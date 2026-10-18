@@ -2441,6 +2441,18 @@ export function SalePage(props: SalePageProps) {
   }
 
   const totals = useMemo(() => computeCart(lines), [lines]);
+  // auditoria-sirope (#11) · el total de la venta de mostrador viaja con
+  // su id, para que el mapa de sala pueda decir cuánto hay aparcado sin
+  // abrirla. En cuanto la venta tiene borrador, sus líneas viven en el
+  // servidor y NO en el carrito persistido: sin esto el mapa no tendría
+  // de dónde sacarlo.
+  useEffect(() => {
+    setMostrador((prev) =>
+      prev == null || prev.total === totals.total
+        ? prev
+        : { ...prev, total: totals.total },
+    );
+  }, [totals.total]);
   // v1.14 §4 · el ranking del servidor cruzado con el catálogo local.
   // Los productos borrados del catálogo desde que se vendieron se caen
   // aquí: mejor tres atajos buenos que cinco con huecos.
@@ -2589,12 +2601,14 @@ export function SalePage(props: SalePageProps) {
     const out: ChromeAction[] = [
       {
         key: "menu",
+        short: "Menú",
         label: "Abrir menú",
         icon: <Menu className="w-[22px] h-[22px]" strokeWidth={2.1} />,
         onClick: () => setDrawerOpen(true),
       },
       {
         key: "search",
+        short: "Buscar",
         // MISMA etiqueta accesible que la lupa del TPV claro: es el
         // contrato que comprueba el test de N1, y dos cadenas distintas
         // para el mismo botón harían que el guardia del teclado del
@@ -2611,6 +2625,7 @@ export function SalePage(props: SalePageProps) {
     if (hasCameraSupport()) {
       out.push({
         key: "scan",
+        short: "Escanear",
         label: "Escanear con cámara",
         icon: <ScanLine className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowCameraScan(true),
@@ -2619,6 +2634,7 @@ export function SalePage(props: SalePageProps) {
     out.push(
       {
         key: "refresh",
+        short: "Recargar",
         label: "Refrescar catálogo",
         icon: <RotateCw className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         spinning: refreshing,
@@ -2638,12 +2654,14 @@ export function SalePage(props: SalePageProps) {
       },
       {
         key: "tickets",
+        short: "Tickets",
         label: "Tickets pasados",
         icon: <ReceiptText className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowHistory(true),
       },
       {
         key: "more",
+        short: "Más",
         label: "Más acciones del ticket",
         icon: <Ellipsis className="w-[22px] h-[22px]" strokeWidth={2.25} />,
         onClick: () => setOpenSheet({ kind: "ticketActions" }),
@@ -2652,6 +2670,7 @@ export function SalePage(props: SalePageProps) {
     if (creditSalesEnabled) {
       out.push({
         key: "debts",
+        short: "Deudas",
         label: "Deudas (fiado)",
         icon: <FileText className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowDebts(true),
@@ -2660,6 +2679,7 @@ export function SalePage(props: SalePageProps) {
     if (crmEnabled) {
       out.push({
         key: "clients",
+        short: "Clientes",
         label: "Clientes",
         icon: <Users className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowClients(true),
@@ -2668,6 +2688,7 @@ export function SalePage(props: SalePageProps) {
     if (agendaEnabled) {
       out.push({
         key: "agenda",
+        short: "Agenda",
         label: "Agenda",
         icon: <CalendarDays className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => props.onOpenAgenda?.(),
@@ -2681,12 +2702,14 @@ export function SalePage(props: SalePageProps) {
       out.push(
         {
           key: "suspended",
+        short: "Guardar",
           label: "Ventas pendientes",
           icon: <Bookmark className="w-[21px] h-[21px]" strokeWidth={2.25} />,
           onClick: () => setOpenSheet({ kind: "suspended" }),
         },
         {
           key: "new",
+        short: "Nueva",
           label: "Nueva venta",
           icon: <Plus className="w-[22px] h-[22px]" strokeWidth={2.25} />,
           onClick: clearCart,
@@ -3336,12 +3359,15 @@ export function SalePage(props: SalePageProps) {
           }}
         />
       )}
+      {/* auditoria-sirope (#10) · la confirmación habla de VACIAR, como
+          el botón que la abre: dos verbos para la misma acción es lo que
+          hace dudar en el único momento en que no se puede dudar. */}
       {confirmAction === "clearCart" && (
         <ConfirmSheet
           title={
             businessType === "SERVICES"
-              ? "Cancelar el servicio"
-              : "Cancelar la venta"
+              ? "Vaciar el servicio"
+              : "Vaciar la venta"
           }
           body={
             businessType === "SERVICES"
@@ -3350,8 +3376,8 @@ export function SalePage(props: SalePageProps) {
           }
           confirmLabel={
             businessType === "SERVICES"
-              ? "Cancelar el servicio"
-              : "Cancelar la venta"
+              ? "Vaciar el servicio"
+              : "Vaciar la venta"
           }
           cancelLabel={
             businessType === "SERVICES"

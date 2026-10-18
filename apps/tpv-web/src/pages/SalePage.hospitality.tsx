@@ -166,8 +166,19 @@ function useIsHandheld(): boolean {
 /** Una acción de la barra de chrome que vive dentro de la comanda. */
 export interface ChromeAction {
   key: string;
-  /** Rótulo accesible. En esta barra los botones son sólo icono. */
+  /** Rótulo accesible y `title`. */
   label: string;
+  /**
+   * auditoria-sirope (#9) · EL RÓTULO QUE SE VE, bajo el icono.
+   *
+   * El 18-10 esta barra eran OCHO iconos sin una palabra (captura 00).
+   * Un icono se reconoce cuando ya sabes lo que hace; el camarero nuevo
+   * de un sábado no lo sabe, y la lupa, el escáner y el refresco se
+   * parecen lo bastante para probar a ver qué pasa — con el cliente
+   * delante. Dos palabras bajo cada icono cuestan 14 px de alto una vez
+   * y los devuelven en cada turno.
+   */
+  short: string;
   icon: ReactNode;
   onClick: () => void;
   /** El refresco de catálogo gira mientras trabaja. */
@@ -982,7 +993,16 @@ function PendingLine({
       className="rounded-[14px]"
       style={highlighted ? { background: DARK_LINE_HIGHLIGHT } : undefined}
     >
-      <div className="flex items-center gap-2.5 min-h-[68px] px-2">
+      {/* auditoria-sirope (#8) · UNA FILA, NO DOS.
+          Los chips («Espera», las sillas) vivían en una segunda fila
+          debajo, y eso doblaba el alto de cada línea: en el D8 cabían
+          TRES líneas de comanda. Ahora van en esta misma fila, en
+          compacto y detrás del importe, y la fila envuelve sólo cuando
+          de verdad no caben.
+
+          Los `−`/`+` NO se tocan: siguen a 56 px. Lo que se toca con
+          prisa es la cantidad. */}
+      <div className="flex flex-wrap items-center gap-2 min-h-[64px] px-2">
       {/* El rótulo accesible dice lo que el botón VA a hacer, que con
           una sola unidad no es restar sino quitar la línea (decisión
           3d). En el panel claro el `−` se deshabilita a una unidad y
@@ -1009,8 +1029,20 @@ function PendingLine({
         type="button"
         onClick={onClick}
         data-testid="cart-line-name"
-        className="flex-grow min-w-0 text-left font-semibold truncate"
-        style={{ fontSize: PENDING_LINE_NAME_PX, color: DARK_TEXT }}
+        className="flex-grow min-w-0 text-left font-semibold"
+        style={{
+          fontSize: PENDING_LINE_NAME_PX,
+          color: DARK_TEXT,
+          // auditoria-sirope (#8) · hasta DOS líneas. Con `truncate`, el
+          // D8 pintaba «Café con l…» y «Café Ame…»: dos cafés distintos
+          // con el mismo principio, que es el mismo fallo que #7 en la
+          // rejilla y aquí con el cliente delante.
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 2,
+          overflow: "hidden",
+          lineHeight: 1.15,
+        }}
       >
         {line.nameSnapshot}
       </button>
@@ -1021,8 +1053,8 @@ function PendingLine({
       >
         {formatEur(lineGross({ ...line, units }))}
       </span>
-      </div>
       {chips}
+      </div>
     </div>
   );
 }
@@ -1219,6 +1251,7 @@ function Comanda({
                       <ChipsDeLinea
                         lineId={l.id}
                         enviada
+                        compacto
                         alergenosDelPlato={l.allergens ?? []}
                         seat={sillaDeLinea(props.kitchen.estado, l.id)}
                         course={tiempoDeLinea(props.kitchen.estado, l.id)}
@@ -1285,6 +1318,7 @@ function Comanda({
                     chips={
                       <ChipsDeLinea
                         lineId={l.id}
+                        compacto
                         alergenosDelPlato={l.allergens ?? []}
                         seat={sillaDeLinea(props.kitchen.estado, l.id)}
                         course={tiempoDeLinea(props.kitchen.estado, l.id)}
@@ -1491,16 +1525,29 @@ function ComandaHeader(props: HospitalityWorkspaceProps) {
               aria-label={a.label}
               title={a.label}
               data-chrome-action={a.key}
-              className={`shrink-0 rounded-[14px] flex items-center justify-center ${PRESS_FEEDBACK_CLASS}`}
+              // auditoria-sirope (#9) · icono ARRIBA y rótulo debajo. El
+              // botón sigue midiendo 56 de alto táctil como mínimo; lo
+              // que crece es el ancho, y la barra envuelve sola cuando
+              // no caben todos en una fila.
+              className={`shrink-0 rounded-[14px] flex flex-col items-center justify-center gap-0.5 px-2 ${PRESS_FEEDBACK_CLASS}`}
               style={{
-                width: MIN_TOUCH_PX,
-                height: MIN_TOUCH_PX,
+                minWidth: MIN_TOUCH_PX,
+                minHeight: MIN_TOUCH_PX,
+                paddingTop: 6,
+                paddingBottom: 6,
                 background: DARK_SURFACE,
                 color: DARK_TEXT_SOFT,
               }}
             >
               <span className={a.spinning ? "animate-spin" : undefined}>
                 {a.icon}
+              </span>
+              <span
+                data-testid="chrome-rotulo"
+                className="font-medium leading-none"
+                style={{ fontSize: 11.5, letterSpacing: "0.01em" }}
+              >
+                {a.short}
               </span>
             </button>
           ))}

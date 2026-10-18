@@ -344,7 +344,9 @@ describe("v1.14 · M3 · la búsqueda según el vertical", () => {
       'button[aria-label="Buscar producto o escanear código"]',
     ) as HTMLButtonElement;
     expect(lupa).not.toBeNull();
-    expect(lupa.style.width).toBe("56px");
+    // auditoria-sirope (#9) · el chrome lleva rótulo bajo el icono, así
+    // que 56 es el MÍNIMO y no el ancho: la palabra puede pedir más.
+    expect(lupa.style.minWidth).toBe("56px");
     expect(searchInput().getAttribute("aria-hidden")).toBe("true");
     expect(searchInput().getAttribute("inputmode")).toBe("none");
 

@@ -22,6 +22,15 @@ const MOSTRADOR_KEY = "mipiacetpv-mostrador-en-curso";
 export interface MostradorEnCurso {
   ticketId: string;
   numero: number;
+  /**
+   * auditoria-sirope (#11) · lo que lleva esta venta, para que el mapa
+   * de sala lo pueda decir sin abrirla.
+   *
+   * Se guarda aquí y no se calcula en el mapa porque en cuanto la venta
+   * tiene borrador sus líneas viven en el servidor y NO en el carrito
+   * persistido: el mapa no tendría de dónde sacarlo.
+   */
+  total?: number;
 }
 
 /** «Mostrador nº 3». La misma frase que compone el servidor
@@ -94,4 +103,27 @@ const UUID_V4 =
 
 function esUuidV4(s: string): boolean {
   return UUID_V4.test(s);
+}
+
+/**
+ * auditoria-sirope (#11) · LO QUE HAY APARCADO EN VENTA RÁPIDA.
+ *
+ * El 18-10 quedó una venta rápida de 3 € a medias y desde el mapa de
+ * sala no se veía: el botón decía «Venta rápida» igual que si no hubiera
+ * nada. Una mesa abierta se ve de lejos; una venta de mostrador a medias
+ * no se veía de ninguna manera, y al cerrar el turno aparece sola.
+ *
+ * Dos sitios de donde puede salir, y se miran los dos:
+ *
+ *   · el carrito persistido de la venta rápida (`persistedCart`), que es
+ *     lo que hay antes de que la venta tenga borrador;
+ *   · el total del borrador de mostrador, que es lo que hay después.
+ */
+export function totalAparcadoEnVentaRapida(
+  lineasDelCarrito: readonly CartLine[],
+  totalDelCarrito: number,
+): number {
+  const mostrador = leerMostradorEnCurso();
+  if (mostrador?.total != null && mostrador.total > 0) return mostrador.total;
+  return lineasDelCarrito.length > 0 ? totalDelCarrito : 0;
 }

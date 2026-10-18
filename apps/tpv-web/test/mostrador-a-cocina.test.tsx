@@ -556,3 +556,41 @@ describe("#12 · con Cocina apagada el TPV no habla de cocina", () => {
     expect($('[data-testid="comanda-enviar"]')).toBeNull();
   });
 });
+
+describe("#8 · la línea de la comanda ocupa UNA fila", () => {
+  it("«Espera» va dentro de la fila de la línea, no debajo", async () => {
+    // EL SABOTAJE: devolver los chips a su propia fila dobla el alto de
+    // cada línea y deja TRES visibles en el D8 en vez de seis.
+    banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+
+    const linea = $('[data-testid="comanda-linea-pendiente"]')!;
+    const chips = linea.querySelector('[data-testid="comanda-linea-chips"]');
+    expect(chips).not.toBeNull();
+    expect(chips!.getAttribute("data-compacto")).toBe("1");
+    // Mismo padre que los `−`/`+`: es la misma fila.
+    const menos = linea.querySelector('[data-testid="stepper-menos"]')!;
+    expect(chips!.parentElement).toBe(menos.parentElement);
+  });
+
+  it("los `−`/`+` siguen a 56 px: lo que se toca con prisa no encoge", async () => {
+    banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    const menos = $('[data-testid="stepper-menos"]')!;
+    expect(menos.style.width).toBe("56px");
+    expect(menos.style.height).toBe("56px");
+  });
+
+  it("el nombre usa hasta dos líneas en vez de truncarse", async () => {
+    banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    const nombre = $('[data-testid="cart-line-name"]')!;
+    // `truncate` es una línea con elipsis: eso es lo que convertía
+    // «Café con leche» en «Café con l…».
+    expect(nombre.className).not.toContain("truncate");
+    expect(nombre.style.webkitLineClamp).toBe("2");
+  });
+});

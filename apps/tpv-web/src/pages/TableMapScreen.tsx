@@ -64,6 +64,8 @@ import {
   refreshCatalog,
 } from "../lib/catalog.js";
 import { computeCart } from "../lib/cart.js";
+import { totalAparcadoEnVentaRapida } from "../lib/mostrador.js";
+import { loadPersistedCartLines } from "../lib/persistedCart.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
 import { mapServerDraftLines } from "../lib/tableDraft.js";
 import type { ServerDraft } from "../lib/tableDraft.js";
@@ -242,6 +244,16 @@ interface CobroState {
 }
 
 export function TableMapScreen(props: TableMapScreenProps) {
+  // auditoria-sirope (#11) · lo que hay aparcado en venta rápida. Se
+  // vuelve a leer en cada repintado del mapa (lo mismo que hace `load`
+  // con las mesas) porque el carrito y el borrador los escribe la otra
+  // pantalla: aquí sólo se miran.
+  const aparcadoEnVentaRapida = (() => {
+    const lineas = loadPersistedCartLines(
+      "mipiacetpv-cart-in-progress:quick-sale",
+    );
+    return totalAparcadoEnVentaRapida(lineas, computeCart(lineas).total);
+  })();
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
@@ -546,9 +558,15 @@ export function TableMapScreen(props: TableMapScreenProps) {
         >
           {props.cashierLabel.split("@")[0]}
         </button>
+        {/* auditoria-sirope (#11) · LA VENTA RÁPIDA APARCADA SE VE.
+            El 18-10 quedó una de 3 € a medias y desde el mapa no había
+            forma de saberlo: el botón decía «Venta rápida» igual que si
+            no hubiera nada. Una mesa abierta se ve de lejos; ésta sólo
+            aparecía sola al cerrar el turno. */}
         <button
           type="button"
           onClick={props.onQuickSale}
+          data-testid="boton-venta-rapida"
           className="shrink-0 rounded-2xl px-5 font-semibold"
           style={{
             height: MIN_TOUCH_PX,
@@ -557,7 +575,9 @@ export function TableMapScreen(props: TableMapScreenProps) {
             fontSize: 19,
           }}
         >
-          Venta rápida
+          {aparcadoEnVentaRapida > 0
+            ? `Venta rápida · ${formatEur(aparcadoEnVentaRapida)}`
+            : "Venta rápida"}
         </button>
       </header>
 
