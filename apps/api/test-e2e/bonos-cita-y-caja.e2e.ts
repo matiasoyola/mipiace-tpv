@@ -361,6 +361,26 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
       sesionesLibres: 2,
       sesionesApartadas: 1,
     });
+    // LA FICHA DE LA CITA VIAJA AL TICKET. Lo pilló la pasada en el
+    // navegador: sin esto el borrador salía a 0 € y SIN el chip «Con bono
+    // B1», porque `GET /tickets/:id/bonos` no puede proponer nada sin
+    // saber de quién es el ticket — y la cajera veía un cero sin
+    // explicación.
+    const delTicket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: draftId },
+      select: { clientId: true },
+    });
+    expect(delTicket.clientId).toBe(e.clientId);
+    // Y la propuesta se puede pintar: la línea sale marcada con su bono.
+    const propuestas = await app.inject({
+      method: "GET",
+      url: `/tickets/${draftId}/bonos`,
+      headers: auth(e.token),
+    });
+    expect(propuestas.statusCode).toBe(200);
+    expect(propuestas.json().propuestas).toEqual([
+      expect.objectContaining({ marcadoCon: bono.id }),
+    ]);
     // CONTRA LA BD: la línea del servicio, a 0 € y con su bono. Y **sin
     // descuento**: un bono no es un descuento (no puede disparar el umbral
     // del PIN de encargado).

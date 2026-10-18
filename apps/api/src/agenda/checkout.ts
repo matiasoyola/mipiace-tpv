@@ -330,6 +330,21 @@ export async function checkoutAppointment(
         internalNumber: `D-${randomUUID()}`,
         externalId: randomUUID(),
         publicSlug: generatePublicSlug(),
+        // B-reservas-8 · LA FICHA DE LA CITA VIAJA AL TICKET.
+        //
+        // Lo pilló la pasada en el navegador: el borrador de una cita de
+        // bono salía con su línea a 0 € —eso lo pone `canjeParaElBorrador`
+        // de aquí abajo— pero SIN el chip «Con bono B1», porque
+        // `GET /tickets/:id/bonos` no puede proponer nada sin saber de
+        // quién es el ticket. La cajera veía un cero sin explicación.
+        //
+        // Y no es sólo el chip: sin esto, el canje SIN CITA tampoco se
+        // puede ofrecer sobre el borrador de una cita, y la ficha de la
+        // clienta no sale en la venta que le corresponde.
+        //
+        // `null` en una cita anónima (walk-in, reserva de teléfono sin
+        // ficha), que es exactamente lo que `Ticket.clientId` admite.
+        clientId: appt.clientId,
         status: "DRAFT",
         total: new Prisma.Decimal(totals.total),
         totalTax: new Prisma.Decimal(totals.tax),
