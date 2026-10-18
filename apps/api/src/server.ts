@@ -23,6 +23,7 @@ import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { exigirArranqueClinico } from "./clinica/arranque.js";
+import { cablearAvisoDeIlegible } from "./clinica/aviso-de-ilegible.js";
 import { registerContratoRoutes } from "./clinica/contrato-routes.js";
 import { registerInformePublicoRoutes } from "./clinica/informe-publico.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
@@ -45,6 +46,7 @@ import { registerReleasesRoutes } from "./releases/routes.js";
 import { loadEnv } from "./env.js";
 import { getAppVersion, SERVER_STARTED_AT } from "./version.js";
 import { registerErrorHandler } from "./lib/error-handler.js";
+import { registrarSitioDeLectura } from "./lib/sitio-de-lectura.js";
 import { registerLenientJsonParser } from "./lib/lenient-json.js";
 import { registerFormBodyParser } from "./lib/form-body.js";
 import { initSentry } from "./lib/sentry.js";
@@ -173,6 +175,21 @@ async function main() {
   // 400, holded-client → 502 con código propio, resto → 500 con
   // requestId y stack sólo en logs.
   registerErrorHandler(app);
+
+  // residencia-6 · **LO QUE NO SE DESCIFRA DEJA RASTRO.**
+  //
+  // Las dos líneas que cierran la deuda que clinica-7 dejó abierta y que
+  // residencia-1b, -3 y -5 fueron anotando: hasta hoy, un valor cifrado
+  // que no se descifraba salía como hueco en pantalla y **no quedaba en
+  // ningún sitio** (residencia-5 §19.11, veinticuatro columnas).
+  //
+  // Van aquí, antes de las rutas, por dos razones concretas: el hook del
+  // sitio de lectura tiene que estar puesto antes de que se registre
+  // cualquier ruta para cubrirlas todas, y lo de cablear el aviso no
+  // abre nada ni puede lanzar —es asignar una función—, que es lo que el
+  // arranque exige (el `smoke` arranca sin migrar).
+  registrarSitioDeLectura(app);
+  cablearAvisoDeIlegible(app.log);
 
   // v1.0-pilotos · Lote 2 (#9): el TPV manda `Content-Type:
   // application/json` también en POSTs sin body (reimprimir, comanda,
