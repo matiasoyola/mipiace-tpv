@@ -459,11 +459,16 @@ export function nombresQueColisionan(
   nombres: readonly string[],
   anchoPx: number,
   maxLineas: number = PRODUCT_NAME_MAX_LINES,
+  /** El tamaño FIJO con el que se pintaría. `null` = el adaptativo, que
+   *  es lo que hace la rejilla desde este bloque. Se puede pasar para
+   *  medir la regla vieja —`line-clamp-2` a 24 px— y enseñar que
+   *  colisionaba, que es lo que hace el test. */
+  sizeFijoPx: number | null = null,
 ): Array<[string, string]> {
   const vistos = new Map<string, string>();
   const choques: Array<[string, string]> = [];
   for (const nombre of nombres) {
-    const px = tamanoNombreProducto(nombre, anchoPx, maxLineas);
+    const px = sizeFijoPx ?? tamanoNombreProducto(nombre, anchoPx, maxLineas);
     const porLinea = caracteresPorLinea(anchoPx, px);
     // Lo que se vería si el navegador cortara al límite de las líneas.
     const visible = nombre.slice(0, porLinea * maxLineas);

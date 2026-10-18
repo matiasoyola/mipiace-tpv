@@ -45,10 +45,22 @@ describe("#7 · el nombre manda sobre el tamaño", () => {
   });
 
   it("dos productos de nombre distinto NUNCA pintan el mismo texto", () => {
-    // EL SABOTAJE: volver al `line-clamp-2` de tamaño fijo deja los dos
-    // desayunos con el mismo «Desayuno 1 · Café + Tostada…» y dos
-    // precios distintos.
     expect(nombresQueColisionan(CARTA, ANCHO_BOTON, 3)).toEqual([]);
+  });
+
+  it("y tampoco en el botón ESTRECHO, que es donde chocaban", () => {
+    // El choque del 18-10 no pasó en un botón ancho: pasó en uno de
+    // ~170 px, donde dos líneas son unas 24 letras y los dos desayunos
+    // se quedan los dos en «Desayuno 1 · Café + Tost».
+    //
+    // EL SABOTAJE: volver al `line-clamp-2` de tamaño fijo. Se puede
+    // escribir aquí mismo, porque la regla vieja es esta función con el
+    // techo puesto a mano y dos líneas:
+    const VIEJO = nombresQueColisionan(CARTA, 170, 2, 24);
+    expect(VIEJO.length).toBeGreaterThan(0);
+    // Y con la regla nueva —tres líneas y el tamaño que haga falta— no
+    // hay dos botones que se lean igual.
+    expect(nombresQueColisionan(CARTA, 170, 3)).toEqual([]);
   });
 
   it("y la red lo CANTA cuando de verdad colisionan", () => {
