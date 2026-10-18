@@ -972,8 +972,15 @@ export function CheckoutOverlay(props: {
   const lineCount = props.lines.length;
   const cobrarLabel =
     props.businessType === "SERVICES" ? "Cerrar servicio" : "Cobrar";
+  // auditoria-sirope (#4) · EL TÍTULO LLEVA LA CIFRA.
+  //
+  // «Total a cobrar» a secas en el sitio más visible de la hoja, y la
+  // cifra escondida abajo entre el Subtotal y el IVA. El cajero abre esta
+  // pantalla para cobrar UNA cantidad: que la diga el título.
   const headLabel =
-    props.businessType === "SERVICES" ? "Importe del servicio" : "Total a cobrar";
+    props.businessType === "SERVICES"
+      ? `Cobrar el servicio · ${formatEur(total)}`
+      : `Cobrar ${formatEur(total)}`;
 
   return (
     <div className="fixed inset-0 z-50 bg-mipiace-ink/95 flex items-stretch sm:items-center justify-center sm:p-4 font-sans">
@@ -996,28 +1003,39 @@ export function CheckoutOverlay(props: {
                 "Artículos" (v1.10.3-barra · hallazgo #7). */}
             <span className="w-10" aria-hidden="true" />
           </div>
-          <div className="bg-mipiace-stone rounded-2xl px-3 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Subtotal</span>
-              <span className="tabular-nums text-mipiace-ink">
-                {formatEur(props.totals.subtotalNet)}
+          {/* auditoria-sirope (#4) · SUBTOTAL E IVA SE PLIEGAN.
+              Ocupaban la cabecera entera, encima de todo lo que se toca,
+              y son dos números que el cajero no usa para cobrar: los mira
+              quien cuadra, y para eso está el detalle. El DESCUENTO se
+              queda fuera del pliegue: ése sí cambia lo que se cobra y
+              tiene que verse sin abrir nada. */}
+          {props.totals.discount > 0 && (
+            <div className="bg-mipiace-stone rounded-2xl px-3 py-2 flex justify-between text-[13px] mb-2">
+              <span className="text-slate-500">Descuento</span>
+              <span className="text-mipiace-coral tabular-nums">
+                −{formatEur(props.totals.discount)}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">IVA</span>
-              <span className="tabular-nums text-mipiace-ink">
-                {formatEur(props.totals.tax)}
-              </span>
-            </div>
-            {props.totals.discount > 0 && (
-              <div className="col-span-2 flex justify-between border-t border-slate-200/70 pt-1.5">
-                <span className="text-slate-500">Descuento</span>
-                <span className="text-mipiace-coral tabular-nums">
-                  −{formatEur(props.totals.discount)}
+          )}
+          <details data-testid="desglose-iva" className="group">
+            <summary className="list-none cursor-pointer text-[12.5px] text-slate-500 hover:text-mipiace-ink select-none">
+              Subtotal e IVA
+            </summary>
+            <div className="mt-2 bg-mipiace-stone rounded-2xl px-3 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Subtotal</span>
+                <span className="tabular-nums text-mipiace-ink">
+                  {formatEur(props.totals.subtotalNet)}
                 </span>
               </div>
-            )}
-          </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">IVA</span>
+                <span className="tabular-nums text-mipiace-ink">
+                  {formatEur(props.totals.tax)}
+                </span>
+              </div>
+            </div>
+          </details>
         </header>
 
         {/* ── BODY SCROLLABLE ─────────────────────────────────────── */}
@@ -1094,10 +1112,26 @@ export function CheckoutOverlay(props: {
             ))}
           </div>
 
-          {/* Atajos efectivo en 1 fila (5/10/20/50/100/C). Sólo si hay
-              alguna row CASH. SET, no SUM (hotfix Fix 4). */}
+          {/* Atajos de efectivo en una fila: Exacto · 5 · 10 · 20 · 50 ·
+              100 · C. Sólo si hay alguna row CASH. Suman desde el segundo
+              (#3).
+
+              auditoria-sirope (#4) · «Importe exacto» ES UNA TECLA MÁS.
+              Era una barra coral a ancho completo debajo de los billetes:
+              en una hoja donde el coral es de «Cobrar», el segundo coral
+              más grande de la pantalla era el atajo que menos se usa en
+              una barra —el cliente paga con un billete, no con la cifra
+              exacta—. Baja a la fila de los billetes, con ellos. */}
           {firstCashIdx !== -1 && (
-            <div className="grid grid-cols-6 gap-1.5 mb-2">
+            <div className="grid grid-cols-7 gap-1.5 mb-2.5">
+              <button
+                data-testid="importe-exacto"
+                onClick={applyExactCash}
+                title={`Importe exacto · ${formatEur(exactCashForFirstCashRow)}`}
+                className="h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12.5px] font-medium text-mipiace-ink"
+              >
+                Exacto
+              </button>
               {[5, 10, 20, 50, 100].map((n) => (
                 <button
                   key={n}
@@ -1119,20 +1153,6 @@ export function CheckoutOverlay(props: {
             </div>
           )}
 
-          {/* Importe exacto (sólo si hay row CASH). 1 tap → change=0. */}
-          {firstCashIdx !== -1 && (
-            <button
-              data-testid="importe-exacto"
-              onClick={applyExactCash}
-              className="w-full h-touch mb-2.5 rounded-xl bg-mipiace-coral-soft hover:bg-mipiace-coral-soft/70 border border-mipiace-coral/30 text-mipiace-coral-dark text-[12.5px] font-medium flex items-center justify-center gap-2"
-            >
-              <span>Importe exacto</span>
-              <span className="text-slate-400">·</span>
-              <span className="tabular-nums">
-                {formatEur(exactCashForFirstCashRow)}
-              </span>
-            </button>
-          )}
 
           {/* Estado del reparto: una sola frase, siempre cierta. Es la
               que explica por qué "Cobrar" está gris. */}
@@ -1151,13 +1171,24 @@ export function CheckoutOverlay(props: {
                 ? payments.map((p) => labelFor(p.method)).join(" + ")
                 : "Pagado"}
             </span>
+            {/* auditoria-sirope (#4) · LA FRANJA DICE «ENTREGADO».
+                «Sobran 7,00 €» sobre un billete de 10 por una cuenta de
+                3 no es un aviso: es lo normal en una barra, y leerlo en
+                coral hace dudar al cajero de si ha hecho algo mal. Lo
+                que sobra tiene nombre —es el cambio— y vive en su
+                recuadro del pie (#1). Aquí se dice lo que se entregó.
+
+                Lo que SÍ sigue siendo un aviso es un exceso que no sale
+                del cajón (pagar 15 con tarjeta una cuenta de 14): ahí no
+                hay cambio que devolver y «Cobrar» se queda gris, así que
+                la franja tiene que decir por qué. */}
             <span className="tabular-nums font-semibold shrink-0">
               {missing > 0.005
                 ? `Falta ${formatEur(missing)}`
                 : overNotRefundable
                   ? `Sobran ${formatEur(over)} · baja el importe`
                   : over > 0.005
-                    ? `${formatEur(paymentsSum)} · sobran ${formatEur(over)}`
+                    ? `Entregado ${formatEur(paymentsSum)}`
                     : `${formatEur(paymentsSum)} · cuadra`}
             </span>
           </div>
@@ -1396,25 +1427,59 @@ export function CheckoutOverlay(props: {
             </div>
           )}
 
-          {/* Cambio (sólo si hay overpayment efectivo). */}
-          {cashAmount > 0 && change > 0 && (
-            <div className="flex items-baseline justify-between mb-1.5">
-              <span className="text-[12.5px] text-slate-500">Cambio</span>
-              <span className="text-[15px] font-semibold text-mipiace-coral tabular-nums">
+          {/* ── auditoria-sirope (#1) · EL CAMBIO, ANTES DE COBRAR ─────
+              El 18-10 el cambio iba a 15 px en coral y el TOTAL a 30
+              (capturas 02 y 03). Pero el cajero no necesita el total
+              cuando tiene el billete en la mano: necesita saber **cuánto
+              devuelve**, y lo necesita ANTES de pulsar Cobrar. Hasta hoy
+              sólo lo veía después, en «Ticket emitido», a 48 px — ese es
+              el modelo, y llegaba tarde.
+
+              Así que con efectivo y cambio > 0 el pie copia aquel
+              recuadro: «CAMBIO A DEVOLVER» en tinta y grande, con el
+              total y lo entregado pequeños debajo. Sin cambio, el pie se
+              queda exactamente como estaba: en una venta clavada no hay
+              nada que devolver y el total vuelve a mandar. */}
+          {cashAmount > 0 && change > 0 ? (
+            <div
+              data-testid="cambio-antes-de-cobrar"
+              className="mb-2.5 rounded-2xl bg-mipiace-coral-soft px-4 py-3"
+            >
+              <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-mipiace-coral-dark">
+                Cambio a devolver
+              </div>
+              <div
+                data-testid="cambio-antes-de-cobrar-importe"
+                className="text-[44px] leading-none font-semibold tabular-nums tracking-[-0.025em] text-mipiace-ink mt-1"
+              >
                 {formatEur(change)}
+              </div>
+              <div className="mt-2.5 pt-2.5 border-t border-mipiace-coral/25 grid grid-cols-2 gap-3 text-[12.5px]">
+                <div className="text-left">
+                  <div className="text-slate-500">Total</div>
+                  <div className="font-semibold text-mipiace-ink tabular-nums">
+                    {formatEur(total)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-slate-500">Entregado</div>
+                  <div className="font-semibold text-mipiace-ink tabular-nums">
+                    {formatEur(paymentsSum)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* TOTAL grande. */
+            <div className="flex items-baseline justify-between mb-2.5">
+              <span className="text-[12.5px] uppercase tracking-wider font-medium text-slate-500">
+                Total
+              </span>
+              <span className="text-[26px] sm:text-[30px] font-semibold text-mipiace-ink tabular-nums leading-none">
+                {formatEur(total)}
               </span>
             </div>
           )}
-
-          {/* TOTAL grande. */}
-          <div className="flex items-baseline justify-between mb-2.5">
-            <span className="text-[12.5px] uppercase tracking-wider font-medium text-slate-500">
-              Total
-            </span>
-            <span className="text-[26px] sm:text-[30px] font-semibold text-mipiace-ink tabular-nums leading-none">
-              {formatEur(total)}
-            </span>
-          </div>
 
           {/* v1.9.2-mesas-concurrencia · Frente 1.4/2: la cuenta cambió
               desde otra caja. Aviso inline bajo el total con "Actualizar"

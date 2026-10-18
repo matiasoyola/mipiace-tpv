@@ -205,3 +205,66 @@ describe("#3 · los billetes suman", () => {
     expect(importeEfectivo()).toBeCloseTo(5, 2);
   });
 });
+
+describe("#1 · el cambio, ANTES de pulsar Cobrar", () => {
+  it("con efectivo y cambio, el pie lo pinta grande y en tinta", async () => {
+    // EL SABOTAJE: devolver el cambio a una línea de 15 px bajo el TOTAL.
+    await renderOverlay();
+    await click($('[data-testid="billete-5"]'));
+
+    const caja = $('[data-testid="cambio-antes-de-cobrar"]');
+    expect(caja).not.toBeNull();
+    expect(caja!.textContent).toMatch(/Cambio a devolver/i);
+    const importe = $('[data-testid="cambio-antes-de-cobrar-importe"]')!;
+    expect(importe.textContent).toMatch(/2,00/);
+    // ≥ 44 px, que es lo que pedía el hallazgo.
+    expect(
+      Number.parseInt(importe.className.match(/text-\[(\d+)px\]/)![1]!, 10),
+    ).toBeGreaterThanOrEqual(44);
+    // Y con el total y lo entregado pequeños debajo.
+    expect(caja!.textContent).toMatch(/Total/);
+    expect(caja!.textContent).toMatch(/Entregado/);
+  });
+
+  it("sin cambio, el pie se queda como estaba: manda el TOTAL", async () => {
+    await renderOverlay();
+    expect($('[data-testid="cambio-antes-de-cobrar"]')).toBeNull();
+    expect(container.textContent).toMatch(/Total/);
+  });
+
+  it("con tarjeta no hay cambio que devolver", async () => {
+    await renderOverlay();
+    await click(botonPorTexto("Tarjeta"));
+    expect($('[data-testid="cambio-antes-de-cobrar"]')).toBeNull();
+  });
+});
+
+describe("#4 · la jerarquía de la hoja", () => {
+  it("el título lleva la cifra", async () => {
+    await renderOverlay();
+    expect(container.textContent).toMatch(/Cobrar 3,00/);
+  });
+
+  it("Subtotal e IVA se pliegan: no mandan en la cabecera", async () => {
+    await renderOverlay();
+    const desglose = $('[data-testid="desglose-iva"]') as HTMLDetailsElement;
+    expect(desglose).not.toBeNull();
+    expect(desglose.open).toBe(false);
+  });
+
+  it("«Exacto» es una tecla más, sin coral", async () => {
+    await renderOverlay();
+    const exacto = $('[data-testid="importe-exacto"]')!;
+    expect(exacto.className).not.toMatch(/coral/);
+    // En la misma fila que los billetes.
+    expect(exacto.parentElement).toBe($('[data-testid="billete-5"]')!.parentElement);
+  });
+
+  it("la franja dice «Entregado», no «sobran»", async () => {
+    await renderOverlay();
+    await click($('[data-testid="billete-5"]'));
+    const franja = container.querySelector('[role="status"]')!;
+    expect(franja.textContent).toMatch(/Entregado 5,00/);
+    expect(franja.textContent).not.toMatch(/sobran/i);
+  });
+});
