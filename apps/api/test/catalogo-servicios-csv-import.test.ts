@@ -723,11 +723,25 @@ describe("clinica-8 · el fichero deja la clínica lista para cobrar", () => {
   it("en un comercio SIN historia clínica, las filas con marcas se SALTAN", async () => {
     // La misma puerta que la exención, y por lo mismo: la capability es
     // del comercio y el parser no habla con la base.
+    //
+    // SIN `E1` en el fichero, a propósito: con la exención puesta las
+    // filas se saltarían por la puerta de `catalogo-servicios-csv` y este
+    // test saldría verde con la puerta nueva quitada. Lo enseñó su
+    // sabotaje. Las dos filas son IVA 21 y sujetas; lo único que un bar no
+    // puede tener aquí son las marcas de clínica.
     tenant = { ...tenant!, clinicalRecordsEnabled: false };
-    const r = await post({ csv: CSV_ROSARIO, confirmar: true });
-    expect(r.statusCode).toBe(400);
-    expect(r.json().error).toBe("NADA_QUE_CARGAR");
-    expect(productos.size).toBe(0);
+    const csv =
+      "sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min,tipo_visita,primera_valoracion,tratamiento_sesion,nivel_quiropodia\n" +
+      "SVC-1,Quiropodia,25.00,21,quiropodia,SERVICE,,30,QUIROPODIA,no,si,1\n" +
+      "SVC-2,Corte,18.00,21,peluqueria,SERVICE,,30,,,,";
+    const r = await post({ csv, confirmar: true });
+    expect(r.statusCode).toBe(200);
+    // La de las marcas, fuera con su motivo; la normal, dentro.
+    expect([...productos.values()].map((p) => p.sku)).toEqual(["SVC-2"]);
+    expect(
+      r.json().saltadas.find((x: any) => x.sku === "SVC-1").motivo,
+    ).toContain("no tiene la historia clínica encendida");
+    expect(tiposDeVisita.size).toBe(0);
   });
 
   it("un fichero SIN las columnas deja la fila de agenda como la dejaba ayer", async () => {
