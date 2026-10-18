@@ -93,9 +93,35 @@ UPDATE "tenants" t
 -- nueva—; el del otro es que un cliente vendiendo deje de facturar sin que
 -- nadie se entere.
 --
--- «Venta real» = ni borrador ni ensayo. `VOIDED` cuenta: se cobró y se
--- anuló después, pero el día que esta cuenta empezó a facturar ya había
--- pasado.
+-- ── QUÉ ES UNA «VENTA REAL», y por qué `VOIDED` NO lo es ──────────────
+--
+-- La primera versión de esta regla decía «ni borrador ni ensayo», y contaba
+-- las anuladas con este razonamiento: «se cobró y se anuló después, pero el
+-- día que esta cuenta empezó a facturar ya había pasado». **Es falso**, y lo
+-- enseñó la foto de producción del 18-10:
+--
+--   Cafetería Sirope salía por esta regla con 20 «ventas reales». Las 20
+--   son `VOIDED`, ninguna tiene `holded_document_id`, 16 las hizo el cajero
+--   de pruebas y las otras 4 son la demostración con la dueña (8,50 € y tres
+--   de 0,00 €). Sirope **no ha vendido nunca**. Con la regla vieja habría
+--   arrancado a facturar sola en el despliegue, sin que nadie lo decidiera,
+--   y su próxima venta de ensayo habría sido su factura C1/1 — exactamente
+--   lo que este bloque existe para impedir.
+--
+-- `VOIDED` no dice «se cobró»: dice «esto no cuenta». Es lo que deja un
+-- ensayo que se limpia a medias, y lo que deja un cobro equivocado. Una
+-- venta anulada no demuestra que un comercio esté facturando.
+--
+-- Lo que SÍ lo demuestra, aunque esté anulada después: que llegara a
+-- Holded. `holded_document_id` lo pone el worker de subida cuando Holded
+-- CREA el documento, así que si está poblado existió una factura con número
+-- en la contabilidad del cliente — y eso no se borra anulando el ticket
+-- aquí. De ahí el `OR`.
+--
+-- La regla, entonces:
+--
+--   venta real  =  no es DRAFT, ni TEST, ni VOIDED
+--               OR  tiene holded_document_id
 --
 -- `COALESCE(paid_at, created_at)`: un ticket anulado o un fiado sin saldar
 -- pueden no tener `paid_at`.
@@ -105,7 +131,8 @@ UPDATE "tenants" t
   FROM (
     SELECT "tenant_id", MIN(COALESCE("paid_at", "created_at")) AS "desde"
       FROM "tickets"
-     WHERE "status" NOT IN ('DRAFT', 'TEST')
+     WHERE ("status" NOT IN ('DRAFT', 'TEST', 'VOIDED')
+            OR "holded_document_id" IS NOT NULL)
      GROUP BY "tenant_id"
   ) sub
  WHERE t."id" = sub."tenant_id"
