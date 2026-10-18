@@ -19,7 +19,9 @@
 //   6. cambios del **plan de cuidados** del turno;
 //   7. **excepciones de umbral** nuevas;
 //   8. **registros sin turno**;
-//   9. **avisos que no salieron a tiempo**.
+//   9. **avisos que no salieron a tiempo**;
+//  10. residencia-6 · **los residentes sin plan de cuidados**, una línea
+//      por zona.
 //
 // Lo que NO lleva es todo lo demás. Un parte con los 1.200 registros del
 // turno es un parte que nadie lee, y el bloque entero depende de que se
@@ -87,7 +89,11 @@ export type ClaseDeLinea =
   | "CAMBIO_DE_PLAN"
   | "EXCEPCION_NUEVA"
   | "REGISTRO_SIN_TURNO"
-  | "AVISO_QUE_NO_SALIO";
+  | "AVISO_QUE_NO_SALIO"
+  /** residencia-6 (punto 4) · residentes con cama y **sin plan de
+   *  cuidados vigente**. Una línea por zona, no una por residente ni una
+   *  por cuidado: ver §«los residentes sin plan» más abajo. */
+  | "SIN_PLAN_DE_CUIDADOS";
 
 /**
  * Cómo se lee cada clase en la pantalla de la sala. Vive aquí y no en el
@@ -104,6 +110,7 @@ export const NOMBRE_DE_LA_CLASE: Record<ClaseDeLinea, string> = {
   EXCEPCION_NUEVA: "Umbral propio nuevo",
   REGISTRO_SIN_TURNO: "Registro sin turno",
   AVISO_QUE_NO_SALIO: "Aviso que no salió a tiempo",
+  SIN_PLAN_DE_CUIDADOS: "Sin plan de cuidados",
 };
 
 /** Una línea del parte. */
@@ -672,6 +679,66 @@ export async function construirParte(
     });
   }
 
+  // ── residencia-6 (punto 4) · LOS RESIDENTES SIN PLAN ──────────────
+  //
+  // residencia-5 §16.4 dejó dicho que «el parte de un turno sin plan sale
+  // enorme de "no hecho"». Lo que este bloque decide es el otro lado del
+  // mismo problema: **un residente sin plan de cuidados vigente no genera
+  // ni una línea de «no hecho»** —no hay nada que incumplir, porque
+  // `queToca` no devuelve nada suyo— y eso, sin más, lo vuelve invisible.
+  // Sale perfecto en los indicadores, no aparece en «lo que toca» de su
+  // puerta y nadie se entera de que a don Luis no le preparó el plan
+  // nadie.
+  //
+  // Así que el parte lo dice **una vez**, con sus nombres, en vez de
+  // treinta líneas rojas.
+  //
+  // ── UNA LÍNEA POR ZONA, Y NO UNA SOLA EN EL PARTE ─────────────────
+  //
+  // El parte se recorta por alcance (D-51, `recortarAlAlcance`): una
+  // auxiliar de la primera planta no puede leer nombres de residentes de
+  // la segunda. Una única línea «3 residentes sin plan: Carmen, Luis,
+  // Pilar» sería un dato de la segunda planta dentro del parte de la
+  // primera. Por zona, cada una ve a los suyos — y el panel de dirección
+  // los ve todos (`porArreglar`).
+  //
+  // Va en las SUELTAS de la zona y no colgando de cada residente: colgada
+  // de cada uno serían otra vez N líneas, que es lo que se viene a
+  // quitar.
+  const conPlanVivo = new Set(
+    plan
+      .filter(
+        (l) =>
+          l.fromAt.getTime() < tope.getTime() &&
+          (l.toAt == null || l.toAt.getTime() > desde.getTime()),
+      )
+      .map((l) => l.clientId),
+  );
+  const sinPlanPorZona = new Map<string | null, string[]>();
+  for (const [clientId, r] of residentes) {
+    if (conPlanVivo.has(clientId)) continue;
+    const ya = sinPlanPorZona.get(r.floorId) ?? [];
+    ya.push(`${r.nombre} (${r.habitacion})`);
+    sinPlanPorZona.set(r.floorId, ya);
+  }
+  for (const [floorId, quienes] of sinPlanPorZona) {
+    anotar(null, floorId, {
+      clase: "SIN_PLAN_DE_CUIDADOS",
+      texto:
+        `${quienes.length} ${
+          quienes.length === 1 ? "residente" : "residentes"
+        } sin plan de cuidados: ${quienes.join(", ")}. ` +
+        "No les toca nada, así que no sale nada en su puerta.",
+      // Sin hora: no ha pasado a ninguna hora. Poner la del corte diría
+      // que el plan se cayó a las 15:00.
+      hora: null,
+      nivel: null,
+      incidentId: null,
+      careRecordId: null,
+      aviso: null,
+    });
+  }
+
   // ── 6 · Cambios del plan ──────────────────────────────────────────
   for (const c of cambiosDePlan) {
     const abierta = c.fromAt.getTime() >= desde.getTime() && c.fromAt.getTime() < tope.getTime();
@@ -871,6 +938,10 @@ function ordenarLineas(lineas: LineaDelParte[]): LineaDelParte[] {
     CAMBIO_DE_PLAN: 6,
     NO_HECHO: 7,
     REGISTRO_SIN_TURNO: 8,
+    // residencia-6 · al final, con lo administrativo. No es algo que
+    // haya pasado en el turno: es algo que falta por configurar, y el
+    // orden del parte es el de la urgencia.
+    SIN_PLAN_DE_CUIDADOS: 9,
   };
   const nivel = (n: string | null): number =>
     n == null ? 0 : -Number(n.replace("N", ""));
