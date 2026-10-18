@@ -51,6 +51,8 @@ import {
   TenantNoExisteError as EliminarCuentaTenantNoExisteError,
 } from "./eliminar-cuenta.js";
 import { loadEnv } from "../env.js";
+// auditoria-sirope (#20) · avisar a las cajas de que los ajustes cambiaron.
+import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
 // residencia-1 · la semilla del centro al encender el interruptor.
@@ -208,6 +210,40 @@ function fiscalAddressString(profile: Prisma.JsonValue | null): string | null {
   const obj = profile as Record<string, unknown>;
   const addr = obj.address;
   return typeof addr === "string" ? addr : null;
+}
+
+/**
+ * auditoria-sirope (#19 + #23) · lo que el super-admin necesita saber de
+ * la cocina de una cuenta sin llamar a nadie.
+ *
+ *   · cuántas pantallas vivas hay (lo que se queda a oscuras al apagar);
+ *   · cuántas etiquetas del catálogo NO tienen sección. Con Cocina
+ *     encendida eso no es un detalle de configuración: sus platos van a
+ *     SALÓN en silencio y la cocina no los ve.
+ */
+async function resumenDeCocina(
+  prisma: ReturnType<typeof getPrisma>,
+  tenantId: string,
+): Promise<{ pantallas: number; etiquetasSinSeccion: number }> {
+  const [pantallas, productos, mapeos] = await Promise.all([
+    prisma.device.count({
+      where: { tenantId, kind: "KITCHEN", revokedAt: null },
+    }),
+    prisma.product.findMany({
+      where: { tenantId, active: true, archivedFromHoldedAt: null },
+      select: { tags: true },
+    }),
+    prisma.tagSection.findMany({ where: { tenantId }, select: { slug: true } }),
+  ]);
+  const mapeadas = new Set(mapeos.map((m) => m.slug));
+  const sinSeccion = new Set<string>();
+  for (const p of productos) {
+    for (const t of p.tags) {
+      const slug = t.trim().toLowerCase();
+      if (slug && !mapeadas.has(slug)) sinSeccion.add(slug);
+    }
+  }
+  return { pantallas, etiquetasSinSeccion: sinSeccion.size };
 }
 
 async function computeMetrics(
@@ -496,6 +532,13 @@ export async function registerSuperAdminTenantsRoutes(
         // kds-1-cocina · el módulo «Cocina», para que el detalle lo pueda
         // pintar y moverlo. Fuera de `modules`, ver `resumenTenant`.
         kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
+        // auditoria-sirope (#19 + #23) · cuántas etiquetas del catálogo no
+        // tienen sección, y cuántas pantallas de cocina hay vivas. Con
+        // Cocina encendida, una etiqueta sin sección manda sus platos a
+        // SALÓN en silencio — que es como se perdió la primera comanda de
+        // la T6 el 18-10—, así que el super-admin tiene que verlo ANTES de
+        // colgar el teléfono.
+        cocina: await resumenDeCocina(prisma, tenant.id),
         // clinica-1 / residencia-1 · los dos de salud. El detalle los pinta
         // como casillas junto a la de cocina y el `PATCH` los mueve; antes
         // de este bloque la clínica NO viajaba, así que el panel no podía
@@ -1555,6 +1598,36 @@ export async function registerSuperAdminTenantsRoutes(
         });
         return u;
       });
+
+      // auditoria-sirope (#20) · AVISAR A LAS CAJAS.
+      //
+      // El 18-10 se encendió Cocina con el D8 delante y el D8 no se
+      // enteró hasta reiniciar la aplicación: `/devices/me` se lee al
+      // arrancar y se cachea. Ahora el cambio se cuenta por el bus de
+      // cada tienda del tenant y el terminal vuelve a pedir sus ajustes.
+      //
+      // Fuera de la transacción, como el resto de avisos: la verdad está
+      // en el GET, y un bus que no llega sólo retrasa el repaso.
+      // Best-effort: si falla, el cambio ya está guardado.
+      try {
+        const tiendas = await prisma.store.findMany({
+          where: { tenantId: id },
+          select: { id: true },
+        });
+        const at = new Date().toISOString();
+        for (const t of tiendas) {
+          getStoreEventBus().broadcast(t.id, {
+            type: "tenant.settings_changed",
+            fields: Object.keys(changes),
+            at,
+          });
+        }
+      } catch (err) {
+        request.log.warn(
+          { err, event: "tenant.settings_changed_broadcast_failed", tenantId: id },
+          "no se pudo avisar a las cajas del cambio de ajustes",
+        );
+      }
 
       return reply.code(200).send({
         tenant: {

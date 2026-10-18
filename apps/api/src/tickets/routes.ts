@@ -13,12 +13,18 @@
 import { randomUUID } from "node:crypto";
 
 import { Prisma, TicketStatus } from "@mipiacetpv/db";
+// auditoria-sirope (#17) · la regla de «¿es devolvible?» la escribe una
+// sola función, y la miran el servidor y el TPV.
+import {
+  mensajeNoDevolvible,
+  motivoNoDevolvible,
+} from "@mipiacetpv/ticket-model";
 import type { FastifyInstance } from "fastify";
 
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { ingestFiscalRecord, type IngestResult } from "../fiscal/ingest.js";
-import { comprobarGateFiscal, esCobroDeEnsayo } from "../fiscal/mode.js";
+import { comprobarGateFiscal, enEnsayo, esCobroDeEnsayo } from "../fiscal/mode.js";
 import { canjearAlCobrar, type CanjeAlCobrar } from "../vouchers/caja.js";
 import { CANDADO_ERROR, CANDADO_MENSAJE } from "../vouchers/numero.js";
 import { nacerLosBonos, type BonoNacido } from "../vouchers/venta.js";
@@ -35,6 +41,10 @@ import {
   FISCAL_RECORD_BODY_SCHEMA,
   type FiscalRecordBody,
 } from "../fiscal/payload.js";
+import {
+  avisarComandasServidas,
+  servirComandasListas,
+} from "../kitchen/servir.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { emitTicketPaid, emitTicketRefunded } from "../realtime/emit-helpers.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
@@ -1613,6 +1623,25 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               where: { groupedIntoTableId: draft.tableId },
               data: { groupedIntoTableId: null },
             });
+            // auditoria-sirope (#14) · la mesa queda POR RECOGER.
+            //
+            // Hasta hoy pasaba a Libre en el instante del cobro y en el
+            // mapa figuraba disponible con el servicio todavía encima.
+            // No es libre —no se puede sentar a nadie— y no está
+            // abierta —no debe nada—, y las dos cosas las tiene que ver
+            // la caja de al lado, así que vive en el servidor.
+            //
+            // Las mesas ABSORBIDAS por un grupo también: se recogen
+            // igual que la principal.
+            await tx.table.updateMany({
+              where: {
+                OR: [
+                  { id: draft.tableId },
+                  { groupedIntoTableId: draft.tableId },
+                ],
+              },
+              data: { porRecogerDesde: new Date() },
+            });
           }
           await tx.shift.update({
             where: { id: resolution.shiftId },
@@ -1701,10 +1730,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               ahora: new Date(),
             });
           }
+          // auditoria-sirope (#22) · lo que estaba LISTO pasa a servido.
+          // La mesa se ha ido: dejar la comanda viva deja la etiqueta
+          // LISTO en el mapa, la tarjeta esperando en el AP11 y la banda
+          // «T6 · listo para servir» encima de las ventas siguientes.
+          const servidas = await servirComandasListas(tx, {
+            ticketId: draft.id,
+            byUserId: cashier.sub,
+            now: new Date(),
+          });
           // La imputación sale de la tx para que el log y el Z
           // correctivo se hagan fuera, como en `POST /tickets`.
           return {
             ticket: t,
+            servidas,
             shift: {
               shiftId: resolution.shiftId,
               imputed: resolution.imputed,
@@ -1781,6 +1820,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
 
       const updated = txOut.ticket;
       const shiftResolution = txOut.shift;
+      // auditoria-sirope (#22) · fuera de la transacción, como el resto
+      // de los avisos de cocina: la verdad está en el GET.
+      avisarComandasServidas(txOut.servidas, new Date());
 
       // B-reservas-5 Frente T · rastro de la imputación, con el mismo
       // nombre de evento que `POST /tickets` para que una sola búsqueda
@@ -2316,6 +2358,13 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // es el CUARTO camino que encola, y era el único —junto al de
       // mesa— que nunca miró la clave. Aquí sí hace falta una consulta
       // propia: el handler del refund no leía el tenant para nada.
+      //
+      // auditoria-sirope (#17) · y además `facturaDesde`, porque la regla
+      // de «¿es devolvible?» pregunta si la cuenta está en ensayo. La lee
+      // la misma función que mira el TPV antes de pintar el botón
+      // (`esDevolvible`, en `@mipiacetpv/ticket-model`): cuando las dos
+      // respuestas se escribían por separado, el TPV escondía el botón de
+      // tickets que el servidor habría devuelto sin rechistar.
       const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
         select: {
@@ -2324,20 +2373,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // B-reservas-8 · si devolver estas líneas anula algún bono. Se
           // cuela en el `select` que ya existía: cero consultas extra.
           bonosEnabled: true,
+          facturaDesde: true,
         },
       });
       const destinoHolded = holdedDestination(tenantForUpload);
 
       const isTestTicket = ticket.status === TicketStatus.TEST;
-      if (
-        !isTestTicket &&
-        ticket.status !== TicketStatus.SYNCED &&
-        ticket.status !== TicketStatus.PAID
-      ) {
+      const motivoNo = motivoNoDevolvible(ticket.status, {
+        enEnsayo: enEnsayo(tenantForUpload),
+        sesionDePrueba: cashier.isTest,
+      });
+      if (motivoNo) {
         return reply.code(409).send({
           error: "TICKET_NOT_REFUNDABLE",
-          message:
-            "Sólo se puede devolver un ticket cobrado y sincronizado con Holded.",
+          message: mensajeNoDevolvible(motivoNo),
         });
       }
 

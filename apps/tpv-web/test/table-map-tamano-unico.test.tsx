@@ -61,7 +61,8 @@ vi.mock("../src/pages/CheckoutPage.js", () => ({
 import { TableMapScreen, type ApiTable } from "../src/pages/TableMapScreen.js";
 import {
   TABLE_SHAPE_RADIUS,
-  TABLE_SHAPE_SIZE,
+  TABLE_SHAPE_MAX,
+  TABLE_SHAPE_MIN,
 } from "../src/lib/roomGrid.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -230,8 +231,17 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     // comprobar aparte que la clase y la constante no se habían
     // separado, y aun así un `!w-[124px]` colado en un envoltorio se
     // escapaba de jsdom. Ahora no hay por dónde.
+    //
+    // auditoria-sirope (#13) · el tamaño ya no es un número escrito: sale
+    // del ancho disponible, entre un suelo y un techo. La INVARIANTE es
+    // la misma —todas iguales— y es lo que se afirma; el número concreto
+    // depende del viewport y afirmarlo aquí sería afirmar el tamaño de
+    // la ventana de jsdom.
     const unicos = new Set(tamanos());
-    expect([...unicos]).toEqual([`${TABLE_SHAPE_SIZE}px x${TABLE_SHAPE_SIZE}px`.replace(" ", "")]);
+    expect(unicos.size).toBe(1);
+    const lado = Number.parseInt([...unicos][0]!.split("px")[0]!, 10);
+    expect(lado).toBeGreaterThanOrEqual(TABLE_SHAPE_MIN);
+    expect(lado).toBeLessThanOrEqual(TABLE_SHAPE_MAX);
   });
 
   it("ninguna mesa lleva una medida ADEMÁS de la compartida", async () => {
@@ -269,19 +279,20 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     }
     // Dentro de una zona, un solo radio.
     for (const radios of porZona.values()) expect(radios.size).toBe(1);
-    // La barra y la terraza son círculos (radio = mitad del lado); el
+    // La barra y la terraza son círculos (radio = MITAD DEL LADO, que
+    // desde #13 es variable: un radio fijo convertiría la mesa en un
+    // rectángulo de esquinas redondas en cuanto el lado creciera); el
     // salón y los reservados, no.
-    expect(porZona.get("BARRA")).toEqual(
-      new Set([`${TABLE_SHAPE_RADIUS.BARRA}px`]),
+    const lado = Number.parseInt(
+      formasDeMesa()[0]!.style.width.split("px")[0]!,
+      10,
     );
-    expect(porZona.get("TERRAZA")).toEqual(
-      new Set([`${TABLE_SHAPE_RADIUS.TERRAZA}px`]),
-    );
+    expect(porZona.get("BARRA")).toEqual(new Set([`${lado / 2}px`]));
+    expect(porZona.get("TERRAZA")).toEqual(new Set([`${lado / 2}px`]));
     expect(porZona.get("SALON")).toEqual(
       new Set([`${TABLE_SHAPE_RADIUS.SALON}px`]),
     );
-    expect(TABLE_SHAPE_RADIUS.BARRA).toBe(TABLE_SHAPE_SIZE / 2);
-    expect(TABLE_SHAPE_RADIUS.SALON).toBeLessThan(TABLE_SHAPE_SIZE / 2);
+    expect(TABLE_SHAPE_RADIUS.SALON).toBeLessThan(lado / 2);
   });
 
   it("la barra no vuelve a los círculos de 84 px de v1.9.3", async () => {
@@ -291,7 +302,11 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     );
     expect(barra.length).toBeGreaterThan(0);
     for (const el of barra) {
-      expect(el.style.width).toBe(`${TABLE_SHAPE_SIZE}px`);
+      // auditoria-sirope (#13) · el suelo del tamaño adaptativo es 120,
+      // muy por encima de los 84 de v1.9.3.
+      expect(
+        Number.parseInt(el.style.width.split("px")[0]!, 10),
+      ).toBeGreaterThanOrEqual(TABLE_SHAPE_MIN);
     }
     const html = container.innerHTML;
     expect(html).not.toContain("w-[84px]");
@@ -329,12 +344,17 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
   it("la vista filtrada por zona usa el mismo tamaño que la vista «Todas»", async () => {
     await renderSala();
     const todas = formasDeMesa();
+    // auditoria-sirope (#13) · el lado sale de la sala ENTERA, no de lo
+    // que se esté viendo: filtrar por una zona no puede hacer crecer las
+    // mesas y luego encogerlas al volver.
+    const ladoDeTodas = todas[0]!.style.width;
+    const altoDeTodas = todas[0]!.style.height;
     await filtrarPor("Terraza");
     const filtradas = formasDeMesa();
     expect(filtradas).toHaveLength(2);
     for (const el of filtradas) {
-      expect(el.style.width).toBe(`${TABLE_SHAPE_SIZE}px`);
-      expect(el.style.height).toBe(`${TABLE_SHAPE_SIZE}px`);
+      expect(el.style.width).toBe(ladoDeTodas);
+      expect(el.style.height).toBe(altoDeTodas);
     }
     expect(todas.length).toBeGreaterThan(filtradas.length);
   });

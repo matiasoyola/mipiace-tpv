@@ -153,6 +153,9 @@ function fakePrisma(shifts: FakeShiftRow[]) {
       },
       ticket: {
         count: vi.fn(async () => 12),
+        // auditoria-sirope (#18) · el Z cuenta las mesas vaciadas con
+        // consumo. En este banco no hay ninguna.
+        findMany: vi.fn(async () => []),
         groupBy: vi.fn(async () => []),
         aggregate: vi.fn(async () => ({ _count: { _all: 0 }, _sum: { total: null } })),
       },

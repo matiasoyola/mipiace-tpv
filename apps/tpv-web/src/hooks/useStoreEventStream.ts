@@ -175,7 +175,11 @@ export type StoreEvent =
       ticketId: string;
       tableId: string | null;
       at: string;
-    };
+    }
+  // auditoria-sirope (#20) · los ajustes de la cuenta cambiaron (el
+  // super-admin encendió o apagó un módulo). No trae el ajuste dentro: el
+  // TPV vuelve a pedir `/devices/me`, que es la verdad.
+  | { type: "tenant.settings_changed"; fields: string[]; at: string };
 
 export type StreamStatus = "connecting" | "open" | "degraded";
 

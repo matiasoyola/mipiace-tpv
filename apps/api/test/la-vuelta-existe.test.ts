@@ -289,6 +289,13 @@ const fakePrisma: Record<string, unknown> = {
       holdedApiKeyCiphertext: "cipher",
     })),
   },
+  // auditoria-sirope (#22) · cobrar (o vaciar) cierra las comandas que
+  // estaban LISTAS. Este banco no tiene cocina: ninguna comanda, nada
+  // que servir.
+  kitchenOrder: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+  },
   holdedUpload: { upsert: vi.fn(async () => ({})) },
   ticketEmailJob: { create: vi.fn(async () => ({ id: randomUUID() })) },
   table: { updateMany: vi.fn(async () => ({ count: 0 })) },

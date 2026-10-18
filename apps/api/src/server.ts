@@ -122,6 +122,7 @@ import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
 import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
+import { registerMostradorRoutes } from "./tickets/mostrador.js";
 import { registerSendToKitchenRoute } from "./tickets/send-to-kitchen.js";
 import { registerSendToKitchenEscposRoute } from "./tickets/send-to-kitchen-escpos.js";
 import { registerTicketPrintRoute } from "./tickets/print.js";
@@ -298,6 +299,7 @@ async function main() {
   // V1-verifactu (ADR-019) · el registro de facturación encadenado.
   await registerFiscalRoutes(app);
   await registerCreditRoutes(app);
+  await registerMostradorRoutes(app);
   await registerSendToKitchenRoute(app);
   await registerSendToKitchenEscposRoute(app);
   // kds-1-cocina · las rutas de la PANTALLA (`/kitchen/*`, device token de

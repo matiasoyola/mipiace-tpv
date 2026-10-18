@@ -160,7 +160,13 @@ describe("Cierre Z · checkbox con motivo (Frente 3)", () => {
   it("con arqueo obligatorio el modal entra por la tabla, y el checkbox sigue igual", async () => {
     outboxMock.outboxCounts.mockResolvedValue({ pending: 1, rejected: 0 });
     await renderModal({ requireCashCountOnClose: true });
-    expect(container.textContent).toContain("Denominación");
+    // auditoria-sirope (#28) · la tabla de tres columnas es ahora una
+    // rejilla de dos, para que las doce denominaciones de todos los días
+    // quepan sin scroll. Lo que se afirma es que SE ESTÁ CONTANDO, no
+    // cómo se llamaba el titular de una columna.
+    expect(
+      container.querySelector('[data-testid="cuadre-diarias"]'),
+    ).not.toBeNull();
     expect(checkbox()).not.toBeNull();
     expect(container.textContent).toContain("1 cobro en la cola local del dispositivo");
   });

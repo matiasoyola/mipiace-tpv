@@ -1111,6 +1111,111 @@ function matrizDelBanco() {
   return SALUD_MATRIZ;
 }
 
+// ── auditoria-sirope · LA PANTALLA DE COCINA Y LA VENTA CON COCINA ──
+//
+// Las dos pantallas que el bloque cambia y que el banco no tenía:
+//
+//   · `cocina` — el AP11 de Sirope, con Cocina y Barra a la vez. Es
+//     donde se mira la franja de sección de #26 y que la franja «+N» ya
+//     no deja 90 px muertos (#24).
+//   · `venta-mesa?cocina=1` — la comanda con el módulo encendido: la
+//     línea en UNA fila con su chip «Espera» (#8) y el botón «Enviar».
+//
+// Los fixtures son los del 18-10: una tostada a cocina y un café a la
+// barra.
+const KDS_AHORA = "2026-10-18T14:20:00.000Z";
+
+function comandaDeCocina(
+  id: string,
+  section: "COCINA" | "BARRA",
+  tableName: string,
+  plato: string,
+  minutos: number,
+) {
+  const sentAt = new Date(Date.parse(KDS_AHORA) - minutos * 60_000).toISOString();
+  return {
+    id,
+    section,
+    ticketId: `tk-${id}`,
+    tableId: section === "COCINA" ? "mesa-1" : null,
+    tableName,
+    number: 1,
+    urgent: false,
+    lateArrival: false,
+    sentAt,
+    firedAt: sentAt,
+    orderAt: sentAt,
+    readyAt: null,
+    servedAt: null,
+    recoveredAt: null,
+    isNew: false,
+    allergyBands: [],
+    lines: [
+      {
+        id: `l-${id}`,
+        name: plato,
+        units: 1,
+        unitsOriginal: null,
+        notes: [],
+        course: 1,
+        seat: null,
+        fired: true,
+        done: false,
+        voidedUnits: 0,
+        voidPending: false,
+        doneBeforeVoid: false,
+        changeNote: null,
+        changePending: false,
+        carries: [],
+        seatAllergy: null,
+        allergyWarning: null,
+      },
+    ],
+  };
+}
+
+const VISTA_COCINA = {
+  serverTime: KDS_AHORA,
+  settings: { greenMaxMin: 10, amberMaxMin: 20, readyBeep: false },
+  sections: ["COCINA", "BARRA"],
+  orders: [
+    comandaDeCocina("o1", "COCINA", "T6", "Tostada con tomate", 4),
+    comandaDeCocina("o2", "BARRA", "Mostrador nº 3", "Café con leche", 1),
+    comandaDeCocina("o3", "COCINA", "T3", "Croissant a la plancha", 13),
+  ],
+  ready: [],
+};
+
+/** ¿La venta del banco lleva el módulo «Cocina» encendido? */
+function conCocina(): boolean {
+  return benchParam("cocina") === "1";
+}
+
+/** El estado de cocina de la mesa del banco: una línea ya enviada y el
+ *  resto sin enviar, que es la comanda partida de #8. */
+function estadoCocinaDelBanco(lineas: Array<Record<string, unknown>>) {
+  return {
+    diners: 2,
+    revision: 1,
+    lines: lineas.map((l, i) => ({
+      id: l.id,
+      units: Number(l.units),
+      sentUnits: i === 0 ? Number(l.units) : 0,
+      course: 1,
+      seat: null,
+      section: "COCINA",
+    })),
+    firedCourses: [{ course: 1, firedAt: KDS_AHORA }],
+    allergies: [],
+    orders: [],
+    destinations: {
+      BARRA: { screen: true, printer: false, canCorrectSent: true },
+      COCINA: { screen: true, printer: false, canCorrectSent: true },
+      SALON: { screen: false, printer: false, canCorrectSent: false },
+    },
+  };
+}
+
 function stubFetch(): void {
   const routes: Record<string, unknown> = {
     "/tpv/health/holded": {
@@ -1173,6 +1278,31 @@ function stubFetch(): void {
     },
     "/agenda/skill-matrix": matrizDelBanco(),
     "/clients": { items: SOLE_CLIENTS, nextCursor: null },
+    // auditoria-sirope · la pantalla de cocina del AP11.
+    "/kitchen/comandas": VISTA_COCINA,
+    "/kitchen/comandas/hoy": { ...VISTA_COCINA, orders: [], ready: [] },
+    "/kitchen/estado": {
+      heartbeatWindowMs: 90000,
+      screens: [],
+      lan: null,
+      sections: [
+        {
+          section: "COCINA",
+          screen: true,
+          printer: false,
+          canCorrectSent: true,
+          needsPaperFallback: false,
+        },
+        {
+          section: "BARRA",
+          screen: true,
+          printer: false,
+          canCorrectSent: true,
+          needsPaperFallback: false,
+        },
+      ],
+    },
+    "/kitchen/listas": { ready: [] },
     "/tpv/catalog/wildcards": { items: [] },
     "/tpv/catalog/modifier-groups": { groups: [] },
     "/tickets": {
@@ -1476,6 +1606,14 @@ function stubFetch(): void {
     // B-reservas-mostrador F3 · la ficha del cliente de la sección Clientes.
     // Se resuelven aquí porque el id va en la ruta y `routes` es una tabla
     // de rutas peladas.
+    // auditoria-sirope · el estado de cocina de la mesa del banco. Va
+    // aquí y no en `routes` porque el id del ticket viaja en la ruta.
+    if (/^\/tickets\/[^/]+\/kitchen$/.test(path)) {
+      return new Response(JSON.stringify(estadoCocinaDelBanco(draftLines)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const ficha = /^\/clients\/([^/]+)(\/(history|vouchers))?$/.exec(path);
     if (ficha && (init?.method ?? "GET") === "GET") {
       const cliente = SOLE_CLIENTS.find((c) => c.id === ficha[1]);
@@ -1579,6 +1717,7 @@ function Bench() {
     AgendaHealthPanel: typeof import("../src/pages/AgendaHealthPanel.js")["AgendaHealthPanel"];
     AgendaSkillMatrix: typeof import("../src/pages/AgendaSkillMatrix.js")["AgendaSkillMatrix"];
     ClientsPage: typeof import("../src/pages/ClientsPage.js")["ClientsPage"];
+    KitchenScreen: typeof import("../src/kitchen/KitchenScreen.js")["KitchenScreen"];
   }>(null);
 
   useEffect(() => {
@@ -1595,6 +1734,7 @@ function Bench() {
         salud,
         matriz,
         clientes,
+        cocina,
       ] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
         import("../src/pages/CheckoutPage.successOverlay.js"),
@@ -1607,6 +1747,7 @@ function Bench() {
         import("../src/pages/AgendaHealthPanel.js"),
         import("../src/pages/AgendaSkillMatrix.js"),
         import("../src/pages/ClientsPage.js"),
+        import("../src/kitchen/KitchenScreen.js"),
       ]);
       // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
       // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
@@ -1634,6 +1775,7 @@ function Bench() {
         AgendaHealthPanel: salud.AgendaHealthPanel,
         AgendaSkillMatrix: matriz.AgendaSkillMatrix,
         ClientsPage: clientes.ClientsPage,
+        KitchenScreen: cocina.KitchenScreen,
       });
     })();
   }, []);
@@ -1747,6 +1889,21 @@ function Bench() {
         onTicketMovedToTable={null}
         onLogoutCashier={() => {}}
         onCloseShift={() => {}}
+        // auditoria-sirope · `?cocina=1` enciende el módulo: es como se
+        // miran la comanda en una fila (#8) y el botón «Enviar» (#12).
+        {...(conCocina()
+          ? {
+              kitchenDisplayEnabled: true,
+              initialKitchen: { lastSentAt: KDS_AHORA, revision: 1 },
+              kitchenSettings: {
+                courseMode: "ESPERA" as const,
+                seatMode: "ALERGIA" as const,
+                greenMaxMin: 10,
+                amberMaxMin: 20,
+                readyBeep: false,
+              },
+            }
+          : {})}
       />
     );
   }
@@ -1795,6 +1952,20 @@ function Bench() {
     return <Screens.ClientsPage onClose={() => {}} />;
   }
 
+  // ── auditoria-sirope · la pantalla de cocina del AP11 ─────────────
+  if (screen === "cocina") {
+    return (
+      <Screens.KitchenScreen
+        me={{
+          device: { id: "ap11", name: "AP11-1006" },
+          store: { id: "store-1", name: "Cafetería Sirope" },
+          sections: ["COCINA", "BARRA"],
+          settings: { greenMaxMin: 10, amberMaxMin: 20, readyBeep: false },
+        }}
+      />
+    );
+  }
+
   if (screen === "mapa") {
     return (
       <Screens.TableMapScreen
@@ -1823,6 +1994,18 @@ function Bench() {
       onBackToMap={() => {}}
       onLogoutCashier={() => {}}
       onCloseShift={() => {}}
+      {...(conCocina()
+        ? {
+            kitchenDisplayEnabled: true,
+            kitchenSettings: {
+              courseMode: "ESPERA" as const,
+              seatMode: "ALERGIA" as const,
+              greenMaxMin: 10,
+              amberMaxMin: 20,
+              readyBeep: false,
+            },
+          }
+        : {})}
     />
   );
 }

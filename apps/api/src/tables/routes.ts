@@ -49,7 +49,14 @@ interface TableSummaryDto {
   height: number | null;
   barSeatIndex: number | null;
   groupedIntoTableId: string | null;
-  state: "FREE" | "OPEN" | "BILLING";
+  /**
+   * auditoria-sirope (#14) · POR_RECOGER es nuevo: pagada y todavía con
+   * el servicio encima. No es libre —no se puede sentar a nadie— y no
+   * está abierta —no debe nada—, y el mapa tiene que poder decirlo.
+   */
+  state: "FREE" | "OPEN" | "BILLING" | "POR_RECOGER";
+  /** auditoria-sirope (#14) · cuándo se cobró, para los minutos. */
+  porRecogerDesde: string | null;
   // Si OPEN/BILLING, snapshot del ticket DRAFT activo.
   activeTicket: {
     id: string;
@@ -69,6 +76,25 @@ interface TableSummaryDto {
 // usa tanto desde el admin (/admin/stores/:id/tables) como desde el
 // TPV (/tpv/tables) — el shape es idéntico para no duplicar tipos en
 // el cliente.
+/**
+ * auditoria-sirope (#14) · ¿sigue esta mesa esperando a que la recojan?
+ *
+ * Caduca sola a las seis horas, y por eso no hace falta ni un job ni un
+ * barrido: una mesa que se cobró anoche y nadie tocó no está «por
+ * recoger» esta mañana, está libre. Quien la recoja de verdad la deja
+ * libre de un toque (`POST /tables/:id/recogida`) o abriendo cuenta
+ * nueva; esto es sólo la red para la mesa que nadie tocó.
+ *
+ * Seis horas y no doce: un servicio entero cabe de sobra, y una mesa
+ * «por recoger» a la mañana siguiente es una mentira en el mapa.
+ */
+const RECOGIDA_CADUCA_MS = 6 * 60 * 60 * 1000;
+
+function sigueSinRecoger(desde: Date | null): boolean {
+  if (!desde) return false;
+  return Date.now() - desde.getTime() < RECOGIDA_CADUCA_MS;
+}
+
 export async function buildTableSnapshot(
   prisma: ReturnType<typeof getPrisma>,
   tenantId: string,
@@ -124,7 +150,16 @@ export async function buildTableSnapshot(
       height: t.height,
       barSeatIndex: t.barSeatIndex,
       groupedIntoTableId: t.groupedIntoTableId,
-      state: draft ? "OPEN" : "FREE",
+      // auditoria-sirope (#14) · un DRAFT manda sobre todo: si alguien
+      // abrió cuenta nueva en una mesa por recoger, está OCUPADA.
+      state: draft
+        ? "OPEN"
+        : sigueSinRecoger(t.porRecogerDesde)
+          ? "POR_RECOGER"
+          : "FREE",
+      porRecogerDesde: sigueSinRecoger(t.porRecogerDesde)
+        ? t.porRecogerDesde!.toISOString()
+        : null,
       activeTicket: draft
         ? {
             id: draft.id,

@@ -21,7 +21,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { Prisma } from "@mipiacetpv/db";
+import { Prisma, type MotivoVaciado } from "@mipiacetpv/db";
 import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
@@ -51,7 +51,7 @@ import { plantillasDeLosProductos } from "../vouchers/venta.js";
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 
-interface LineBody {
+export interface LineBody {
   productId?: string;
   variantId?: string;
   holdedProductId?: string;
@@ -109,6 +109,13 @@ export async function registerTableOperativaRoutes(
         cashier.sub,
         body.diners ?? null,
       );
+      // auditoria-sirope (#14) · abrir cuenta nueva la ocupa y la saca
+      // de «por recoger»: lo que se recoge se recoge para sentar a
+      // alguien, y ya hay alguien sentado.
+      await prisma.table.updateMany({
+        where: { id: ctx.tableId, porRecogerDesde: { not: null } },
+        data: { porRecogerDesde: null },
+      });
       if (wasNew) {
         const cashierUser = await prisma.user.findUniqueOrThrow({
           where: { id: cashier.sub },
@@ -123,6 +130,50 @@ export async function registerTableOperativaRoutes(
         });
       }
       return reply.code(201).send({ ticket: serializeDraft(draft) });
+    },
+  );
+
+  // ── auditoria-sirope (#14) · DEJAR LIBRE UNA MESA POR RECOGER ─────
+  //
+  // El otro toque del estado nuevo. «Abrir cuenta nueva» la ocupa (y la
+  // limpia de paso, arriba); esto la deja lista sin sentar a nadie.
+  //
+  // Es idempotente a propósito: dos camareros que la toquen a la vez no
+  // se pisan, y tocar una mesa que ya está libre no es un error —es lo
+  // que querías—.
+  app.post(
+    "/tables/:tableId/recogida",
+    {
+      preHandler: [requireCashierSession, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["tableId"],
+          properties: { tableId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { tableId } = request.params as { tableId: string };
+      const prisma = getPrisma();
+      const ctx = await ensureTableContext(prisma, cashier, tableId);
+      if ("error" in ctx) return reply.code(ctx.status).send(ctx.error);
+      await prisma.table.updateMany({
+        where: { id: ctx.tableId },
+        data: { porRecogerDesde: null },
+      });
+      // El mapa de las demás cajas se entera por el mismo bus que todo
+      // lo demás de la sala: la mesa pasa a libre y hay que poder
+      // sentar a alguien sin esperar al repoll de 30 s.
+      getStoreEventBus().broadcast(ctx.storeId, {
+        type: "table.cleared",
+        tableId: ctx.tableId,
+        ticketId: "",
+        reason: "recogida",
+        at: new Date().toISOString(),
+      });
+      return reply.code(200).send({ ok: true });
     },
   );
 
@@ -245,65 +296,15 @@ export async function registerTableOperativaRoutes(
         }
       }
 
-      // Resolver modificadores estructurados antes del cálculo.
-      const [modifierResult] = await resolveModifierSelectionsForLines(
-        prisma,
-        cashier.tid,
-        [
-          {
-            productId: body.productId ?? null,
-            selections: body.modifierSelections ?? [],
-          },
-        ],
-      );
-      if (modifierResult && !modifierResult.ok) {
-        return reply
-          .code(400)
-          .send(buildModifierErrorReply(modifierResult, body.nameSnapshot));
-      }
-      const modifierSnapshot = modifierResult?.ok
-        ? modifierResult.resolved.snapshot
-        : [];
-      const unitPriceDeltaCents = modifierResult?.ok
-        ? modifierResult.resolved.unitPriceDeltaCents
-        : 0;
-
-      const lineId = body.lineExternalId ?? randomUUID();
-      const lineSnapshot = computeTicket([
-        {
-          units: body.units,
-          unitPrice: body.unitPrice + unitPriceDeltaCents / 100,
-          discountPct: body.discountPct,
-          taxRate: body.taxRate,
-        },
-      ]).lines[0]!;
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.ticketLine.create({
-          data: {
-            id: lineId,
-            ticketId: draft.id,
-            productId: body.productId ?? null,
-            variantId: body.variantId ?? null,
-            holdedProductId: body.holdedProductId ?? null,
-            sku: body.sku,
-            nameSnapshot: body.nameSnapshot,
-            units: new Prisma.Decimal(body.units),
-            // unitPrice persistido = BASE (sin deltas). Los deltas viven
-            // como datos desnormalizados dentro de `modifiers` y ya están
-            // reflejados en `subtotal`/`total`.
-            unitPrice: new Prisma.Decimal(body.unitPrice),
-            discountPct: new Prisma.Decimal(body.discountPct),
-            taxRate: new Prisma.Decimal(body.taxRate),
-            subtotal: new Prisma.Decimal(lineSnapshot.subtotal),
-            total: new Prisma.Decimal(lineSnapshot.total),
-            modifiers: buildModifiersSnapshotForLine(
-              body.modifiers,
-              modifierSnapshot,
-            ),
-          },
-        });
-        return recomputeTicketTotalsWithModifiers(tx, draft.id);
+      const añadida = await anadirLineaAlDraft(prisma, {
+        draftId: draft.id,
+        tenantId: cashier.tid,
+        body,
       });
+      if ("error" in añadida) {
+        return reply.code(añadida.status).send(añadida.error);
+      }
+      const { lineId, updated } = añadida;
       getStoreEventBus().broadcast(ctx.storeId, {
         type: "table.lineAdded",
         tableId: ctx.tableId,
@@ -685,6 +686,24 @@ export async function registerTableOperativaRoutes(
           additionalProperties: false,
           properties: {
             reason: { type: "string", maxLength: 200 },
+            // auditoria-sirope (#18) · QUÉ PASÓ EN LA SALA.
+            //
+            // Obligatorio cuando la mesa tiene consumo: vaciar una mesa
+            // con platos dentro es comida que salió de la cocina y no se
+            // cobra, y una invitación, un error de comanda y alguien que
+            // se fue sin pagar se gestionan de tres maneras distintas.
+            // Lo exige el SERVIDOR y no sólo la pantalla: el día que otro
+            // cliente llame a esta ruta, el rastro tiene que existir
+            // igual.
+            motivo: {
+              type: "string",
+              enum: [
+                "INVITACION",
+                "ERROR_DE_COMANDA",
+                "SE_FUERON_SIN_PAGAR",
+                "OTRO",
+              ],
+            },
             // v1.12-mesas-abandonadas · "vacía esta mesa SÓLO si sigue
             // vacía". Lo manda el TPV al salir del detalle sin haber
             // pedido nada. Ver el bloque de comentario del handler.
@@ -696,7 +715,11 @@ export async function registerTableOperativaRoutes(
     async (request, reply) => {
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
-      const query = request.query as { reason?: string; onlyIfEmpty?: boolean };
+      const query = request.query as {
+        reason?: string;
+        motivo?: MotivoVaciado;
+        onlyIfEmpty?: boolean;
+      };
       const prisma = getPrisma();
       const draft = await prisma.ticket.findFirst({
         where: { id: ticketId, tenantId: cashier.tid, status: "DRAFT" },
@@ -704,6 +727,8 @@ export async function registerTableOperativaRoutes(
           id: true,
           registerId: true,
           tableId: true,
+          total: true,
+          _count: { select: { lines: true } },
           register: { select: { storeId: true } },
         },
       });
@@ -738,12 +763,31 @@ export async function registerTableOperativaRoutes(
       //     metido líneas hace tres segundos y este device aún no ha
       //     repollado—, así que quien lo comprueba es el servidor, dentro
       //     del WHERE de la reclamación (`lines: { none: {} }`).
+      // auditoria-sirope (#18) · con consumo, el motivo es obligatorio.
+      //
+      // «Con consumo» es tener líneas o importe: una mesa que se abrió
+      // por error y está vacía se libera de un toque, como siempre, y el
+      // barrido de las 05:00 —que sólo toca vacías— no se ve afectado.
+      //
+      // Lo exige el servidor y no sólo la hoja del TPV: el motivo es el
+      // rastro de comida que salió y no se cobró, y un rastro que
+      // depende de que el cliente se acuerde no es un rastro.
+      const conConsumo =
+        draft._count.lines > 0 || Number(draft.total) > 0;
+      if (conConsumo && !query.onlyIfEmpty && !query.motivo) {
+        return reply.code(400).send({
+          error: "VOID_MOTIVO_REQUIRED",
+          message:
+            "Esta mesa tiene consumo: hay que decir por qué se vacía.",
+        });
+      }
       const voided = await voidDraftTicket({
         prisma,
         ticketId,
         tenantId: cashier.tid,
         reason: "MANUAL",
         byUserId: cashier.sub,
+        motivo: conConsumo ? (query.motivo ?? null) : null,
         note: query.reason ? `[VACIADA] ${query.reason}` : "[VACIADA] sin motivo",
         requireEmpty: query.onlyIfEmpty === true,
       });
@@ -872,7 +916,7 @@ async function ensureTableContext(
   };
 }
 
-const DRAFT_INCLUDE = {
+export const DRAFT_INCLUDE = {
   // kds-1-cocina · `include: true` trae ya `course`, `seat` y `sentUnits`
   // sin tocar nada. Lo que hay que añadir a mano son los ALÉRGENOS DEL
   // PRODUCTO, que no están en la línea sino en su ficha.
@@ -886,6 +930,94 @@ const DRAFT_INCLUDE = {
   lines: { include: { product: { select: { allergens: true } } } },
   table: { select: { id: true, name: true, zone: true, capacity: true } },
 } as const;
+
+/**
+ * auditoria-sirope (#25) · AÑADIR UNA LÍNEA A UN DRAFT, sea de quien sea.
+ *
+ * Esto vivía dentro del handler de `POST /tables/:tableId/lines` y por eso
+ * sólo sabía añadir líneas a una MESA. Con la venta de mostrador hay un
+ * segundo borrador sin mesa que necesita exactamente lo mismo —resolver
+ * modificadores, calcular la línea, recalcular los totales—, y la
+ * alternativa era copiar sesenta líneas que se separarían a la segunda
+ * corrección.
+ *
+ * Lo que NO entra aquí y se queda en cada llamante: la idempotencia por
+ * `lineExternalId` (la mesa la comprueba antes) y el evento del bus, que
+ * es de mesa y no existe en el mostrador.
+ */
+export async function anadirLineaAlDraft(
+  prisma: ReturnType<typeof getPrisma>,
+  args: {
+    draftId: string;
+    tenantId: string;
+    body: LineBody;
+  },
+): Promise<
+  | { lineId: string; updated: Awaited<ReturnType<typeof reloadDraft>> }
+  | { status: number; error: Record<string, unknown> }
+> {
+  const { body } = args;
+  const [modifierResult] = await resolveModifierSelectionsForLines(
+    prisma,
+    args.tenantId,
+    [
+      {
+        productId: body.productId ?? null,
+        selections: body.modifierSelections ?? [],
+      },
+    ],
+  );
+  if (modifierResult && !modifierResult.ok) {
+    return {
+      status: 400,
+      error: buildModifierErrorReply(
+        modifierResult,
+        body.nameSnapshot,
+      ) as unknown as Record<string, unknown>,
+    };
+  }
+  const modifierSnapshot = modifierResult?.ok
+    ? modifierResult.resolved.snapshot
+    : [];
+  const unitPriceDeltaCents = modifierResult?.ok
+    ? modifierResult.resolved.unitPriceDeltaCents
+    : 0;
+
+  const lineId = body.lineExternalId ?? randomUUID();
+  const lineSnapshot = computeTicket([
+    {
+      units: body.units,
+      unitPrice: body.unitPrice + unitPriceDeltaCents / 100,
+      discountPct: body.discountPct,
+      taxRate: body.taxRate,
+    },
+  ]).lines[0]!;
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.ticketLine.create({
+      data: {
+        id: lineId,
+        ticketId: args.draftId,
+        productId: body.productId ?? null,
+        variantId: body.variantId ?? null,
+        holdedProductId: body.holdedProductId ?? null,
+        sku: body.sku,
+        nameSnapshot: body.nameSnapshot,
+        units: new Prisma.Decimal(body.units),
+        // unitPrice persistido = BASE (sin deltas). Los deltas viven como
+        // datos desnormalizados dentro de `modifiers` y ya están
+        // reflejados en `subtotal`/`total`.
+        unitPrice: new Prisma.Decimal(body.unitPrice),
+        discountPct: new Prisma.Decimal(body.discountPct),
+        taxRate: new Prisma.Decimal(body.taxRate),
+        subtotal: new Prisma.Decimal(lineSnapshot.subtotal),
+        total: new Prisma.Decimal(lineSnapshot.total),
+        modifiers: buildModifiersSnapshotForLine(body.modifiers, modifierSnapshot),
+      },
+    });
+    return recomputeTicketTotalsWithModifiers(tx, args.draftId);
+  });
+  return { lineId, updated };
+}
 
 async function getOrCreateDraftTicket(
   prisma: ReturnType<typeof getPrisma>,
@@ -938,7 +1070,7 @@ async function getOrCreateDraftTicket(
   });
 }
 
-async function reloadDraft(
+export async function reloadDraft(
   prisma: ReturnType<typeof getPrisma>,
   ticketId: string,
 ) {
@@ -971,7 +1103,7 @@ export async function recomputeTicketTotals(
 // siempre el BASE; los deltas vienen de `modifiers` cuando tiene el
 // shape estructurado (B-Bar-Modifiers). Las strings legacy y null se
 // tratan como "sin delta" — comportamiento legacy intacto.
-async function recomputeTicketTotalsWithModifiers(
+export async function recomputeTicketTotalsWithModifiers(
   tx: Prisma.TransactionClient,
   ticketId: string,
 ) {
@@ -1007,7 +1139,7 @@ async function recomputeTicketTotalsWithModifiers(
 
 // Igual que en tickets/routes — prioriza snapshot estructurado, cae a
 // legacy strings, o null si ambos están vacíos.
-function buildModifiersSnapshotForLine(
+export function buildModifiersSnapshotForLine(
   legacyStrings: string[] | undefined,
   structuredSnapshot: ModifierSnapshotEntry[],
 ): typeof Prisma.JsonNull | object {
@@ -1020,7 +1152,7 @@ function buildModifiersSnapshotForLine(
   return Prisma.JsonNull;
 }
 
-function buildModifierErrorReply(
+export function buildModifierErrorReply(
   result: Extract<ResolveResult, { ok: false }>,
   lineName: string,
 ): {
@@ -1069,7 +1201,7 @@ function buildModifierErrorReply(
   }
 }
 
-interface SerializedDraft {
+export interface SerializedDraft {
   id: string;
   status: string;
   externalId: string;
@@ -1115,7 +1247,7 @@ interface SerializedDraft {
   }>;
 }
 
-function serializeDraft(
+export function serializeDraft(
   t: Awaited<ReturnType<typeof reloadDraft>>,
 ): SerializedDraft {
   return {

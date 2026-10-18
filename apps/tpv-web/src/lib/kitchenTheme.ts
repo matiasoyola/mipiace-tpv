@@ -262,6 +262,31 @@ export const URGENTE_PX = 26;
 /** El alto de la franja «URGENTE». */
 export const FRANJA_URGENTE_ALTO_PX = 52;
 
+// ── auditoria-sirope (#26) · LA SECCIÓN SE VE SIN LEERLA ─────────────
+//
+// En una pantalla compartida (el AP11 de Sirope lleva Cocina + Barra),
+// la sección de cada tarjeta era una palabra de 13 px dentro del
+// eyebrow, entre «2ª COMANDA» y «LLEGÓ TARDE». El cocinero tenía que
+// LEER cada tarjeta para saber si era suya. (Captura 60.)
+//
+// Ahora cada sección tiene su franja, con su color y su nombre grande.
+// Los colores no pueden ser ninguno de los que ya significan algo en
+// esta pantalla:
+//
+//   · verde → ámbar → rojo es el SEMÁFORO del tiempo;
+//   · rojo pleno es URGENTE y es la ALERGIA.
+//
+// Así que violeta, cian y pizarra: tres tonos que no están en juego, y
+// que se distinguen entre sí de lejos y con poca luz.
+export const FRANJA_SECCION_ALTO_PX = 34;
+export const FRANJA_SECCION_PX = 20;
+export const SECCION_COLOR: Record<string, string> = {
+  COCINA: "#6D5BD0",
+  BARRA: "#2D8FBF",
+  SALON: "#5B6B7C",
+};
+export const SECCION_TEXT = "#FFFFFF";
+
 /** «SILLA 3 · CELÍACO», la primera línea de la franja de la alergia. */
 export const ALERGIA_PX = 21;
 /** «Gluten», el alérgeno, debajo y más pequeño. */

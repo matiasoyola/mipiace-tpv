@@ -9,6 +9,8 @@ import {
   type CausaExencion,
   esCausaExencion,
   leyendaExencion,
+  mensajeNoDevolvible,
+  motivoNoDevolvible,
 } from "@mipiacetpv/ticket-model";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -30,7 +32,7 @@ import {
 import { isValidEmail, normalizeEmail } from "@mipiacetpv/util-validation/email";
 
 import { ApiError, apiWithCashier } from "../api.js";
-import { getCachedBusinessType } from "../lib/catalog.js";
+import { getCachedBusinessType, getCachedEnsayo } from "../lib/catalog.js";
 import { syncNow } from "../lib/syncNow.js";
 import { isTestModeActive } from "../lib/test-mode.js";
 import { vocab } from "../lib/vocab.js";
@@ -761,6 +763,14 @@ export function TicketDetailDrawer({
   const reprinting = reprintState.phase === "printing";
   const canReprint =
     ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
+  // auditoria-sirope (#17) · la misma regla que el servidor. El contexto
+  // son las dos señales que ya viajan en el terminal: la cuenta en ensayo
+  // (`getCachedEnsayo`, que escribe el login) y la sesión del cajero
+  // técnico del super-admin (`isTestModeActive`).
+  const motivoNoDevolucion = motivoNoDevolvible(ticket.status, {
+    enEnsayo: getCachedEnsayo(),
+    sesionDePrueba: isTestModeActive(),
+  });
 
   async function resend() {
     if (!emailValid) return;
@@ -1073,13 +1083,17 @@ export function TicketDetailDrawer({
           </div>
 
           {/* v1.9.5-formacion · Frente 1: la devolución se ensaya también
-              sobre tickets TEST, pero SÓLO en modo prueba (misma señal que
-              pinta el badge PRUEBA). El refund test nace SKIPPED en el
-              backend: nunca toca Holded. */}
-          {(ticket.status === "SYNCED" ||
-            (ticket.status === "TEST" && isTestModeActive())) && (
+              sobre tickets TEST. auditoria-sirope (#17): ya no se decide
+              aquí. La regla la escribe `motivoNoDevolvible`
+              (`@mipiacetpv/ticket-model`), la misma que mira el servidor
+              antes de aceptar el refund — escribirla dos veces es lo que
+              dejó a Sirope sin poder devolver un `PAID` ni un `TEST` de
+              ensayo. Y cuando dice que no, se dice en voz alta: un botón
+              que desaparece no explica nada. */}
+          {motivoNoDevolucion == null ? (
             <button
               onClick={onRefund}
+              data-testid="iniciar-devolucion"
               className="w-full h-11 rounded-xl border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft text-[13.5px] font-medium flex items-center justify-center gap-2"
             >
               {/* v1.3-Servicios-Pinta · Lote 5: en SERVICES (anulación)
@@ -1092,6 +1106,13 @@ export function TicketDetailDrawer({
               )}
               Iniciar {vocab("refundNoun", businessType).toLowerCase()}
             </button>
+          ) : (
+            <div
+              data-testid="devolucion-no-disponible"
+              className="text-[12.5px] text-slate-500 leading-snug"
+            >
+              {mensajeNoDevolvible(motivoNoDevolucion)}
+            </div>
           )}
 
           {ticket.holdedDocumentId && (

@@ -212,6 +212,30 @@ function writeCachedDeviceMe(data: DeviceMeResponse): void {
   }
 }
 
+/**
+ * auditoria-sirope (#20) · EL AVISO INTERNO DE «LOS AJUSTES CAMBIARON».
+ *
+ * El bus de la tienda lo recibe quien tiene el WebSocket abierto (la
+ * pantalla de venta y la de sala) y quien tiene que reaccionar es el
+ * bootstrap, que vive arriba del todo. En vez de bajar un callback por
+ * cinco niveles de props, el que lo recibe lo RELANZA como evento del
+ * navegador y el bootstrap lo escucha.
+ *
+ * Un `CustomEvent` y no un estado global: no hay nada que guardar, sólo
+ * un «vuelve a preguntar».
+ */
+export const EVENTO_AJUSTES_CAMBIADOS = "mipiacetpv:ajustes-cambiados";
+
+export function avisarAjustesCambiados(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(EVENTO_AJUSTES_CAMBIADOS));
+}
+
+/** Cada cuánto se repasan los ajustes del tenant con la app abierta.
+ *  Un minuto: «encender Cocina se nota en la caja en menos de un
+ *  minuto» es el criterio del bloque. */
+const REPASO_MS = 60_000;
+
 export function useDeviceBootstrap(): {
   state: BootstrapState;
   refresh: () => void;
@@ -335,9 +359,54 @@ export function useDeviceBootstrap(): {
     }
   }, []);
 
+  // auditoria-sirope (#20) · EL REPASO SILENCIOSO.
+  //
+  // `refresh` es el arranque: puede dejar el terminal en `loading`, en
+  // `unpaired` o reintentando. Esto es otra cosa — el terminal ya está
+  // funcionando y sólo queremos enterarnos de que el super-admin ha
+  // tocado un módulo. Si la llamada falla, NO pasa nada: se queda lo que
+  // había y se repasa al siguiente minuto. Una caja no se cae porque un
+  // repaso de ajustes no llegue.
+  const repasar = useCallback(async () => {
+    if (!getDeviceToken()) return;
+    try {
+      const data = await apiWithDevice<DeviceMeResponse>("/devices/me");
+      writeCachedDeviceMe(data);
+      setState((prev) =>
+        // Sólo pisa el estado de un terminal que YA está emparejado. Si
+        // está arrancando, en modo cocina o en modo puerta, manda
+        // `refresh` y este repaso no se mete.
+        prev.kind === "paired" ? { kind: "paired", data } : prev,
+      );
+    } catch {
+      /* el terminal sigue con lo que tenía */
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    // Al volver al primer plano: es el caso del 18-10 (el super-admin
+    // cambia el ajuste mientras el cajero mira el móvil).
+    const alVolver = () => {
+      if (document.visibilityState === "visible") void repasar();
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    // Y con un evento del bus, que es lo que hace que se note en
+    // segundos con la app delante.
+    const alAvisar = () => void repasar();
+    window.addEventListener(EVENTO_AJUSTES_CAMBIADOS, alAvisar);
+    const t = setInterval(() => void repasar(), REPASO_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+      window.removeEventListener(EVENTO_AJUSTES_CAMBIADOS, alAvisar);
+      clearInterval(t);
+    };
+  }, [repasar]);
 
   return {
     state,

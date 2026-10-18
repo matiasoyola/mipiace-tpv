@@ -192,11 +192,18 @@ export function buildTicketActions(input: {
     // 2026-07-08). En venta rápida sin nada que destruir sí se apaga.
     // B-reservas-5 F3 · en contexto CITA el botón NO destruye: sale a la
     // agenda y deja el borrador donde está.
+    // auditoria-sirope (#10) · «Cancelar» → «Vaciar venta».
+    //
+    // «Cancelar» en una hoja de acciones se lee como «cerrar esta hoja»,
+    // y lo que hacía era borrar la venta entera. En mesas ya decía
+    // «Vaciar mesa» desde el primer día; la venta rápida se había
+    // quedado con el verbo equivocado. La confirmación que ya existe se
+    // queda: el nombre no sustituye a la pregunta.
     label: input.hasTable
       ? "Vaciar mesa"
       : input.hasAppointment
         ? "Volver a la agenda"
-        : "Cancelar",
+        : "Vaciar venta",
     hint: input.hasTable
       ? "Cancela la cuenta y libera la mesa"
       : input.hasAppointment

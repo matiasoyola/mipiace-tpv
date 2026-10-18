@@ -58,6 +58,10 @@ import {
 
 import { ApiError } from "../api.js";
 import { ConfirmSheet } from "../components/ConfirmSheet.js";
+import {
+  MotivoVaciadoSheet,
+  type MotivoVaciado,
+} from "../components/MotivoVaciadoSheet.js";
 import { Logo } from "../Logo.js";
 import {
   computeCart,
@@ -115,10 +119,19 @@ import { useClientPicker } from "../hooks/useClientPicker.js";
 import { clientFullName } from "../lib/clients.js";
 import { urlDeclaracionResponsable } from "../lib/declaracionResponsable.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
+import { avisarAjustesCambiados } from "../hooks/useDeviceBootstrap.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
 import { refreshFiscalHead } from "../lib/fiscal.js";
 import { newId } from "../lib/ids.js";
+// auditoria-sirope (#25) · la venta de mostrador que va a cocina.
+import {
+  etiquetaDeMostrador,
+  guardarMostradorEnCurso,
+  leerMostradorEnCurso,
+  lineaParaElServidor,
+  type MostradorEnCurso,
+} from "../lib/mostrador.js";
 import {
   buildGroupsByProduct,
   loadModifierGroups,
@@ -141,7 +154,11 @@ import {
   type CaminoDirecto,
 } from "../kitchen/tpv/useCaminoDirecto.js";
 import { componerComandasLan } from "../kitchen/tpv/envioLan.js";
-import { lineasQueElServidorNoConoce } from "../lib/kitchenComanda.js";
+import {
+  hayDondeMandar,
+  lineasQueElServidorNoConoce,
+  partirComanda,
+} from "../lib/kitchenComanda.js";
 import {
   alergenosPorLineaDeEnvio,
   ESPERA_CATALOGO_MS,
@@ -546,6 +563,20 @@ export function SalePage(props: SalePageProps) {
   const [kitchenRevision, setKitchenRevision] = useState(0);
   const [kitchenToast, setKitchenToast] = useState<{
     sections: Array<{ section: string; lineCount: number }>;
+    /**
+     * auditoria-sirope (#19) · LO QUE NO TIENE A DÓNDE IR.
+     *
+     * Una sección sin pantalla y sin impresora se marca como enviada
+     * igualmente (decisión 2 de kds-1: la caña no puede bloquear a las
+     * bravas), y hasta este bloque el toast la listaba junto a las
+     * demás bajo un «Comanda enviada» en verde. El 18-10, con Cocina
+     * recién encendida y sin mapa de etiquetas, las tres líneas de la
+     * T6 cayeron a SALÓN y el D8 dijo «enviada». La cocina no vio nada.
+     *
+     * Enviada y sin destino no son lo mismo, así que no se cuentan
+     * juntas.
+     */
+    sinDestino?: Array<{ section: string; lineCount: number }>;
     revision: number;
     /**
      * kds-2-wifi · la comanda salió SÓLO por la wifi del local (internet
@@ -593,7 +624,7 @@ export function SalePage(props: SalePageProps) {
   // navegador (hallazgo H5): título "mipiacetpv.com dice", botones
   // azules de Chrome y dos "Cancelar" con significados opuestos.
   const [confirmAction, setConfirmAction] = useState<
-    null | "voidTable" | "clearCart"
+    null | "voidTable" | "clearCart" | "cobrarConComandaPendiente"
   >(null);
 
   // Cuando el cajero cambia de mesa o sale del modo mesa, reiniciamos
@@ -601,9 +632,34 @@ export function SalePage(props: SalePageProps) {
   // (Ticket.lastSentRevision), pero como SalePage no recarga el
   // ticket DRAFT entre interacciones, este state es el que decide
   // si el botón rotula "Enviar" o "Reenviar".
+  // auditoria-sirope (#25) · LA VENTA DE MOSTRADOR QUE YA TIENE BORRADOR.
+  //
+  // Una venta rápida no existe en el servidor hasta que se cobra, y por
+  // eso «Enviar» no mandaba nada a cocina. Desde este bloque, la primera
+  // vez que una venta de mostrador va a cocina se le crea su borrador
+  // (`POST /mostrador/draft`) y a partir de ahí la venta es un DRAFT como
+  // el de una mesa: mismas rutas de línea y cobro por
+  // `/tickets/:id/checkout`, que es lo que hace que cobrar CIERRE la
+  // comanda en vez de dejarla viva en la pantalla de cocina (#22).
+  //
+  // Vive aquí y no en `App` a propósito: no hay nada que la pantalla de
+  // al lado necesite saber, y subirlo obligaría a remontar `SalePage`
+  // —que es donde está el carrito— justo en mitad del gesto.
+  //
+  // Se respalda en `sessionStorage` por lo mismo que el carrito: una
+  // recarga a media mañana no puede dejar un borrador abierto en el
+  // servidor y sin dueño en la pantalla.
+  const [mostrador, setMostrador] = useState<MostradorEnCurso | null>(() =>
+    leerMostradorEnCurso(),
+  );
+  useEffect(() => {
+    guardarMostradorEnCurso(mostrador);
+  }, [mostrador]);
+
   const activeTicketId =
     props.tableContext?.activeTicketId ??
     props.appointmentContext?.activeTicketId ??
+    mostrador?.ticketId ??
     null;
   // v2-H1 §5 · al cambiar de mesa, la revisión arranca de lo que diga el
   // servidor y no de cero.
@@ -614,7 +670,23 @@ export function SalePage(props: SalePageProps) {
   // dato llega con el borrador (`initialKitchen`) y el rótulo dice la
   // verdad desde el primer pintado. El resto del efecto no cambia.
   const initialKitchenRev = props.initialKitchen?.revision ?? 0;
+  // auditoria-sirope (#25) · el borrador que NACE no es un cambio de
+  // mesa.
+  //
+  // Este efecto limpia el estado de comanda al cambiar de cuenta. Con la
+  // venta de mostrador, `activeTicketId` pasa de `null` a un id EN MITAD
+  // del propio envío —es ese envío el que crea el borrador—, así que el
+  // efecto borraba el aviso de la comanda que acababa de salir. El
+  // camarero pulsaba «Enviar», la comanda salía, y en pantalla no pasaba
+  // nada. Se vio escribiendo el test del aviso «sin destino» (#19).
+  //
+  // `null → id` es la MISMA venta estrenando borrador; sólo se limpia
+  // cuando se pasa de una cuenta a otra de verdad.
+  const ticketAnterior = useRef<string | null>(activeTicketId);
   useEffect(() => {
+    const previo = ticketAnterior.current;
+    ticketAnterior.current = activeTicketId;
+    if (previo == null && activeTicketId != null) return;
     setKitchenRevision(initialKitchenRev);
     setKitchenToast(null);
     setKitchenError(null);
@@ -637,7 +709,11 @@ export function SalePage(props: SalePageProps) {
   //                  comanda a cocina, mover línea a otra mesa.
   const isTableMode = props.tableContext != null;
   const appointmentContext = props.appointmentContext ?? null;
-  const isDraftMode = isTableMode || appointmentContext != null;
+  // auditoria-sirope (#25) · una venta de mostrador con comanda enviada
+  // es un borrador del servidor como cualquier otro: sus líneas se editan
+  // por la API y su cobro cierra ESE ticket.
+  const isDraftMode =
+    isTableMode || appointmentContext != null || mostrador != null;
   const tableContext = props.tableContext ?? null;
   const [quickLines, setQuickLines] = usePersistedCartLines("quick-sale");
   const [draftLines, setDraftLines] = useState<CartLine[]>(
@@ -708,6 +784,44 @@ export function SalePage(props: SalePageProps) {
       if (isDraftMode) void reloadDraft().catch(() => undefined);
     },
   });
+
+  // auditoria-sirope (#12) · ¿HAY A DÓNDE MANDAR?
+  //
+  // La verdad de la TIENDA la trae `GET /kitchen/estado`
+  // (`kitchen.pantallas`), que no depende de que haya mesa abierta y por
+  // eso vale también en una venta de mostrador antes de tener borrador.
+  // Sin él —un banco de pruebas, el camino apagado— se cae a los destinos
+  // del ticket, que es lo que había.
+  const hayCocina = useMemo(() => {
+    // Con el módulo encendido hay cocina, y punto: si además falta
+    // emparejar la pantalla o mapear etiquetas, eso lo cuenta el aviso
+    // «sin destino» de cada envío (#19). Esconder el botón aquí dejaría
+    // al implantador sin forma de probar el camino.
+    if (props.kitchenDisplayEnabled === true) return true;
+    // Con el módulo APAGADO queda la impresora térmica, que es el caso de
+    // La Maestranza: el envío por diferencias es un arreglo del servidor
+    // y funciona igual sin módulo. Lo dicen los destinos del ticket.
+    return hayDondeMandar(kitchen.estado.destinations);
+  }, [props.kitchenDisplayEnabled, kitchen.estado]);
+
+  // auditoria-sirope (#18) · ¿hay consumo en esta mesa?
+  //
+  // Líneas o importe, que es la misma regla que aplica el servidor. Con
+  // consumo se pregunta el motivo; sin él, la mesa se libera de un toque
+  // como siempre — abrir una mesa por error y cerrarla no es nada, y
+  // preguntar ahí llenaría el informe de ruido.
+  const hayConsumoEnLaMesa = lines.length > 0;
+
+  // auditoria-sirope (#25) · lo que la cocina todavía no tiene.
+  //
+  // Sin destino —ni pantalla ni impresora— no hay comanda que mandar, así
+  // que la lista está vacía y «Cobrar» no pregunta nada (ver #12). Lo que
+  // manda es `hayCocina` y no el módulo: una barra con térmica y sin
+  // pantalla sí tiene líneas pendientes de mandar.
+  const comandaPendiente = useMemo(
+    () => (hayCocina ? partirComanda(lines, kitchen.estado).pending : []),
+    [lines, kitchen.estado, hayCocina],
+  );
 
   // ── kds-2b · EL «−» DE UNA LÍNEA EN COCINA BAJA EL TOTAL, YA ────────
   //
@@ -888,11 +1002,21 @@ export function SalePage(props: SalePageProps) {
   // toque no duplica) y el servidor lo usa como id de la TicketLine —
   // la proyección local y la BD comparten ids.
   async function tableCreateLine(line: CartLine): Promise<void> {
-    if (!tableContext) return;
+    // auditoria-sirope (#25) · la venta de mostrador con borrador manda
+    // sus líneas al servidor como una mesa, por su propia ruta: no hay
+    // mesa a la que colgarlas. Sin esto, lo que se marcara después del
+    // primer envío viviría sólo en la pantalla — la comanda siguiente
+    // saldría sin ello y el cobro cobraría de menos.
+    const destino = tableContext
+      ? `/tables/${tableContext.id}/lines`
+      : mostrador
+        ? `/mostrador/${mostrador.ticketId}/lines`
+        : null;
+    if (!destino) return;
     try {
       const { apiWithCashier } = await import("../api.js");
       const res = await apiWithCashier<{ ticket: ServerDraft }>(
-        `/tables/${tableContext.id}/lines`,
+        destino,
         {
           method: "POST",
           body: {
@@ -979,12 +1103,16 @@ export function SalePage(props: SalePageProps) {
   }
 
   // Vaciar la mesa entera: DRAFT → VOIDED y volver al mapa.
-  async function tableVoidTicket(): Promise<void> {
+  async function tableVoidTicket(motivo?: MotivoVaciado): Promise<void> {
     if (!activeTicketId) return;
     try {
       const { apiWithCashier } = await import("../api.js");
+      // auditoria-sirope (#18) · el motivo viaja con la anulación. El
+      // servidor lo EXIGE con consumo (400 VOID_MOTIVO_REQUIRED): la
+      // hoja de aquí es la forma cómoda de contestarlo, no el guardián.
+      const conMotivo = motivo ? `&motivo=${motivo}` : "";
       await apiWithCashier(
-        `/tickets/${activeTicketId}?reason=${encodeURIComponent("Vaciada desde el TPV")}`,
+        `/tickets/${activeTicketId}?reason=${encodeURIComponent("Vaciada desde el TPV")}${conMotivo}`,
         { method: "DELETE" },
       );
       setDraftLines([]);
@@ -1298,6 +1426,14 @@ export function SalePage(props: SalePageProps) {
   // refetch de la proyección; cobro/absorción remota → expulsión al
   // mapa con aviso. Reutiliza el mismo WS ya conectado.
   const wsStatus = useStoreEventStream(storeId, (ev) => {
+    // auditoria-sirope (#20) · el super-admin tocó un módulo. Quien
+    // tiene que volver a preguntar es el bootstrap, que vive arriba del
+    // todo, así que el aviso se relanza como evento del navegador en vez
+    // de bajar un callback por cinco niveles de props.
+    if (ev.type === "tenant.settings_changed") {
+      avisarAjustesCambiados();
+      return;
+    }
     // kds-1-cocina · los avisos de cocina. No se aplican al estado local:
     // ninguno lleva la comanda dentro (ver `realtime/store-events.ts`), así
     // que lo que hacen es pedir otra vez la verdad. La banda «LISTO» la
@@ -1826,9 +1962,40 @@ export function SalePage(props: SalePageProps) {
 
   function clearCart(): void {
     dismissUndoRemove();
+    // auditoria-sirope (#25) · si la venta de mostrador ya tiene
+    // borrador en el servidor, vaciar la pantalla no basta: dejaría el
+    // DRAFT vivo, con su comanda en la cocina y su número gastado. Se
+    // anula de verdad, y el cajero se queda donde está (no hay mapa al
+    // que salir).
+    if (mostrador) {
+      void anularBorradorDeMostrador();
+      return;
+    }
     setLines([]);
     setContact(null);
     setNotes("");
+  }
+
+  async function anularBorradorDeMostrador(): Promise<void> {
+    const ticketId = mostrador?.ticketId;
+    if (!ticketId) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      await apiWithCashier(
+        `/tickets/${ticketId}?reason=${encodeURIComponent("Venta de mostrador vaciada desde el TPV")}`,
+        { method: "DELETE" },
+      );
+    } catch (err) {
+      setTableError(tableErrorMessage(err));
+      return;
+    }
+    setDraftLines([]);
+    setContact(null);
+    setNotes("");
+    // Lo que esté dentro de su ventana de 5 s sale ya: un plato no puede
+    // desaparecer de la cuenta y quedarse en la plancha.
+    kitchen.vaciarAnulaciones();
+    setMostrador(null);
   }
 
   function suspendCart(label: string): void {
@@ -1868,9 +2035,124 @@ export function SalePage(props: SalePageProps) {
   // manda la comanda por TCP a la impresora WIFI de cada sección.
   // Sustituye el flujo anterior de PDFs por pestaña (legible pero
   // requería un clic por sección).
+  /**
+   * auditoria-sirope (#25) · EL BORRADOR DE LA VENTA DE MOSTRADOR.
+   *
+   * Lo crea en el servidor con las líneas que hay en pantalla y deja el
+   * carrito apuntando a él. Devuelve el id, o `null` con el motivo ya
+   * puesto en el banner — nunca un fallo mudo.
+   */
+  async function asegurarBorradorDeMostrador(): Promise<MostradorEnCurso | null> {
+    if (mostrador) return mostrador;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      const res = await apiWithCashier<{
+        ticket: { id: string; lines: unknown[] };
+        counterNumber: number;
+      }>("/mostrador/draft", {
+        method: "POST",
+        body: {
+          lines: lines.map(lineaParaElServidor),
+          ...(notes ? { notes } : {}),
+        },
+      });
+      // El carrito pasa a ser la proyección del borrador, igual que al
+      // abrir una mesa. Las dos cosas en el mismo gesto: `isDraftMode`
+      // cambia con `mostrador`, así que `draftLines` tiene que estar ya
+      // puesto cuando cambie.
+      setDraftLines(
+        mapServerDraftLines(
+          res.ticket.lines as Parameters<typeof mapServerDraftLines>[0],
+        ),
+      );
+      setQuickLines([]);
+      const abierto: MostradorEnCurso = {
+        ticketId: res.ticket.id,
+        numero: res.counterNumber,
+      };
+      setMostrador(abierto);
+      // Se devuelve el objeto y no se lee `mostrador`: el `setState` de
+      // la línea de arriba no se ve dentro de este mismo gesto, y la
+      // comanda necesita su título AHORA.
+      return abierto;
+    } catch (err) {
+      setKitchenError({
+        kind: "failed",
+        message:
+          err instanceof ApiError && err.message
+            ? err.message
+            : "No se pudo abrir la venta en el servidor, así que la comanda no ha salido. Revisa la conexión y vuelve a intentarlo.",
+      });
+      return null;
+    }
+  }
+
+  /**
+   * auditoria-sirope (#25) · COBRAR CON PLATOS SIN MANDAR.
+   *
+   * Dos sitios, dos respuestas, y la diferencia es cómo se trabaja en
+   * cada uno:
+   *
+   *   · En el MOSTRADOR se paga primero y se prepara después. Si quedan
+   *     líneas sin enviar, salen solas al tocar «Cobrar»: preguntarlo
+   *     sería un toque de más en el gesto más repetido de la mañana.
+   *   · En una MESA se cobra al final, así que unas líneas sin enviar a
+   *     estas alturas son una de dos cosas —se le cantaron a la cocina a
+   *     viva voz, o se olvidó pulsar «Enviar»— y sólo el camarero sabe
+   *     cuál. Se pregunta.
+   *
+   * Pase lo que pase con la comanda, el cobro se abre. Cobrar siempre se
+   * puede: un fallo de cocina no puede dejar a nadie sin pagar.
+   */
+  async function abrirCobro(): Promise<void> {
+    if (comandaPendiente.length === 0) {
+      setOpenSheet({ kind: "checkout" });
+      return;
+    }
+    if (isTableMode) {
+      setConfirmAction("cobrarConComandaPendiente");
+      return;
+    }
+    await sendToKitchen();
+    setOpenSheet({ kind: "checkout" });
+  }
+
   async function sendToKitchen(): Promise<void> {
     const tableContext = props.tableContext;
-    if (!tableContext?.activeTicketId) return;
+    // auditoria-sirope (#25) · NUNCA UN BOTÓN QUE NO HACE NADA.
+    //
+    // Hasta este bloque la función empezaba con `if
+    // (!tableContext?.activeTicketId) return;`: sin mesa, el envío
+    // terminaba en seco y el botón seguía encendido. Sirope trabaja casi
+    // todo en mostrador, así que eso era «lo que se pide en la barra no
+    // llega nunca a la cocina».
+    //
+    // Ahora, sin mesa, la venta de mostrador se crea al enviar. Y lo que
+    // de verdad no se puede enviar lo dice en voz alta.
+    if (lines.length === 0) {
+      setKitchenError({
+        kind: "failed",
+        message: "No hay nada que mandar a cocina: la comanda está vacía.",
+      });
+      return;
+    }
+    if (props.kitchenDisplayEnabled !== true && !tableContext) {
+      // Sin el módulo de Cocina no hay a dónde mandar una venta de
+      // mostrador. El botón no debería ni estar (ver #12), pero si llega
+      // aquí no se queda callado.
+      setKitchenError({
+        kind: "failed",
+        message:
+          "Esta cuenta no tiene la pantalla de cocina encendida: no hay a dónde mandar la comanda.",
+      });
+      return;
+    }
+    const enMostrador = tableContext ? null : await asegurarBorradorDeMostrador();
+    const ticketId = tableContext?.activeTicketId ?? enMostrador?.ticketId ?? null;
+    if (!ticketId) return;
+    const tituloComanda =
+      tableContext?.name ??
+      (enMostrador ? etiquetaDeMostrador(enMostrador.numero) : "Mostrador");
     setKitchenBusy(true);
     setKitchenError(null);
     // kds-1-cocina · EL ID DEL ENVÍO, generado AQUÍ.
@@ -1949,9 +2231,9 @@ export function SalePage(props: SalePageProps) {
 
     const porWifi = (async () => {
       const comandas = componerComandasLan({
-        ticketId: tableContext.activeTicketId!,
-        tableId: tableContext.id,
-        tableName: tableContext.name,
+        ticketId,
+        tableId: tableContext?.id ?? null,
+        tableName: tituloComanda,
         clientSendId,
         urgent: urgentePendiente,
         estado: estadoCocinaAlDia,
@@ -1984,7 +2266,7 @@ export function SalePage(props: SalePageProps) {
           orderId?: string;
           error?: string;
         }>;
-      }>(`/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`, {
+      }>(`/tickets/${ticketId}/send-to-kitchen/escpos`, {
         method: "POST",
         body: {
           clientSendId,
@@ -2048,7 +2330,7 @@ export function SalePage(props: SalePageProps) {
           reportPrinterFailure(err, {
             operation: "kitchen",
             transport: "usb",
-            ticketId: tableContext.activeTicketId!,
+            ticketId,
           });
           setKitchenError({
             kind: "failed",
@@ -2072,11 +2354,22 @@ export function SalePage(props: SalePageProps) {
       // impresora de cocina estaba apagada, el cajero leía "Cocina: 2
       // líneas" bajo un "Comanda enviada" en verde y daba por hecho que
       // el pedido estaba en cocina.
-      const printed = res.sections.filter((s) => s.ok);
+      // auditoria-sirope (#19) · lo que NO tiene destino se cuenta
+      // aparte. `destino: "NINGUNO"` es una sección sin pantalla y sin
+      // impresora: la línea queda marcada como enviada —la cuenta tiene
+      // que poder cerrarse— pero nadie en la cocina la ha visto.
+      const sinDestino = res.sections.filter((s) => s.destino === "NINGUNO");
+      const printed = res.sections.filter(
+        (s) => s.ok && s.destino !== "NINGUNO",
+      );
       const failed = res.sections.filter((s) => !s.ok);
-      if (printed.length > 0) {
+      if (printed.length > 0 || sinDestino.length > 0) {
         setKitchenToast({
           sections: printed.map((s) => ({
+            section: s.section,
+            lineCount: s.lineCount,
+          })),
+          sinDestino: sinDestino.map((s) => ({
             section: s.section,
             lineCount: s.lineCount,
           })),
@@ -2088,7 +2381,7 @@ export function SalePage(props: SalePageProps) {
           reportPrinterFailure(new Error(f.error ?? "Error desconocido"), {
             operation: "kitchen",
             transport: "wifi",
-            ticketId: tableContext.activeTicketId,
+            ticketId,
             section: f.section,
           });
         }
@@ -2147,7 +2440,7 @@ export function SalePage(props: SalePageProps) {
           await outboxAdd({
             externalId: clientSendId,
             kind: "kitchen-send",
-            path: `/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`,
+            path: `/tickets/${ticketId}/send-to-kitchen/escpos`,
             body: {
               clientSendId,
               urgent: urgentePendiente,
@@ -2155,9 +2448,9 @@ export function SalePage(props: SalePageProps) {
               // servidor se entera tarde.
               sentAt: pulsadoEn.toISOString(),
             },
-            label: `Comanda ${tableContext.name}`,
+            label: `Comanda ${tituloComanda}`,
             total: 0,
-            tableId: tableContext.id,
+            ...(tableContext ? { tableId: tableContext.id } : {}),
             kitchenLines: unidadesDeEsteEnvio,
           });
         } catch {
@@ -2180,7 +2473,7 @@ export function SalePage(props: SalePageProps) {
       reportPrinterFailure(err, {
         operation: "kitchen",
         transport: "wifi",
-        ticketId: tableContext.activeTicketId,
+        ticketId,
       });
       setKitchenError({
         kind: "failed",
@@ -2231,6 +2524,18 @@ export function SalePage(props: SalePageProps) {
   }
 
   const totals = useMemo(() => computeCart(lines), [lines]);
+  // auditoria-sirope (#11) · el total de la venta de mostrador viaja con
+  // su id, para que el mapa de sala pueda decir cuánto hay aparcado sin
+  // abrirla. En cuanto la venta tiene borrador, sus líneas viven en el
+  // servidor y NO en el carrito persistido: sin esto el mapa no tendría
+  // de dónde sacarlo.
+  useEffect(() => {
+    setMostrador((prev) =>
+      prev == null || prev.total === totals.total
+        ? prev
+        : { ...prev, total: totals.total },
+    );
+  }, [totals.total]);
   // v1.14 §4 · el ranking del servidor cruzado con el catálogo local.
   // Los productos borrados del catálogo desde que se vendieron se caen
   // aquí: mejor tres atajos buenos que cinco con huecos.
@@ -2379,12 +2684,14 @@ export function SalePage(props: SalePageProps) {
     const out: ChromeAction[] = [
       {
         key: "menu",
+        short: "Menú",
         label: "Abrir menú",
         icon: <Menu className="w-[22px] h-[22px]" strokeWidth={2.1} />,
         onClick: () => setDrawerOpen(true),
       },
       {
         key: "search",
+        short: "Buscar",
         // MISMA etiqueta accesible que la lupa del TPV claro: es el
         // contrato que comprueba el test de N1, y dos cadenas distintas
         // para el mismo botón harían que el guardia del teclado del
@@ -2401,39 +2708,60 @@ export function SalePage(props: SalePageProps) {
     if (hasCameraSupport()) {
       out.push({
         key: "scan",
+        short: "Escanear",
         label: "Escanear con cámara",
         icon: <ScanLine className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowCameraScan(true),
       });
     }
     out.push(
-      {
-        key: "refresh",
-        label: "Refrescar catálogo",
-        icon: <RotateCw className="w-[21px] h-[21px]" strokeWidth={2.25} />,
-        spinning: refreshing,
-        onClick: () => {
-          void (async () => {
-            setRefreshing(true);
-            try {
-              const fresh = await refreshCatalog();
-              setCatalog(fresh);
-            } catch {
-              /* mantener cache */
-            } finally {
-              setRefreshing(false);
-            }
-          })();
-        },
-      },
+      // auditoria-sirope (#9) · «Recargar» SALE de la barra de la
+      // comanda oscura.
+      //
+      // Los rótulos bajo el icono cuestan ancho, y con siete botones la
+      // barra pasaba a dos filas: 70 px que la comanda necesita para
+      // sus líneas (#8). El bloque dice qué hacer cuando no caben —«se
+      // queda lo que se usa y el resto va a Más»—, y el que sobra es
+      // éste: «Sincronizar catálogo» ya está en el menú lateral, a un
+      // toque, y es lo que se usa una vez al día. Los demás no tienen
+      // otra puerta.
+      //
+      // En el TPV claro la barra no cambia: ahí los iconos no llevan
+      // rótulo y caben de sobra.
+      ...(isHospitality
+        ? []
+        : [
+            {
+              key: "refresh",
+              short: "Recargar",
+              label: "Refrescar catálogo",
+              icon: <RotateCw className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+              spinning: refreshing,
+              onClick: () => {
+                void (async () => {
+                  setRefreshing(true);
+                  try {
+                    const fresh = await refreshCatalog();
+                    setCatalog(fresh);
+                  } catch {
+                    /* mantener cache */
+                  } finally {
+                    setRefreshing(false);
+                  }
+                })();
+              },
+            } satisfies ChromeAction,
+          ]),
       {
         key: "tickets",
+        short: "Tickets",
         label: "Tickets pasados",
         icon: <ReceiptText className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowHistory(true),
       },
       {
         key: "more",
+        short: "Más",
         label: "Más acciones del ticket",
         icon: <Ellipsis className="w-[22px] h-[22px]" strokeWidth={2.25} />,
         onClick: () => setOpenSheet({ kind: "ticketActions" }),
@@ -2442,6 +2770,7 @@ export function SalePage(props: SalePageProps) {
     if (creditSalesEnabled) {
       out.push({
         key: "debts",
+        short: "Deudas",
         label: "Deudas (fiado)",
         icon: <FileText className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowDebts(true),
@@ -2450,6 +2779,7 @@ export function SalePage(props: SalePageProps) {
     if (crmEnabled) {
       out.push({
         key: "clients",
+        short: "Clientes",
         label: "Clientes",
         icon: <Users className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => setShowClients(true),
@@ -2458,6 +2788,7 @@ export function SalePage(props: SalePageProps) {
     if (agendaEnabled) {
       out.push({
         key: "agenda",
+        short: "Agenda",
         label: "Agenda",
         icon: <CalendarDays className="w-[21px] h-[21px]" strokeWidth={2.25} />,
         onClick: () => props.onOpenAgenda?.(),
@@ -2471,12 +2802,14 @@ export function SalePage(props: SalePageProps) {
       out.push(
         {
           key: "suspended",
+        short: "Guardar",
           label: "Ventas pendientes",
           icon: <Bookmark className="w-[21px] h-[21px]" strokeWidth={2.25} />,
           onClick: () => setOpenSheet({ kind: "suspended" }),
         },
         {
           key: "new",
+        short: "Nueva",
           label: "Nueva venta",
           icon: <Plus className="w-[22px] h-[22px]" strokeWidth={2.25} />,
           onClick: clearCart,
@@ -2710,6 +3043,10 @@ export function SalePage(props: SalePageProps) {
               ahora={ahoraProducts}
               kitchen={{
                 enabled: props.kitchenDisplayEnabled === true,
+                // auditoria-sirope (#12) · sin pantalla ni impresora no
+                // hay comanda que mandar, y el TPV deja de hablar de
+                // cocina: ni «Enviar», ni «EN COCINA», ni «SIN ENVIAR».
+                hayDondeMandar: hayCocina,
                 estado: estadoCocina,
                 courseMode: props.kitchenSettings?.courseMode ?? "ESPERA",
                 seatMode: props.kitchenSettings?.seatMode ?? "ALERGIA",
@@ -2752,7 +3089,7 @@ export function SalePage(props: SalePageProps) {
               onClickLine={(line) => setOpenSheet({ kind: "line", line })}
               onUpdateLineUnits={(id, units) => updateLine(id, { units })}
               onRemoveLine={removeLine}
-              onClickCheckout={() => setOpenSheet({ kind: "checkout" })}
+              onClickCheckout={() => void abrirCobro()}
               onSendToKitchen={() => void sendToKitchen()}
               kitchenBusy={kitchenBusy}
               kitchenLastRevision={kitchenRevision}
@@ -3020,7 +3357,7 @@ export function SalePage(props: SalePageProps) {
             onClickDiscountGlobal={() => setOpenSheet({ kind: "discountGlobal" })}
             onClickNotes={() => setOpenSheet({ kind: "notes" })}
             onClickContact={() => setOpenSheet({ kind: "contact" })}
-            onClickCheckout={() => setOpenSheet({ kind: "checkout" })}
+            onClickCheckout={() => void abrirCobro()}
             onSuspend={() => suspendCart("")}
             onCancel={() => {
               if (isTableMode) {
@@ -3049,6 +3386,7 @@ export function SalePage(props: SalePageProps) {
             onSendToKitchen={() => void sendToKitchen()}
             kitchenBusy={kitchenBusy}
             kitchenLastRevision={kitchenRevision}
+            puedeEnviarComanda={hayCocina && comandaPendiente.length > 0}
             onClickMoveTable={() => setShowMoveTable(true)}
             onClickSplitBill={() => setShowSplitBill(true)}
             hasGroupedTables={hasGroupedTables}
@@ -3096,12 +3434,30 @@ export function SalePage(props: SalePageProps) {
 
       {/* v1.12 · acciones destructivas con hoja propia. Los dos botones
           llevan verbos distintos: en barra no se lee dos veces. */}
-      {confirmAction === "voidTable" && (
+      {/* auditoria-sirope (#18) · CON CONSUMO SE PREGUNTA POR QUÉ.
+          Vaciar una mesa con platos dentro es comida que salió de la
+          cocina y no se cobró: una invitación, un error de comanda y
+          alguien que se fue sin pagar se gestionan de tres maneras
+          distintas, y hasta hoy las tres dejaban el mismo rastro, que
+          era ninguno. Lo vacío sigue sin preguntar: abrir una mesa por
+          error y cerrarla no es nada. */}
+      {confirmAction === "voidTable" && hayConsumoEnLaMesa && (
+        <MotivoVaciadoSheet
+          tableName={props.tableContext?.name ?? "la mesa"}
+          total={formatEur(totals.total)}
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={(motivo) => {
+            setConfirmAction(null);
+            void tableVoidTicket(motivo);
+          }}
+        />
+      )}
+      {confirmAction === "voidTable" && !hayConsumoEnLaMesa && (
         <ConfirmSheet
           title="Vaciar mesa"
           body={`Se cancela la cuenta de ${
             props.tableContext?.name ?? "la mesa"
-          } y la mesa queda libre para las demás cajas. Lo consumido no se cobra.`}
+          } y la mesa queda libre para las demás cajas.`}
           confirmLabel="Vaciar mesa"
           cancelLabel="Volver"
           onCancel={() => setConfirmAction(null)}
@@ -3111,12 +3467,35 @@ export function SalePage(props: SalePageProps) {
           }}
         />
       )}
+      {confirmAction === "cobrarConComandaPendiente" && (
+        <ConfirmSheet
+          title="Hay platos sin mandar a cocina"
+          body={`${comandaPendiente.length === 1 ? "Queda 1 línea" : `Quedan ${comandaPendiente.length} líneas`} que la cocina todavía no tiene. ¿Se mandan antes de cobrar?`}
+          confirmLabel="Enviar y cobrar"
+          cancelLabel="Volver"
+          altLabel="Cobrar sin enviar"
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            setConfirmAction(null);
+            void sendToKitchen().then(() =>
+              setOpenSheet({ kind: "checkout" }),
+            );
+          }}
+          onAlt={() => {
+            setConfirmAction(null);
+            setOpenSheet({ kind: "checkout" });
+          }}
+        />
+      )}
+      {/* auditoria-sirope (#10) · la confirmación habla de VACIAR, como
+          el botón que la abre: dos verbos para la misma acción es lo que
+          hace dudar en el único momento en que no se puede dudar. */}
       {confirmAction === "clearCart" && (
         <ConfirmSheet
           title={
             businessType === "SERVICES"
-              ? "Cancelar el servicio"
-              : "Cancelar la venta"
+              ? "Vaciar el servicio"
+              : "Vaciar la venta"
           }
           body={
             businessType === "SERVICES"
@@ -3125,8 +3504,8 @@ export function SalePage(props: SalePageProps) {
           }
           confirmLabel={
             businessType === "SERVICES"
-              ? "Cancelar el servicio"
-              : "Cancelar la venta"
+              ? "Vaciar el servicio"
+              : "Vaciar la venta"
           }
           cancelLabel={
             businessType === "SERVICES"
@@ -3298,7 +3677,13 @@ export function SalePage(props: SalePageProps) {
           // tránsito sin red.
           draftTicketId={isDraftMode ? activeTicketId : null}
           draftLabel={
-            isTableMode ? "Mesa" : appointmentContext ? "Cita" : undefined
+            isTableMode
+              ? "Mesa"
+              : appointmentContext
+                ? "Cita"
+                : mostrador
+                  ? etiquetaDeMostrador(mostrador.numero)
+                  : undefined
           }
           doneLabel={appointmentContext ? "Volver a la agenda" : undefined}
           onPaid={
@@ -3373,6 +3758,19 @@ export function SalePage(props: SalePageProps) {
           onRequestAssignContact={() => setOpenSheet({ kind: "contact" })}
           onClose={() => setOpenSheet(null)}
           onConfirmed={() => {
+            // auditoria-sirope (#25) · la venta de mostrador cobrada no
+            // sale a ningún sitio: el cajero sigue en la caja y el
+            // siguiente cliente ya está delante. Lo que se va es el
+            // borrador, que acaba de cerrarse.
+            if (mostrador) {
+              setDraftLines([]);
+              setContact(null);
+              setNotes("");
+              setMostrador(null);
+              kitchen.vaciarAnulaciones();
+              setOpenSheet(null);
+              return;
+            }
             if (isDraftMode) {
               // El borrador quedó cobrado (o el cobro en tránsito en el
               // outbox): proyección local fuera y salida al sitio del
@@ -3484,6 +3882,7 @@ export function SalePage(props: SalePageProps) {
       {kitchenToast && (
         <KitchenToast
           sections={kitchenToast.sections}
+          sinDestino={kitchenToast.sinDestino ?? []}
           revision={kitchenToast.revision}
           porWifi={kitchenToast.porWifi === true}
           onClose={() => setKitchenToast(null)}
@@ -4149,6 +4548,7 @@ function SaleWorkspace({
   onSendToKitchen,
   kitchenBusy,
   kitchenLastRevision,
+  puedeEnviarComanda,
   onClickMoveTable,
   onClickSplitBill,
   hasGroupedTables,
@@ -4216,6 +4616,16 @@ function SaleWorkspace({
   onSendToKitchen: () => void;
   kitchenBusy: boolean;
   kitchenLastRevision: number;
+  /**
+   * auditoria-sirope (#12) · ¿se puede enviar AHORA?
+   *
+   * `false` cuando no hay a dónde (ni pantalla ni impresora) o cuando no
+   * hay nada nuevo que mandar. En los dos casos el botón no se pinta:
+   * con Cocina apagada el TPV no habla de cocina, y «Reenviar» sin nada
+   * nuevo gasta número de comanda y pinta una tarjeta vacía en la
+   * pantalla del cocinero.
+   */
+  puedeEnviarComanda?: boolean;
   // v1.4-Bar-Operativa-MVP Lote 3 · abre el picker de mesa destino.
   // Sólo se invoca cuando hay tableContext.
   onClickMoveTable: () => void;
@@ -4460,6 +4870,7 @@ function SaleWorkspace({
     onSendToKitchen,
     kitchenBusy,
     kitchenLastRevision,
+    puedeEnviarComanda,
     onClickMoveTable,
     onClickSplitBill,
     hasGroupedTables,
@@ -4808,7 +5219,10 @@ function SaleWorkspace({
         className="lg:hidden fixed inset-x-0 z-40 bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2"
         style={{ bottom: "var(--keyboard-offset, 0px)" }}
       >
-        {tableContext && (
+        {/* auditoria-sirope (#12) · sin pantalla ni impresora no hay
+            comanda que mandar, y «Reenviar» sin nada nuevo tampoco: en
+            los dos casos el botón no se pinta. */}
+        {tableContext && puedeEnviarComanda !== false && (
           <button
             type="button"
             onClick={onSendToKitchen}
@@ -4948,6 +5362,16 @@ interface TicketPanelProps {
   onSendToKitchen: () => void;
   kitchenBusy: boolean;
   kitchenLastRevision: number;
+  /**
+   * auditoria-sirope (#12) · ¿se puede enviar AHORA?
+   *
+   * `false` cuando no hay a dónde (ni pantalla ni impresora) o cuando no
+   * hay nada nuevo que mandar. En los dos casos el botón no se pinta:
+   * con Cocina apagada el TPV no habla de cocina, y «Reenviar» sin nada
+   * nuevo gasta número de comanda y pinta una tarjeta vacía en la
+   * pantalla del cocinero.
+   */
+  puedeEnviarComanda?: boolean;
   onClickMoveTable: () => void;
   onClickSplitBill: () => void;
   hasGroupedTables: boolean;
@@ -5027,6 +5451,7 @@ function TicketPanel({
   onSendToKitchen,
   kitchenBusy,
   kitchenLastRevision,
+  puedeEnviarComanda,
   onClickMoveTable,
   onClickSplitBill,
   hasGroupedTables,
@@ -5345,7 +5770,9 @@ function TicketPanel({
         {/* v1.4-Bar-Operativa-MVP Lote 2 · "Enviar comanda" sólo en mesa.
             Primer envío rotula como acción primaria; reenvíos quedan
             discretos (ya hay un papel en la cocina). */}
-        {tableContext && (
+        {/* auditoria-sirope (#12) · ídem: sin destino, o sin nada nuevo
+            que mandar, el botón no está. */}
+        {tableContext && puedeEnviarComanda !== false && (
           <button
             onClick={onSendToKitchen}
             disabled={lines.length === 0 || kitchenBusy}
@@ -5821,11 +6248,14 @@ const SECTION_LABEL_ES: Record<string, string> = {
 
 function KitchenToast({
   sections,
+  sinDestino = [],
   revision,
   porWifi,
   onClose,
 }: {
   sections: Array<{ section: string; lineCount: number }>;
+  /** auditoria-sirope (#19) · secciones sin pantalla ni impresora. */
+  sinDestino?: Array<{ section: string; lineCount: number }>;
   revision: number;
   porWifi?: boolean;
   onClose: () => void;
@@ -5836,10 +6266,22 @@ function KitchenToast({
     const t = setTimeout(onClose, 5_000);
     return () => clearTimeout(t);
   }, [onClose]);
+  // auditoria-sirope (#19) · si NADA tuvo destino, el aviso no es verde
+  // y no dice «enviada»: no hay nadie al otro lado.
+  const nadaLlego = sections.length === 0 && sinDestino.length > 0;
   return (
-    <div className="fixed top-5 right-5 z-50 bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm">
+    <div
+      data-testid="comanda-toast"
+      className={
+        nadaLlego
+          ? "fixed top-5 right-5 z-50 bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm"
+          : "fixed top-5 right-5 z-50 bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm"
+      }
+    >
       <div className="text-[13.5px] font-semibold mb-1">
-        Comanda nº {revision} enviada
+        {nadaLlego
+          ? `Comanda nº ${revision}: sin destino`
+          : `Comanda nº ${revision} enviada`}
       </div>
       {/* kds-2-wifi · sin internet se dice POR DÓNDE salió. El camarero
           tiene que saber que la cocina la tiene y que la caja la subirá
@@ -5861,6 +6303,22 @@ function KitchenToast({
           </div>
         ))}
       </div>
+      {sinDestino.length > 0 && (
+        <div
+          data-testid="comanda-sin-destino"
+          className="text-[12.5px] mt-1.5 font-medium"
+        >
+          {sinDestino.reduce((a, s) => a + s.lineCount, 0)}{" "}
+          {sinDestino.reduce((a, s) => a + s.lineCount, 0) === 1
+            ? "línea sin destino"
+            : "líneas sin destino"}
+          :{" "}
+          {sinDestino
+            .map((s) => SECTION_LABEL_ES[s.section] ?? s.section)
+            .join(", ")}
+          . Nadie las ha visto en cocina.
+        </div>
+      )}
     </div>
   );
 }

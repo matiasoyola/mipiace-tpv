@@ -91,6 +91,7 @@ import {
 } from "@mipiacetpv/ticket-model";
 
 import { getPrisma } from "../context.js";
+import { tituloDeComanda } from "./titulo.js";
 import { cashierLabelFrom } from "../users/display.js";
 import {
   construirDestinos,
@@ -248,6 +249,9 @@ export async function enviarComanda(
       diners: true,
       notes: true,
       lastSentRevision: true,
+      // auditoria-sirope (#25) · el título de la tarjeta cuando no hay
+      // mesa: «Mostrador nº 3».
+      counterNumber: true,
       table: { select: { id: true, name: true } },
       register: { select: { storeId: true } },
       lines: {
@@ -504,7 +508,7 @@ export async function enviarComanda(
         timeoutMs: printer.timeoutMs,
         payload: buildKitchenComanda({
           section: sec,
-          tableName: ticket.table?.name ?? null,
+          tableName: tituloDeComanda(ticket),
           revision,
           issuedAt,
           cashierLabel,
@@ -560,7 +564,7 @@ export async function enviarComanda(
             ticketId: ticket.id,
             storeId,
             tableId: ticket.tableId,
-            tableName: ticket.table?.name ?? null,
+            tableName: tituloDeComanda(ticket),
             section: sec,
             number: revision,
             urgent,
@@ -679,7 +683,7 @@ export async function enviarComanda(
       section: e.section,
       ticketId: ticket.id,
       tableId: ticket.tableId,
-      tableName: ticket.table?.name ?? null,
+      tableName: tituloDeComanda(ticket),
       number: revision,
       urgent,
       at: issuedAt,

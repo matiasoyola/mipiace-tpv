@@ -63,6 +63,10 @@ export function KitchenSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // auditoria-sirope (#19) · cuántas etiquetas del catálogo no tienen
+  // sección. Con Cocina encendida eso NO es un detalle de configuración:
+  // sus platos van a Salón en silencio y la cocina no los ve.
+  const [etiquetasSinSeccion, setEtiquetasSinSeccion] = useState<number>(0);
 
   const canEdit =
     (role === "OWNER" || role === "MANAGER") && readEffectiveAuth().canEdit;
@@ -90,6 +94,17 @@ export function KitchenSection({
       .catch(() => {
         // Sin pantallas o sin permiso: la lista no aparece. No se inventa
         // un «0 pantallas» que podría ser mentira.
+      });
+    // auditoria-sirope (#19) · el aviso de las etiquetas sin sección va
+    // donde se enciende Cocina. El 18-10 se encendió sin mapa y la
+    // primera comanda de la T6 se perdió sin que nadie viera un aviso.
+    api<{ sinSeccion: number }>("/admin/tag-sections/etiquetas")
+      .then((res) => {
+        if (!cancelado) setEtiquetasSinSeccion(res.sinSeccion);
+      })
+      .catch(() => {
+        // Sin permiso o sin catálogo: no se inventa un «0 sin sección»,
+        // que es justo la mentira tranquilizadora que hay que evitar.
       });
     return () => {
       cancelado = true;
@@ -143,6 +158,23 @@ export function KitchenSection({
 
       {success && <SuccessBanner message={success} />}
       <FieldError message={error} />
+
+      {/* auditoria-sirope (#19) · Cocina encendida con etiquetas sin
+          sección: sus platos van a Salón y nadie los ve en la pantalla. */}
+      {etiquetasSinSeccion > 0 && (
+        <div
+          data-testid="aviso-etiquetas-sin-seccion"
+          className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900"
+        >
+          <strong>
+            {etiquetasSinSeccion === 1
+              ? "1 etiqueta del catálogo no tiene sección"
+              : `${etiquetasSinSeccion} etiquetas del catálogo no tienen sección`}
+          </strong>
+          . Sus platos van a Salón: no aparecen en esta pantalla ni salen
+          por su impresora. Se asignan en <em>Comanderas</em>.
+        </div>
+      )}
 
       {/* ── El semáforo ──────────────────────────────────────────────── */}
       <h3 className="text-[14px] font-semibold text-mipiace-ink mt-1 mb-1">
