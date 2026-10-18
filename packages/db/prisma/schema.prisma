@@ -1012,10 +1012,15 @@ model Tenant {
   facturaDesde                   DateTime?         @map("fiscal_go_live_at") @db.Timestamptz()
   // puesta-en-marcha (ADR-021) · ¿es una cuenta NUESTRA de pruebas?
   //
-  // PRUEBAS MIPIACE y la cuenta de ensayo de La Maestranza no son clientes:
-  // son el banco de pruebas del equipo. Una cuenta así NO PUEDE arrancar
-  // (se queda en ensayo para siempre) y se resetea cuantas veces haga
-  // falta, que es justo lo que no se podía hacer antes de este bloque.
+  // PRUEBAS MIPIACE no es un cliente: es el banco de pruebas del equipo. Una
+  // cuenta así NO PUEDE arrancar (se queda en ensayo para siempre) y se
+  // resetea cuantas veces haga falta, que es justo lo que no se podía hacer
+  // antes de este bloque.
+  //
+  // La cuenta de ensayo de La Maestranza estuvo en esta lista hasta el 18-10
+  // y salió: tiene 11 registros fiscales, o sea que llegó a emitir. Una
+  // cuenta que ha facturado no es una cuenta de pruebas por mucho que la
+  // llamemos así — y el CHECK de abajo lo dice antes que nosotros.
   //
   // Su invariante vive en la BASE (`tenants_pruebas_no_facturan_ck`): una
   // cuenta de pruebas no puede tener fecha de arranque. No se puede estar
