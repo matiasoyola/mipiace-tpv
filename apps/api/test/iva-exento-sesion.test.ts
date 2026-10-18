@@ -143,6 +143,8 @@ function apptWith(serviceIds: string[]): AppointmentView {
     source: "PRESENCIAL",
     start: "2026-10-07T08:00:00.000Z",
     end: "2026-10-07T08:30:00.000Z",
+    // B-reservas-8 · cita sin bono: este banco es del IVA exento.
+    voucherId: null,
     ticketId: null,
     notes: null,
     items: serviceIds.map((serviceId, i) => ({

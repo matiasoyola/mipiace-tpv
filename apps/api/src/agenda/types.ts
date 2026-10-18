@@ -148,6 +148,11 @@ export interface AppointmentView {
   start: string; // ISO UTC
   end: string; // ISO UTC
   ticketId: string | null;
+  // B-reservas-8 · el bono con una sesión APARTADA para esta cita, o `null`
+  // en una cita normal. La rejilla lo usa para el distintivo sobrio (punto
+  // + «B») y el cobro para saber qué consumir. **Nunca lleva importes**: lo
+  // que viaja es el id, y los euros los añade quien tenga derecho a verlos.
+  voucherId: string | null;
   notes: string | null;
   items: Array<{
     id: string;
