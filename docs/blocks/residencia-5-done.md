@@ -859,3 +859,50 @@ test(residencia-5): las pantallas del panel, del relevo y de la sala
 fix(residencia): lo que encontró el bucle visual · el pliegue, el aterrizaje y el día de dos caídas
 docs(residencia): el done del bloque residencia-5
 ```
+
+---
+
+## 21 · Integración con master
+
+Master traía dos verticales ajenas: **bonos** (PR #32) y **auditoria-sirope** (PR #33). Se integró con
+`git merge origin/master` —sin rebase— y lo de master entró entero, sin tocarle el comportamiento.
+
+**Chocaron dos ficheros, los dos de sitio y no de fondo:**
+
+1. **`packages/db/prisma/schema.prisma`**, las relaciones de `Client`. El conflicto era de
+   **alineación**: este bloque ensanchó la columna de nombres al añadir `handoverLateAdditions`, y
+   master añadía `vouchers` y `tickets` a la anchura vieja. Se quedan las cinco relaciones con sus
+   comentarios, a la columna ancha. Ninguna regla de borrado cambia: `vouchers` y `tickets` conservan
+   el `Restrict` y el `SetNull` que les puso bonos.
+2. **`apps/admin/src/AdminShell.tsx`**, la barra lateral. Las dos ramas metían entradas de menú en el
+   mismo punto. Se quedan las tres de este bloque (Relevos, Obligaciones, Indicadores) pegadas al
+   grupo de residencia, y **Bonos después, donde master lo tenía**: justo antes de Etiquetas.
+
+**Lo que NO chocó, y se comprobó que no se pisa:** las migraciones de este bloque son `20261019*` y
+van detrás de las cuatro de master (`20261018*`), así que el orden de aplicación es el mismo que en
+master y bonos se aplica primero. Triggers, funciones y tablas alteradas son disjuntos entre las dos
+verticales, y el único enum compartido (`DeviceKind`) lo amplían valores distintos (`HANDOVER` aquí,
+nada allí).
+
+**Sobre el merge, en verde:** cliente de Prisma regenerado; las migraciones aplicadas **desde cero
+sobre base limpia**; **sin deriva nueva** entre schema y migraciones —el residuo que deja
+`prisma migrate diff` es *exactamente* el que ya traían los dos padres por separado (nombres de
+constraint e índice, y defaults de DB que Prisma modela en la app): ni una tabla, columna, tipo o
+nulabilidad distinta—; `tsc` en api, admin, tpv-web y los seis paquetes; la suite unitaria (6001 en
+416 ficheros); y el e2e completo (1052 en 47 ficheros) contra Postgres de verdad, con el `.env` de la
+raíz apartado y `REDIS_URL` a un puerto muerto, como la CI.
+
+**Un rojo del e2e, y no era del merge.** `residencia-3.e2e.ts` tiene un caso —«el PIN NO SALE de la
+API»— que busca el PIN **en crudo** en el cuerpo del arranque de la puerta. Ese cuerpo va lleno de
+valores de alta entropía (una cuarentena de UUID, la huella HMAC de cada PIN, la subclave en base64),
+y **los dígitos 0-9 son también dígitos hex**: `4071` salía dentro de un UUID cualquiera
+(`ec1b1898-48b4-4071-a30b-a19901f758d1`) una pasada de cada tantas, y el caso se ponía rojo sin que se
+hubiera filtrado nada. Estaba igual en master desde residencia-3. Arreglado del lado de residencia-5:
+`PIN_ANA`/`PIN_ROSA` pasan de cuatro cifras a **ocho** —la ruta acepta `^[0-9]{4,8}$`—, con lo que la
+coincidencia por azar desaparece y la aserción sigue siendo la misma. Misma idea que `CANARIO_NOTA`:
+si un canario tiene que no aparecer en un volcado, que sea inconfundible.
+
+```
+Merge master (bonos #32, auditoria-sirope #33) en residencia-5
+docs(residencia): la integración con master en el done
+```
