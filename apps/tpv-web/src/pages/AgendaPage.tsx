@@ -1098,6 +1098,17 @@ export function AgendaPage({
               start: null,
             })
           }
+          // n1-vertical · por debajo de `sm` (640 px) el rótulo está
+          // `hidden`, así que el botón se queda SIN NOMBRE: un «+» pelado.
+          // En el N1 en vertical (360 px) es el botón más importante de
+          // la agenda y no lo nombraba nada — ni para quien usa lector de
+          // pantalla ni para el banco, que no podía ni encontrarlo.
+          //
+          // `aria-label` y NO `title`: en la agenda los tooltips están
+          // prohibidos (ux-principles §6, y hay un banco que lo vigila —
+          // `agenda-mostrador.test.tsx`). Un nombre accesible no es un
+          // tooltip: no se pinta, no tapa nada y no esconde un motivo.
+          aria-label="Nueva cita"
           className="h-11 px-4 shrink-0 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium flex items-center gap-2"
         >
           <Plus className="w-[18px] h-[18px]" strokeWidth={2.25} />
