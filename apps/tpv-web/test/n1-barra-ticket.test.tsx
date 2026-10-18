@@ -139,6 +139,34 @@ let container: HTMLDivElement;
 let root: Root;
 let vv: ViewportFalso;
 
+/**
+ * n1-vertical · `ResizeObserver` de pega que declara UN ancho para la
+ * fila de chips.
+ *
+ * jsdom no lo trae, y sin él la pantalla de venta se queda con el ancho
+ * por defecto (el del terminal, 840 px), así que el reparto de chips no
+ * se puede probar en estrecho. Éste llama al observador una vez con el
+ * ancho que se le diga, que es lo que hace el navegador al montar.
+ */
+function declaraAnchoDeFila(ancho: number): void {
+  class ObservadorFalso {
+    constructor(private cb: ResizeObserverCallback) {}
+    observe(el: Element) {
+      this.cb(
+        [{ target: el, contentRect: { width: ancho } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    configurable: true,
+    value: ObservadorFalso,
+  });
+}
+
 /** El N1 en vertical: 360×648 CSS px. */
 function declaraPantallaDelN1(): void {
   Object.defineProperty(window, "innerHeight", {
@@ -263,6 +291,44 @@ describe("n1-vertical · la barra del ticket y la Agenda", () => {
     declaraHandheld();
     await renderSale();
     expect(barraHandheld()).not.toBeNull();
+  });
+});
+
+describe("n1-vertical · las familias se alcanzan en un aparato de mano", () => {
+  const fila = () =>
+    container.querySelector<HTMLElement>('[data-testid="category-chips"]')!;
+
+  it("en el N1 (fila de 328 px) la fila envuelve a dos líneas", async () => {
+    // Con una sola fila, los chips fijos más «Más (N)» suman 437 px y el
+    // chip que abre el resto quedaba cortado por `overflow-hidden`, sin
+    // forma de tocarlo: las ocho familias, inalcanzables.
+    declaraAnchoDeFila(328);
+    await renderSale();
+    expect(fila().className).toContain("flex-wrap");
+    // Y NO puede recortar, que es lo que escondía el chip.
+    expect(fila().className).not.toContain("overflow-hidden");
+    expect(fila().className).not.toContain("flex-nowrap");
+  });
+
+  it("en el terminal (840 px) sigue siendo UNA fila que recorta", async () => {
+    // La restricción del bloque: el AP11 se ve idéntico a antes.
+    declaraAnchoDeFila(840);
+    await renderSale();
+    expect(fila().className).toContain("flex-nowrap");
+    expect(fila().className).toContain("overflow-hidden");
+    expect(fila().className).not.toContain("flex-wrap");
+  });
+
+  it("sin medida (primer render) se defiende el reparto del terminal", async () => {
+    // jsdom sin `ResizeObserver`: el ancho se queda a 0 y el reparto cae
+    // al del viewport de diseño.
+    Object.defineProperty(window, "ResizeObserver", {
+      writable: true,
+      configurable: true,
+      value: undefined,
+    });
+    await renderSale();
+    expect(fila().className).toContain("flex-nowrap");
   });
 });
 

@@ -128,7 +128,7 @@ import {
   type CategoryIconName,
   type CategoryTone,
 } from "../lib/categoryTones.js";
-import { layoutChips } from "../lib/chipRows.js";
+import { filasDeChips, layoutChips } from "../lib/chipRows.js";
 import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import { isTouchDevice } from "../lib/touchDevice.js";
 import { SaleSearchInput } from "../components/SaleSearchInput.js";
@@ -4299,6 +4299,10 @@ function SaleWorkspace({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // n1-vertical · cuántas filas admite el ancho que hay de verdad. Con
+  // `chipRowWidth` a 0 (primer render, jsdom) sale 1, que es el reparto
+  // del terminal: sin medida se defiende el viewport de diseño.
+  const chipFilas = useMemo(() => filasDeChips(chipRowWidth), [chipRowWidth]);
   const chipLayout = useMemo(
     () =>
       layoutChips(
@@ -4478,10 +4482,23 @@ function SaleWorkspace({
             cabe en 843. Y de paso el bloque de chips deja de costar sus
             72 px de alto, que son los que convierten cuatro filas de
             producto en cinco. */}
+        {/* n1-vertical · EN ESTRECHO LA FILA ENVUELVE A DOS LÍNEAS.
+            En el N1 (fila de 328 px) los chips fijos más el «Más (N)»
+            suman 437: con una sola fila y `overflow-hidden` —que es lo
+            que pide `ux-principles` §1.8 para no deslizar en táctil— el
+            chip que abre el resto de familias quedaba cortado y SIN
+            forma de llegar a él. Con dos filas se ve que hay más y se
+            puede tocar.
+            El umbral y el reparto viven en `chipRows.ts` y son una
+            función pura del ancho: en el AP11 (840 px de columna) esto
+            sigue siendo UNA fila, `flex-nowrap` y `overflow-hidden`,
+            byte por byte lo de v1.14.1. */}
         <div
           ref={chipRowRef}
           data-testid="category-chips"
-          className="lg:hidden flex flex-nowrap items-center gap-2 mb-4 md:mb-6 shrink-0 overflow-hidden"
+          className={`lg:hidden flex items-center gap-2 mb-4 md:mb-6 shrink-0 ${
+            chipFilas > 1 ? "flex-wrap" : "flex-nowrap overflow-hidden"
+          }`}
         >
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
