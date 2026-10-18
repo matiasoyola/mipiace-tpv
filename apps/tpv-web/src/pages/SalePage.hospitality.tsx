@@ -114,6 +114,7 @@ import {
   type AnulacionPendiente,
 } from "../kitchen/tpv/DeshacerToast.js";
 import { ListoBanner, type AvisoListo } from "../kitchen/tpv/ListoBanner.js";
+import { useAparatoDeMano } from "../hooks/useAparatoDeMano.js";
 import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 
 /**
@@ -126,43 +127,6 @@ import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
  * línea, que no tiene techo.
  */
 export const QUANTITIES = [1, 2, 3, 4, 5, 6] as const;
-
-/**
- * ¿Estamos en handheld (< `sm`)?
- *
- * Hace falta en JS y no sólo en CSS porque el número de columnas de la
- * barra de familias y de la cuadrícula entra por `grid-template-columns`
- * calculado: el JIT de Tailwind no compila `grid-cols-${n}` y el reparto
- * de la cuadrícula es dinámico por definición (depende de cuántos
- * productos tenga la familia).
- *
- * Con `matchMedia` y su listener, no con `window.innerWidth` leído en el
- * render: leído en el render, girar la tablet o abrir el teclado del
- * sistema no vuelve a pintar y la rejilla se queda con las columnas del
- * tamaño anterior. `ux-principles` §3.6 pide justamente que la pantalla
- * se reorganice sola al cambiar de orientación.
- *
- * `matchMedia` puede no existir (jsdom sin stub): ahí se asume terminal,
- * que es el caso para el que están medidos los números.
- */
-function useIsHandheld(): boolean {
-  const [handheld, setHandheld] = useState(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return false;
-    return window.matchMedia("(max-width: 639px)").matches;
-  });
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(max-width: 639px)");
-    const onChange = (e: MediaQueryListEvent) => setHandheld(e.matches);
-    setHandheld(mq.matches);
-    // `addEventListener` sobre MediaQueryList existe desde Chrome 39, así
-    // que el WebView 101 del D8 lo tiene de sobra; el `addListener`
-    // legacy no hace falta.
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  return handheld;
-}
 
 /** Una acción de la barra de chrome que vive dentro de la comanda. */
 export interface ChromeAction {
@@ -317,7 +281,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // efecto: con un efecto habría un primer pintado con otra vista y la
   // pantalla parpadearía al entrar en cada mesa.
   const [view, setView] = useState<View>({ kind: "ahora" });
-  const handheld = useIsHandheld();
+  const handheld = useAparatoDeMano();
   // Handheld: la comanda vive en un bottom-sheet. Cerrarlo no toca nada
   // —las líneas viven en `SalePage`—, así que es sólo abierto/cerrado.
   const [sheetOpen, setSheetOpen] = useState(false);
