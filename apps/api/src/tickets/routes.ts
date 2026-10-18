@@ -29,6 +29,10 @@ import {
   FISCAL_RECORD_BODY_SCHEMA,
   type FiscalRecordBody,
 } from "../fiscal/payload.js";
+import {
+  avisarComandasServidas,
+  servirComandasListas,
+} from "../kitchen/servir.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { emitTicketPaid, emitTicketRefunded } from "../realtime/emit-helpers.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
@@ -1418,10 +1422,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               body: body.fiscalRecord,
             });
           }
+          // auditoria-sirope (#22) · lo que estaba LISTO pasa a servido.
+          // La mesa se ha ido: dejar la comanda viva deja la etiqueta
+          // LISTO en el mapa, la tarjeta esperando en el AP11 y la banda
+          // «T6 · listo para servir» encima de las ventas siguientes.
+          const servidas = await servirComandasListas(tx, {
+            ticketId: draft.id,
+            byUserId: cashier.sub,
+            now: new Date(),
+          });
           // La imputación sale de la tx para que el log y el Z
           // correctivo se hagan fuera, como en `POST /tickets`.
           return {
             ticket: t,
+            servidas,
             shift: {
               shiftId: resolution.shiftId,
               imputed: resolution.imputed,
@@ -1476,6 +1490,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
 
       const updated = txOut.ticket;
       const shiftResolution = txOut.shift;
+      // auditoria-sirope (#22) · fuera de la transacción, como el resto
+      // de los avisos de cocina: la verdad está en el GET.
+      avisarComandasServidas(txOut.servidas, new Date());
 
       // B-reservas-5 Frente T · rastro de la imputación, con el mismo
       // nombre de evento que `POST /tickets` para que una sola búsqueda
