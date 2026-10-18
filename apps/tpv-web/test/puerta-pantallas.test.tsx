@@ -587,9 +587,18 @@ describe("pantalla 3 · lo que toca ahora", () => {
     await pintar(
       <PuertaLoQueToca {...props} datos={conRegistroPropio(true)} />,
     );
-    expect(container.textContent).toContain("en la tablet");
-    // Y dice lo que NO puede saber: lo registrado desde otra pantalla sin
-    // red. Callárselo sería afirmar que no se hizo.
+    // **En la LÍNEA de la ocurrencia, no en cualquier sitio.** La primera
+    // versión de este test miraba `container.textContent`, y la banda de
+    // arriba también dice «en la tablet»: quitarle la marca a la línea
+    // dejaba el test VERDE. Lo encontró la tabla de sabotajes — es la
+    // lección de siempre: saboteá lo que el banco ejercita de verdad.
+    const linea = [...container.querySelectorAll("li")].find((li) =>
+      li.textContent?.includes("Ana"),
+    );
+    expect(linea, "no está la línea de lo ya hecho").toBeTruthy();
+    expect(linea!.textContent).toContain("en la tablet");
+    // Y la pantalla dice lo que NO puede saber: lo registrado desde otra
+    // pantalla sin red. Callárselo sería afirmar que no se hizo.
     expect(container.textContent).toContain(
       "registrado desde otra pantalla sin red no se puede saber",
     );
@@ -599,7 +608,10 @@ describe("pantalla 3 · lo que toca ahora", () => {
     await pintar(
       <PuertaLoQueToca {...props} datos={conRegistroPropio(false)} />,
     );
-    expect(container.textContent).not.toContain("en la tablet");
+    const linea = [...container.querySelectorAll("li")].find((li) =>
+      li.textContent?.includes("Ana"),
+    );
+    expect(linea!.textContent).not.toContain("en la tablet");
     expect(container.textContent).not.toContain("otra pantalla sin red");
   });
 
