@@ -20,6 +20,8 @@ import { DeclaracionResponsablePage } from "./pages/DeclaracionResponsablePage.j
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
+// B-reservas-8 · los bonos de sesiones.
+import { BonosPage } from "./pages/BonosPage.js";
 import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
 // residencia-1 · las tres pantallas del centro.
@@ -186,6 +188,9 @@ export function App() {
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/staff" element={<StaffPage />} />
         <Route path="/admin/agenda-catalog" element={<AgendaCatalogPage />} />
+        {/* B-reservas-8 · la pantalla se auto-gatea (la puerta de verdad es
+            el 404 del servidor). */}
+        <Route path="/admin/bonos" element={<BonosPage />} />
         {/* B-reservas-7a · el horario del centro NO va envuelto: es agenda,
             no caja. Misma regla que "Agenda · Catálogo". */}
         <Route path="/admin/agenda-hours" element={<AgendaHorarioPage />} />

@@ -76,6 +76,14 @@ export interface TenantCapabilities {
   // Apagada —o sea, en los quince clientes de hoy— el panel es exactamente
   // el de antes del bloque.
   residencia: boolean;
+  // B-reservas-8 · los BONOS DE SESIONES. Columna del tenant, sólo la mueve
+  // el super-admin (y no se puede encender con Holded conectado). Gatea la
+  // pantalla de bonos del panel.
+  bonos: boolean;
+  /** B-reservas-8 · LA PALABRA del centro: «bono», o «programa» en el spa.
+   *  No es una capability, pero se consulta desde los mismos sitios y sale
+   *  de la misma llamada. */
+  bonoEtiqueta: string;
   // puesta-en-marcha (ADR-021) · ¿la cuenta está EN ENSAYO? No es una
   // capability que se venda: es un ESTADO, y vive aquí porque se consulta
   // desde el mismo sitio y para lo mismo —decidir qué se pinta— y porque sale
@@ -112,6 +120,9 @@ const POR_DEFECTO: TenantCapabilities = {
   // sección es más barato que enseñar una que no toca, y la que no toca
   // aquí hablaría de residentes donde no hay ninguno.
   residencia: false,
+  // B-reservas-8 · false al fallar, como las tres de arriba.
+  bonos: false,
+  bonoEtiqueta: "bono",
   // puesta-en-marcha (ADR-021) · ver la nota del campo.
   enEnsayo: false,
 };
@@ -135,6 +146,8 @@ async function pedir(): Promise<void> {
           clinicalRecordsEnabled?: boolean;
           kitchenDisplayEnabled?: boolean;
           residenciaEnabled?: boolean;
+          bonosEnabled?: boolean;
+          bonoEtiqueta?: string;
         };
       }>("/admin/tenant/settings"),
       api<{
@@ -154,6 +167,8 @@ async function pedir(): Promise<void> {
       clinica: s.settings.clinicalRecordsEnabled === true,
       cocina: s.settings.kitchenDisplayEnabled === true,
       residencia: s.settings.residenciaEnabled === true,
+      bonos: s.settings.bonosEnabled === true,
+      bonoEtiqueta: s.settings.bonoEtiqueta ?? "bono",
       holded: me.tenant.hasHoldedKey === true,
       holdedEnabled: me.tenant.holdedEnabled !== false,
       holdedDejado: me.tenant.holdedDisconnectedAt != null,

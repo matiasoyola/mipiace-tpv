@@ -25,6 +25,7 @@ import {
   Shield,
   ShieldCheck,
   Tag,
+  Ticket,
   User,
   UserPlus,
   Users,
@@ -82,6 +83,10 @@ interface NavItem {
     | "fichaje"
     | "holdedDejado"
     | "residencia"
+    // B-reservas-8 · los bonos de sesiones. Una entrada y nada más: los
+    // ajustes, la numeración, las plantillas y el alta inicial caben en
+    // una pantalla.
+    | "bonos"
     // clinica-7 · la sección del contrato de encargado. La capability ya
     // existía (`clinica-1` la trajo para la sección clínica de Personal);
     // lo que es nuevo es que una entrada del menú la use.
@@ -245,6 +250,15 @@ const NAV_ITEMS: NavItem[] = [
     label: "Plantillas",
     icon: Layers,
     capability: "residencia",
+  },
+  // B-reservas-8 · los bonos de sesiones: los ajustes del centro, por qué
+  // número empieza su numeración, qué productos son bonos y el alta de los
+  // que venían en papel.
+  {
+    to: "/admin/bonos",
+    label: "Bonos",
+    icon: Ticket,
+    capability: "bonos",
   },
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },
   // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
