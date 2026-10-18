@@ -297,6 +297,22 @@ export interface Panel {
     }>;
     noHechoDeTurnosCerrados: number;
   };
+  /** residencia-6 · lo que está mal puesto y se arregla configurando:
+   *  PIN que se quedaron cortos (D-68) y residentes sin plan de cuidados
+   *  vigente (punto 4 del bloque). Opcional porque el panel de una API
+   *  anterior a este bloque no lo trae. */
+  porArreglar?: {
+    pinesPorRenovar: Array<{
+      userId: string;
+      nombre: string;
+      roles: string[];
+    }>;
+    residentesSinPlan: Array<{
+      clientId: string;
+      nombre: string;
+      habitacion: string | null;
+    }>;
+  };
   indicadores: ValorDeIndicador[];
   mes: string;
   generadoEn: string;

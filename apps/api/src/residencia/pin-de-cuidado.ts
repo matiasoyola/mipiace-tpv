@@ -24,6 +24,7 @@
 //     móvil abre una GUARDIA, que es otra cosa.
 
 import type { PrismaClient } from "@mipiacetpv/db";
+import { pinPorRenovar } from "@mipiacetpv/residencia-plan";
 
 import { verifyPassword } from "../auth/passwords.js";
 import { dekONada } from "../clinica/claves.js";
@@ -38,6 +39,9 @@ export interface CapacidadDelPin {
   code: string;
   name: string;
   category: string;
+  /** residencia-6 (D-68) · ¿este rol ve todo el centro? De aquí sale
+   *  cuántas cifras le tocan a su PIN. */
+  alcanceTotal: boolean;
 }
 
 /** Quién tecleó, con sus capacidades vigentes. */
@@ -57,7 +61,12 @@ export type ResultadoDelPin =
    *  cuatro cifras aprendiendo qué PIN existen. */
   | { ok: false; motivo: "NO_CUADRA" }
   /** El PIN es bueno y esa persona ya no tiene rol de cuidado vigente. */
-  | { ok: false; motivo: "SIN_ROL" };
+  | { ok: false; motivo: "SIN_ROL" }
+  /** residencia-6 (D-68) · el PIN es bueno, la persona tiene rol y el
+   *  PIN **se quedó corto** para lo que ahora ve: tiene 4 cifras y algún
+   *  rol de alcance total. No entra en ninguna de las tres pantallas
+   *  hasta que dirección se lo ponga de 6. */
+  | { ok: false; motivo: "POR_RENOVAR" };
 
 /**
  * Encuentra a quien tecleó, y lo verifica.
@@ -88,6 +97,8 @@ export async function resolverPinDeCuidado(
     select: {
       userId: true,
       pinHash: true,
+      // residencia-6 (D-68) · cuántas cifras tiene el que hay puesto.
+      pinLength: true,
       user: {
         select: {
           id: true,
@@ -102,7 +113,14 @@ export async function resolverPinDeCuidado(
               id: true,
               fromAt: true,
               toAt: true,
-              careRole: { select: { code: true, name: true, category: true } },
+              careRole: {
+                select: {
+                  code: true,
+                  name: true,
+                  category: true,
+                  fullScope: true,
+                },
+              },
             },
           },
         },
@@ -118,6 +136,27 @@ export async function resolverPinDeCuidado(
   );
   if (vivos.length === 0) return { ok: false, motivo: "SIN_ROL" };
 
+  // ── residencia-6 (D-68) · ¿SE QUEDÓ CORTO? ──────────────────────────
+  //
+  // **Después de verificar el PIN y antes de dar paso.** El orden
+  // importa: antes de verificar, contestar «tu PIN tiene que ser de 6»
+  // diría que ese PIN existe, y eso es justo lo que la frase única de
+  // «PIN incorrecto» evita (se podría barrer el espacio aprendiendo qué
+  // PIN hay). Después, no dice nada que quien lo teclea no sepa ya.
+  //
+  // Y vale para las TRES pantallas que cuelgan de esta función —la sala y
+  // el móvil de guardia aquí, la puerta con su propia copia de la
+  // resolución— porque el PIN es uno: dejarla entrar en la sala con un
+  // PIN de cuatro y no en la puerta sería la mitad de la decisión.
+  if (
+    pinPorRenovar({
+      largoDelPin: fila.pinLength,
+      roles: vivos.map((a) => ({ alcanceTotal: a.careRole.fullScope })),
+    })
+  ) {
+    return { ok: false, motivo: "POR_RENOVAR" };
+  }
+
   return {
     ok: true,
     quien: {
@@ -128,6 +167,7 @@ export async function resolverPinDeCuidado(
         code: a.careRole.code,
         name: a.careRole.name,
         category: a.careRole.category,
+        alcanceTotal: a.careRole.fullScope,
       })),
     },
   };

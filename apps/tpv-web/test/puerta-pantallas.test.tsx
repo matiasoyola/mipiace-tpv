@@ -118,6 +118,17 @@ async function pintar(nodo: React.ReactNode): Promise<void> {
   });
 }
 
+/** Lo mismo, devolviendo el `rerender` para los casos que tienen que
+ *  cambiar una prop SIN perder el estado del componente. Lo pide
+ *  residencia-6: un error no puede devolver el teclado a cuatro
+ *  casillas, y eso sólo se ve volviendo a pintar el mismo árbol. */
+async function pintarConRerender(nodo: React.ReactNode): Promise<{
+  rerender: (otro: React.ReactNode) => Promise<void>;
+}> {
+  await pintar(nodo);
+  return { rerender: pintar };
+}
+
 function pulsar(texto: string): void {
   const botones = [...container.querySelectorAll("button")];
   const b = botones.find((x) => x.textContent?.includes(texto));
@@ -279,6 +290,81 @@ describe("pantalla 2 · el PIN", () => {
     expect(container.querySelector("[role='alert']")?.textContent).toContain(
       "no es correcto",
     );
+  });
+
+  // ── residencia-6 (D-68) · EL BOTÓN «PIN DE 6 CIFRAS» ────────────
+  //
+  // La auxiliar **no gana ni un toque**: sigue entrando sola al cuarto
+  // dígito, y el botón es una tecla más que nunca pulsa. Quien tiene PIN
+  // de seis lo pulsa una vez por turno.
+
+  it("por defecto son CUATRO casillas, como siempre", async () => {
+    await pintar(<PuertaPin {...props} />);
+    expect(container.querySelector("[aria-label='0 de 4 cifras']")).toBeTruthy();
+    expect(container.textContent).toContain("PIN de 6 cifras");
+  });
+
+  // Nota de mecánica: los dígitos se pulsan con `pulsarExacto`. `pulsar`
+  // casa por SUBCADENA, y con el teclado en seis casillas el botón dice
+  // «PIN de 4 cifras» — así que `pulsar("4")` acertaba al interruptor y
+  // volvía a cuatro vaciando lo tecleado. Lo encontró este test al
+  // ponerse rojo, y es la misma trampa que `exact: true` en el bucle
+  // visual.
+
+  it("pulsando «PIN de 6 cifras» hay SEIS casillas y envía al sexto", async () => {
+    const vistos: string[] = [];
+    await pintar(<PuertaPin {...props} onPin={(p) => vistos.push(p)} />);
+    pulsarExacto("PIN de 6 cifras");
+    expect(container.querySelector("[aria-label='0 de 6 cifras']")).toBeTruthy();
+    for (const d of ["9", "1", "8", "2", "5"]) pulsarExacto(d);
+    // Al cuarto NO manda nada: es la mitad que importa del botón.
+    expect(vistos).toEqual([]);
+    pulsarExacto("6");
+    expect(vistos).toEqual(["918256"]);
+  });
+
+  it("es un INTERRUPTOR: vuelve a cuatro con el mismo toque", async () => {
+    // Si fuera un camino de ida, un roce dejaría la puerta en seis
+    // casillas para la siguiente persona — y la siguiente es la auxiliar.
+    await pintar(<PuertaPin {...props} />);
+    pulsarExacto("PIN de 6 cifras");
+    expect(container.textContent).toContain("PIN de 4 cifras");
+    pulsarExacto("PIN de 4 cifras");
+    expect(container.querySelector("[aria-label='0 de 4 cifras']")).toBeTruthy();
+  });
+
+  it("cambiar de largo VACÍA lo tecleado", async () => {
+    // Dejar los dos primeros dígitos puestos al pasar a seis mandaría un
+    // PIN a medias en cuanto llegara al sexto.
+    const vistos: string[] = [];
+    await pintar(<PuertaPin {...props} onPin={(p) => vistos.push(p)} />);
+    for (const d of ["9", "1"]) pulsarExacto(d);
+    pulsarExacto("PIN de 6 cifras");
+    expect(container.querySelector("[aria-label='0 de 6 cifras']")).toBeTruthy();
+    for (const d of ["1", "2", "3", "4", "5", "6"]) pulsarExacto(d);
+    expect(vistos).toEqual(["123456"]);
+  });
+
+  it("un error NO devuelve el teclado a cuatro", async () => {
+    // Quien se equivoca de dígito teniendo PIN de seis no tiene que
+    // volver a pulsar el botón: eso serían dos toques de penalización por
+    // cada error.
+    const { rerender } = await pintarConRerender(<PuertaPin {...props} />);
+    pulsarExacto("PIN de 6 cifras");
+    await rerender(<PuertaPin {...props} error="Ese PIN no es correcto." />);
+    expect(container.querySelector("[aria-label='0 de 6 cifras']")).toBeTruthy();
+  });
+
+  it("el botón NO es una tecla del teclado, y mide lo que hay que pulsar", async () => {
+    // No va en el hueco de abajo a la derecha del teclado: ahí aterriza
+    // el pulgar y un roce cambiaría el largo en mitad de un PIN de
+    // cuatro. Va debajo de los puntos, y es táctil aunque sea discreto.
+    await pintar(<PuertaPin {...props} />);
+    const b = [...container.querySelectorAll("button")].find(
+      (x) => x.textContent === "PIN de 6 cifras",
+    )!;
+    expect(b.className).not.toContain("tap-puerta-tecla");
+    expect(b.className).toContain("min-h-touch-pad");
   });
 
   it("CON DOS ROLES pregunta con cuál entra, y lo dice", async () => {

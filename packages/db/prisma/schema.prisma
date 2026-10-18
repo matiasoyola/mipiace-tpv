@@ -7464,6 +7464,24 @@ model CarePin {
   /// RED (igual que el roster de `offlineAuth` en el TPV).
   pinLookup String @map("pin_lookup")
 
+  /// residencia-6 (D-68) · **CUÁNTAS CIFRAS TIENE.** 4 para alcance por
+  /// zona, 6 para quien tiene algún rol de alcance total.
+  ///
+  /// Es lo ÚNICO que se guarda del largo, y es lo que permite saber que
+  /// un PIN «se quedó corto» cuando a su dueña le dan un rol que lo ve
+  /// todo — sin poder leer el PIN, que es el punto.
+  ///
+  /// **No es un dato que acerque a nadie al PIN**: quien tiene la base ya
+  /// ve en claro los roles de cada persona, y la regla rol → largo está
+  /// escrita en `packages/residencia-plan/src/pin-por-alcance.ts`, a la
+  /// vista. Lo que NO hay —y es la mitad de D-68— es nada derivado de los
+  /// cuatro PRIMEROS dígitos de un PIN de seis: con una huella de prefijo,
+  /// el ataque bajaría a 10 000 + 100 combinaciones.
+  ///
+  /// Las filas de antes de este bloque se quedan en 4, que es con lo que
+  /// se pusieron.
+  pinLength Int @default(4) @map("pin_length")
+
   setAt       DateTime @default(now()) @map("set_at") @db.Timestamptz()
   /// Quién se lo puso. `SetNull`: dar de baja a la dirección no borra el
   /// hecho de que lo puso.

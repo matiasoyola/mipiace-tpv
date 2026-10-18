@@ -41,6 +41,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  FRASE_PIN_POR_RENOVAR,
   diaDelTurno,
   gravedadDe,
   queToca,
@@ -481,6 +482,15 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         const quien = await quienTeclea(pin, arranque);
         if (!quien || quien.roles.length === 0) {
           setErrorDelPin("Ese PIN no es correcto.");
+          return;
+        }
+        // residencia-6 (D-68) · **y sin red tampoco entra el PIN que se
+        // quedó corto.** El servidor manda el booleano ya calculado, así
+        // que la tablet llega a la misma conclusión sin volver a escribir
+        // la regla. Con red lo contesta la ruta (403 `PIN_POR_RENOVAR`) y
+        // la frase es la misma: una sola, en las tres pantallas.
+        if (quien.porRenovar) {
+          setErrorDelPin(FRASE_PIN_POR_RENOVAR);
           return;
         }
         if (quien.roles.length > 1 && !assignmentId) {

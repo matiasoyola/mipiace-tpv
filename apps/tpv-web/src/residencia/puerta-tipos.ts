@@ -112,6 +112,15 @@ export interface EnElRoster {
     name: string;
     alcanceTotal: boolean;
   }>;
+  /** residencia-6 (D-68) · `true` = su PIN tiene cuatro cifras y ha pasado
+   *  a tener un rol que ve todo el centro, así que **no abre nada** hasta
+   *  que dirección se lo ponga de seis. Lo calcula el servidor; lo que
+   *  NO viaja es cuántas cifras tiene (ver el arranque en la API).
+   *
+   *  Opcional como todo lo demás de este fichero: una caché de antes de
+   *  este bloque no lo trae, y entonces la puerta deja entrar sin red
+   *  como hacía ayer y el servidor lo corrige en cuanto haya red. */
+  porRenovar?: boolean;
 }
 
 /** `GET /residencia/puerta/arranque`. */

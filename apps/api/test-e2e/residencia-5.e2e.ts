@@ -106,8 +106,8 @@ const { ocurrenciasDeObligacion, wallTimeToUtc } = await import(
 
 const PIN_ANA = "4071"; // auxiliar, PRIMERA planta
 const PIN_MARI = "7788"; // auxiliar, SEGUNDA planta
-const PIN_ROSA = "9182"; // DUE, alcance total
-const PIN_PILAR = "3344"; // dirección
+const PIN_ROSA = "918256"; // DUE, alcance total — SEIS cifras (D-68)
+const PIN_PILAR = "334455"; // dirección — alcance total, seis cifras
 
 /** El canario de este fichero: si aparece en claro en un volcado, el
  *  bloque no sirve. Es el texto de «algo no va bien», que entra en el

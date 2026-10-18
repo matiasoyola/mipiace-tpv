@@ -44,7 +44,11 @@ import { randomInt } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { GuardChannel } from "@mipiacetpv/db";
-import { diaDelTurno, turnoDe } from "@mipiacetpv/residencia-plan";
+import {
+  FRASE_PIN_POR_RENOVAR,
+  diaDelTurno,
+  turnoDe,
+} from "@mipiacetpv/residencia-plan";
 
 import { getPrisma } from "../context.js";
 import { requireOwnerOrManager } from "../auth/middleware.js";
@@ -328,6 +332,18 @@ export async function registerResidenciaGuardiaRoutes(
           error: "PIN_INCORRECTO",
           message: "Ese PIN no es correcto.",
           attemptsRemaining: estado.attemptsRemaining,
+        });
+      }
+      // residencia-6 (D-68) · el PIN es bueno y **se quedó corto**: tiene
+      // cuatro cifras y esta persona ha pasado a tener un rol que ve todo
+      // el centro. No cuenta como intento fallido —el PIN es el suyo— y
+      // la frase es la MISMA que en la puerta y en la sala, porque quien
+      // la lee está de pie y tiene que saber a dónde ir.
+      if (!res.ok && res.motivo === "POR_RENOVAR") {
+        await reset(limite);
+        return reply.code(403).send({
+          error: "PIN_POR_RENOVAR",
+          message: FRASE_PIN_POR_RENOVAR,
         });
       }
       if (!res.ok) {

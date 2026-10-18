@@ -34,6 +34,7 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import {
   addDays,
   calcularIndicadores,
+  pinPorRenovar,
   cuantoVaHecho,
   diaDelTurno,
   estaConfirmado,
@@ -106,6 +107,41 @@ export interface TurnoEnCurso {
   noHechoDeTurnosCerrados: number;
 }
 
+/**
+ * residencia-6 · **LO QUE HAY QUE ARREGLAR.**
+ *
+ * Dos cosas que no son incidencias ni obligaciones y que dejan el centro
+ * a medio configurar. Van juntas porque las dos tienen la misma forma —
+ * «esto está mal puesto, y se arregla en Personal o en el plan» — y las
+ * dos las arregla quien ve este panel.
+ *
+ *   · **PIN por renovar** (D-68): a alguien con PIN de cuatro cifras se
+ *     le ha dado un rol que ve todo el centro. Su PIN **no abre nada**
+ *     desde ese momento, así que esto no es un aviso de estilo: es una
+ *     persona que no puede registrar hasta que dirección entre aquí.
+ *   · **Residentes sin plan de cuidados** (punto 4 del bloque): un
+ *     residente con cama y sin ninguna línea de plan vigente. No genera
+ *     ni una línea de «no hecho» —no hay nada que incumplir— y eso es
+ *     exactamente el problema: sin esta lista, un residente al que nadie
+ *     le preparó el plan es invisible y sale perfecto en los
+ *     indicadores.
+ */
+export interface PorArreglar {
+  pinesPorRenovar: Array<{
+    userId: string;
+    nombre: string;
+    /** Los roles de alcance total que le obligan a seis cifras. Se
+     *  nombran: «Rosa · DUE» dice a la dirección por qué sale en la
+     *  lista sin que tenga que abrir la ficha. */
+    roles: string[];
+  }>;
+  residentesSinPlan: Array<{
+    clientId: string;
+    nombre: string;
+    habitacion: string | null;
+  }>;
+}
+
 export interface Panel {
   abierto: QueHayAbierto;
   relevos: RelevosDelPanel;
@@ -115,6 +151,8 @@ export interface Panel {
     proximas: OcurrenciaPintada[];
   };
   turno: TurnoEnCurso;
+  /** residencia-6 · lo que está mal puesto y se arregla configurando. */
+  porArreglar: PorArreglar;
   indicadores: ValorDeIndicador[];
   /** El mes de los indicadores, «YYYY-MM». */
   mes: string;
@@ -130,23 +168,127 @@ export async function construirPanel(
   const hoy = utcToWallDate(ahora);
   const mes = hoy.slice(0, 7);
 
-  const [abierto, relevos, obligaciones, turno, indicadores] = await Promise.all([
-    queHayAbierto(prisma, tenantId),
-    relevosDelPanel(prisma, tenantId, ahora),
-    obligacionesDelPanel(prisma, { tenantId, ahora }),
-    turnoEnCurso(prisma, tenantId, ahora),
-    indicadoresDelMes(prisma, tenantId, mes, ahora),
-  ]);
+  const [abierto, relevos, obligaciones, turno, porArreglar, indicadores] =
+    await Promise.all([
+      queHayAbierto(prisma, tenantId),
+      relevosDelPanel(prisma, tenantId, ahora),
+      obligacionesDelPanel(prisma, { tenantId, ahora }),
+      turnoEnCurso(prisma, tenantId, ahora),
+      loQueHayQueArreglar(prisma, tenantId, ahora),
+      indicadoresDelMes(prisma, tenantId, mes, ahora),
+    ]);
 
   return {
     abierto,
     relevos,
     obligaciones,
     turno,
+    porArreglar,
     indicadores,
     mes,
     generadoEn: ahora.toISOString(),
   };
+}
+
+// ── residencia-6 · LO QUE HAY QUE ARREGLAR ───────────────────────────
+//
+// Dos consultas y ningún cálculo caro: ni recorre el plan ni cruza
+// registros. Es lo que permite que entre en el `Promise.all` del panel
+// sin mover el presupuesto de los 10 segundos (bloque C §1).
+
+export async function loQueHayQueArreglar(
+  prisma: PrismaClient,
+  tenantId: string,
+  ahora: Date,
+): Promise<PorArreglar> {
+  const [pins, ocupaciones] = await Promise.all([
+    prisma.carePin.findMany({
+      where: { tenantId },
+      select: {
+        userId: true,
+        pinLength: true,
+        user: {
+          select: {
+            alias: true,
+            email: true,
+            careRoleAssignments: {
+              where: {
+                revokedAt: null,
+                careRole: { active: true, recordsCare: true },
+              },
+              select: {
+                fromAt: true,
+                toAt: true,
+                careRole: { select: { name: true, fullScope: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
+    // Los residentes CON CAMA, con su habitación y si tienen alguna línea
+    // de plan viva. El `some` con la vigencia dentro y no un `count`
+    // aparte: lo que hace falta saber es si hay al menos una, y el motor
+    // corta en la primera.
+    prisma.bedAssignment.findMany({
+      where: { tenantId, toAt: null },
+      select: {
+        clientId: true,
+        bed: { select: { room: { select: { number: true } } } },
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            carePlanItems: {
+              where: {
+                tenantId,
+                fromAt: { lte: ahora },
+                OR: [{ toAt: null }, { toAt: { gt: ahora } }],
+              },
+              select: { id: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    }),
+  ]);
+
+  const pinesPorRenovar: PorArreglar["pinesPorRenovar"] = [];
+  for (const p of pins) {
+    const vivos = p.user.careRoleAssignments.filter(
+      (a) => a.fromAt <= ahora && (a.toAt == null || a.toAt > ahora),
+    );
+    if (
+      !pinPorRenovar({
+        largoDelPin: p.pinLength,
+        roles: vivos.map((a) => ({ alcanceTotal: a.careRole.fullScope })),
+      })
+    ) {
+      continue;
+    }
+    pinesPorRenovar.push({
+      userId: p.userId,
+      nombre: p.user.alias ?? (p.user.email.split("@")[0] ?? p.user.email),
+      roles: vivos
+        .filter((a) => a.careRole.fullScope)
+        .map((a) => a.careRole.name),
+    });
+  }
+
+  const residentesSinPlan = ocupaciones
+    .filter((o) => o.client.carePlanItems.length === 0)
+    .map((o) => ({
+      clientId: o.clientId,
+      nombre: `${o.client.firstName} ${o.client.lastName}`.trim(),
+      habitacion: o.bed.room.number,
+    }));
+
+  // Por nombre, que es como la dirección los busca.
+  pinesPorRenovar.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+  residentesSinPlan.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+
+  return { pinesPorRenovar, residentesSinPlan };
 }
 
 // ── 1 · QUÉ HAY ABIERTO HOY ──────────────────────────────────────────
