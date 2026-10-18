@@ -13,8 +13,12 @@
 --
 --   3.a  tiene registros fiscales      → factura desde su primera factura
 --   3.b  tiene ventas REALES           → factura desde su primera venta
---   3.c  cuenta nuestra de pruebas     → en ensayo, y marcada
+--   3.c  PRUEBAS MIPIACE               → en ensayo, y marcada
 --   3.d  ni registros ni ventas reales → en ensayo
+--
+-- La cuenta de ensayo de La Maestranza ya NO entra en 3.c: tiene 11
+-- registros fiscales, así que entra por 3.a como cualquiera que ha
+-- facturado, y se elimina después del despliegue desde la consola.
 --
 -- Si alguna fila sale con `regla = '¿?'`, PARA: esa cuenta no encaja en
 -- ninguna regla y no se adivina. La tabla que salga va al done.md tal cual.
@@ -64,14 +68,13 @@ ventas AS (
    GROUP BY "tenant_id"
 ),
 pruebas AS (
+  -- PRUEBAS MIPIACE y ninguna más. La cuenta de ensayo de La Maestranza
+  -- estaba aquí hasta el 18-10 y salió: tiene 11 registros fiscales y 16
+  -- ventas, así que entra por 3.a como cualquier cuenta que ha facturado y
+  -- se elimina después del despliegue (decisión de Matías, 18-10).
   SELECT t."id"
     FROM "tenants" t
    WHERE t."name" = 'PRUEBAS MIPIACE'
-      OR EXISTS (
-        SELECT 1 FROM "users" u
-         WHERE u."tenant_id" = t."id"
-           AND u."email" LIKE 'm.oyola+maestranza-ensayo%'
-      )
 )
 SELECT
   t."name"                                              AS "cuenta",
@@ -153,8 +156,5 @@ SELECT t."name",
                  OR "holded_document_id" IS NOT NULL
               GROUP BY 1) v
          ON v."tenant_id" = t."id"
- WHERE (t."name" = 'PRUEBAS MIPIACE'
-        OR EXISTS (SELECT 1 FROM "users" u
-                    WHERE u."tenant_id" = t."id"
-                      AND u."email" LIKE 'm.oyola+maestranza-ensayo%'))
+ WHERE t."name" = 'PRUEBAS MIPIACE'
    AND (f."registros" > 0 OR v."reales" > 0);

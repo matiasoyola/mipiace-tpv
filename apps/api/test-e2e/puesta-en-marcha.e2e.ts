@@ -124,6 +124,20 @@ function sentenciaDeLaMigracion(desde: string, marca: string): string {
   return bloque;
 }
 
+/** El bloque `DO $$ … END $$;` de la comprobación final, LEÍDO de la
+ *  migración. No vale el extractor de arriba: lleva «;» dentro. */
+function bloqueDoDeLaMigracion(): string {
+  const ini = MIGRACION.indexOf("DO $$");
+  if (ini < 0) throw new Error("no se encuentra el bloque DO de la migración");
+  const fin = MIGRACION.indexOf("END $$;", ini);
+  if (fin < 0) throw new Error("el bloque DO no termina en «END $$;»");
+  const bloque = MIGRACION.slice(ini, fin + "END $$;".length);
+  if (!bloque.includes("PUESTA_EN_MARCHA:")) {
+    throw new Error(`el bloque extraído no es la comprobación:\n${bloque}`);
+  }
+  return bloque;
+}
+
 describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", () => {
   if (!e2eEnabled) console.warn(`\n${SKIP_MESSAGE}\n`);
 
@@ -931,6 +945,9 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
     // y otra con una anulada que SÍ llegó a Holded.
     let soloAnuladas = "";
     let anuladaEnHolded = "";
+    // La regla 3.c, que el 18-10 se quedó con una sola cuenta.
+    let pruebasMipiace = "";
+    let ensayoMaestranza = "";
 
     /** Monta un comercio vacío con su tienda, su caja, su propietario y su
      *  turno, listo para colgarle tickets. */
@@ -1054,6 +1071,38 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
         paidAt: new Date("2026-02-02T09:00:00Z"),
         holdedDocumentId: "6714aa0f9c3e1b0012345678",
       });
+
+      // LA CUENTA DE PRUEBAS DEL EQUIPO: se identifica por su nombre, y no
+      // tiene nada dentro.
+      const c6 = await prisma.tenant.create({
+        data: { name: "PRUEBAS MIPIACE" },
+        select: { id: true },
+      });
+      pruebasMipiace = c6.id;
+
+      // Y LA DE ENSAYO DE LA MAESTRANZA, con el email que la identificaba
+      // cuando estaba en la lista de 3.c… y con una factura emitida, que es
+      // lo que la sacó de ella (foto de producción del 18-10: 11 registros).
+      const c7 = await comercio("Ensayo Maestranza");
+      ensayoMaestranza = c7.tenantId;
+      await prisma.user.create({
+        data: {
+          tenantId: ensayoMaestranza,
+          email: `m.oyola+maestranza-ensayo-${randomUUID().slice(0, 6)}@mipiace.es`,
+          role: "OWNER",
+        },
+      });
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO fiscal_records
+           (tenant_id, register_id, external_id, kind, chain_index, serie, numero,
+            num_serie_factura, fecha_expedicion, tipo_factura, cuota_total, importe_total,
+            huella, primer_registro, fecha_hora_huso_gen, huella_input, payload,
+            generated_at, chain_status)
+         VALUES ('${ensayoMaestranza}'::uuid, '${c7.registerId}'::uuid, '${randomUUID()}'::uuid,
+            'ALTA', 1, 'C1', 1, 'C1/000001', '2026-10-06', 'F2', 0.15, 1.60,
+            '${"B".repeat(64)}', true, '2026-10-06T21:00:00+02:00', 'x', '{}'::jsonb,
+            now(), 'OK')`,
+      );
     });
 
     it("3.a · quien tiene facturas factura desde su primera factura", async () => {
@@ -1104,6 +1153,65 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       expect(t.facturaDesde?.toISOString()).toBe("2026-02-02T09:00:00.000Z");
     });
 
+    // ── La regla 3.c, después de la decisión del 18-10 ───────────────
+    //
+    // Sólo PRUEBAS MIPIACE. La cuenta de ensayo de La Maestranza tiene 11
+    // registros fiscales de la noche del 06-10, así que entra por 3.a como
+    // cualquiera que ha facturado y se elimina después del despliegue desde
+    // la consola. Marcarla habría sido mentir sobre una cuenta con facturas
+    // emitidas — y el CHECK de la base lo rechazaría igual.
+    it("3.c · la comprobación final NO para por la cuenta de ensayo de La Maestranza", async () => {
+      // El bloque DO tal cual está en la migración. Antes de la decisión,
+      // esto ABORTABA el despliegue con su nombre dentro.
+      await expect(
+        prisma.$executeRawUnsafe(bloqueDoDeLaMigracion()),
+      ).resolves.toBeDefined();
+    });
+
+    it("3.c · marca PRUEBAS MIPIACE, y a la de ensayo NO", async () => {
+      await prisma.$executeRawUnsafe(
+        sentenciaDeLaMigracion(
+          'UPDATE "tenants" t\n   SET "es_de_pruebas" = true',
+          "PRUEBAS MIPIACE",
+        ),
+      );
+      const pruebas = await prisma.tenant.findUniqueOrThrow({
+        where: { id: pruebasMipiace },
+        select: { esDePruebas: true, facturaDesde: true },
+      });
+      expect(pruebas.esDePruebas).toBe(true);
+      expect(pruebas.facturaDesde).toBeNull();
+
+      const maestranza = await prisma.tenant.findUniqueOrThrow({
+        where: { id: ensayoMaestranza },
+        select: { esDePruebas: true, facturaDesde: true },
+      });
+      expect(maestranza.esDePruebas).toBe(false);
+      // Y con su fecha, la de su primera factura: entró por 3.a.
+      expect(maestranza.facturaDesde?.toISOString().slice(0, 10)).toBe(
+        "2026-10-05",
+      );
+    });
+
+    it("3.c · pero SÍ para si PRUEBAS MIPIACE hubiera facturado", async () => {
+      // La comprobación sigue ahí para lo que estaba: que nadie marque como
+      // cuenta de pruebas algo que ha emitido facturas.
+      await prisma.$executeRawUnsafe(
+        `UPDATE tenants SET es_de_pruebas = false, fiscal_go_live_at = now() WHERE id = '${pruebasMipiace}'`,
+      );
+      let msg = "";
+      try {
+        await prisma.$executeRawUnsafe(bloqueDoDeLaMigracion());
+      } catch (e) {
+        msg = e instanceof Error ? e.message : String(e);
+      }
+      expect(msg).toContain("PUESTA_EN_MARCHA:");
+      expect(msg).toContain("PRUEBAS MIPIACE");
+      await prisma.$executeRawUnsafe(
+        `UPDATE tenants SET fiscal_go_live_at = NULL, es_de_pruebas = true WHERE id = '${pruebasMipiace}'`,
+      );
+    });
+
     it("3.d · y quien no ha vendido nada se queda en ensayo", async () => {
       const t = await prisma.tenant.findUniqueOrThrow({
         where: { id: sinNada },
@@ -1111,7 +1219,13 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       });
       expect(t.facturaDesde).toBeNull();
       await prisma.tenant.delete({ where: { id: sinNada } });
-      for (const id of [conVentas, soloAnuladas, anuladaEnHolded]) {
+      for (const id of [
+        conVentas,
+        soloAnuladas,
+        anuladaEnHolded,
+        pruebasMipiace,
+        ensayoMaestranza,
+      ]) {
         await prisma.$executeRawUnsafe(
           `DELETE FROM tickets WHERE tenant_id = '${id}'`,
         ).catch(() => undefined);

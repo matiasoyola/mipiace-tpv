@@ -138,19 +138,37 @@ UPDATE "tenants" t
  WHERE t."id" = sub."tenant_id"
    AND t."fiscal_go_live_at" IS NULL;
 
--- 3.c · Las cuentas NUESTRAS de pruebas.
+-- 3.c · La cuenta NUESTRA de pruebas: PRUEBAS MIPIACE, y ninguna más.
 --
--- PRUEBAS MIPIACE y la cuenta de ensayo de La Maestranza. Se identifican por
--- lo que las identifica de verdad: el nombre de la primera y el email del
--- propietario de la segunda (`m.oyola+maestranza-ensayo`), que es el que se
--- tecleó al crearla.
+-- Se identifica por lo que la identifica de verdad, su nombre.
 --
--- Y se COMPRUEBA antes de marcar. Si una de las dos tuviera fecha de
--- arranque después de 3.a/3.b, significaría que ha emitido facturas o que ha
--- vendido de verdad, y entonces no es una cuenta de pruebas: es un cliente
--- que alguien llamó así. La migración PARA con un mensaje en vez de marcarla
--- —el CHECK de abajo la rechazaría igual, pero diciendo «viola una
--- restricción» en lugar de qué ha pasado y qué hay que mirar.
+-- ── Por qué la cuenta de ensayo de La Maestranza NO entra aquí ─────────
+--
+-- Estaba en la lista hasta el 18-10, y la foto de producción la sacó: tiene
+-- **11 registros fiscales y 16 ventas**. O sea que llegó a emitir facturas de
+-- verdad, aquella noche del 06-10, antes de que se decidiera montar una
+-- cuenta nueva desde cero. La comprobación de abajo hacía su trabajo y
+-- PARABA el despliegue por ella.
+--
+-- Decisión de Matías (18-10): **no se marca**. Entra por la regla 3.a como
+-- cualquier cuenta que ha facturado —su fecha es la de su primera factura— y
+-- se ELIMINA después del despliegue, con «Eliminar cuenta» desde la consola,
+-- que es el camino que este mismo bloque acaba de construir (ADR-021 §6) y
+-- que le entrega al titular su export antes de borrar nada.
+--
+-- Marcarla `es_de_pruebas` habría sido mentir sobre una cuenta con facturas
+-- emitidas, y además el CHECK `tenants_pruebas_no_facturan_ck` lo rechaza:
+-- una cuenta de pruebas no puede tener fecha de arranque, y ésta la tiene.
+-- (Medido: es el sabotaje nº 15 del done.)
+--
+-- ── La comprobación, que se queda ─────────────────────────────────────
+--
+-- Si PRUEBAS MIPIACE tuviera fecha de arranque después de 3.a/3.b
+-- significaría que ha emitido facturas o que ha vendido de verdad, y
+-- entonces no es una cuenta de pruebas: es un cliente que alguien llamó así.
+-- La migración PARA con un mensaje en vez de marcarla —el CHECK la
+-- rechazaría igual, pero diciendo «viola una restricción» en lugar de qué ha
+-- pasado y qué hay que mirar.
 
 DO $$
 DECLARE
@@ -160,14 +178,7 @@ BEGIN
     INTO v_conflicto
     FROM "tenants" t
    WHERE t."fiscal_go_live_at" IS NOT NULL
-     AND (
-       t."name" = 'PRUEBAS MIPIACE'
-       OR EXISTS (
-         SELECT 1 FROM "users" u
-          WHERE u."tenant_id" = t."id"
-            AND u."email" LIKE 'm.oyola+maestranza-ensayo%'
-       )
-     );
+     AND t."name" = 'PRUEBAS MIPIACE';
   IF v_conflicto IS NOT NULL THEN
     RAISE EXCEPTION
       'PUESTA_EN_MARCHA: estas cuentas iban a marcarse como de pruebas y tienen facturas o ventas reales: %. No se adivina: comprueba la tabla del done.md antes de desplegar.',
@@ -177,12 +188,7 @@ END $$;
 
 UPDATE "tenants" t
    SET "es_de_pruebas" = true
- WHERE t."name" = 'PRUEBAS MIPIACE'
-    OR EXISTS (
-      SELECT 1 FROM "users" u
-       WHERE u."tenant_id" = t."id"
-         AND u."email" LIKE 'm.oyola+maestranza-ensayo%'
-    );
+ WHERE t."name" = 'PRUEBAS MIPIACE';
 
 -- 3.d · El resto se queda en ensayo, que es `null`, que es lo que ya tienen.
 --
