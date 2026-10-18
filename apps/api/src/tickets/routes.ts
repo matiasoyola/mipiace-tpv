@@ -13,12 +13,18 @@
 import { randomUUID } from "node:crypto";
 
 import { Prisma, TicketStatus } from "@mipiacetpv/db";
+// auditoria-sirope (#17) · la regla de «¿es devolvible?» la escribe una
+// sola función, y la miran el servidor y el TPV.
+import {
+  mensajeNoDevolvible,
+  motivoNoDevolvible,
+} from "@mipiacetpv/ticket-model";
 import type { FastifyInstance } from "fastify";
 
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { ingestFiscalRecord, type IngestResult } from "../fiscal/ingest.js";
-import { comprobarGateFiscal, esCobroDeEnsayo } from "../fiscal/mode.js";
+import { comprobarGateFiscal, enEnsayo, esCobroDeEnsayo } from "../fiscal/mode.js";
 import {
   FISCAL_RECORD_BODY_SCHEMA,
   type FiscalRecordBody,
@@ -1986,22 +1992,32 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // es el CUARTO camino que encola, y era el único —junto al de
       // mesa— que nunca miró la clave. Aquí sí hace falta una consulta
       // propia: el handler del refund no leía el tenant para nada.
+      //
+      // auditoria-sirope (#17) · y además `facturaDesde`, porque la regla
+      // de «¿es devolvible?» pregunta si la cuenta está en ensayo. La lee
+      // la misma función que mira el TPV antes de pintar el botón
+      // (`esDevolvible`, en `@mipiacetpv/ticket-model`): cuando las dos
+      // respuestas se escribían por separado, el TPV escondía el botón de
+      // tickets que el servidor habría devuelto sin rechistar.
       const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { holdedEnabled: true, holdedApiKeyCiphertext: true },
+        select: {
+          holdedEnabled: true,
+          holdedApiKeyCiphertext: true,
+          facturaDesde: true,
+        },
       });
       const destinoHolded = holdedDestination(tenantForUpload);
 
       const isTestTicket = ticket.status === TicketStatus.TEST;
-      if (
-        !isTestTicket &&
-        ticket.status !== TicketStatus.SYNCED &&
-        ticket.status !== TicketStatus.PAID
-      ) {
+      const motivoNo = motivoNoDevolvible(ticket.status, {
+        enEnsayo: enEnsayo(tenantForUpload),
+        sesionDePrueba: cashier.isTest,
+      });
+      if (motivoNo) {
         return reply.code(409).send({
           error: "TICKET_NOT_REFUNDABLE",
-          message:
-            "Sólo se puede devolver un ticket cobrado y sincronizado con Holded.",
+          message: mensajeNoDevolvible(motivoNo),
         });
       }
 
