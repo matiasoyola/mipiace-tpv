@@ -47,7 +47,12 @@ export async function bonosDeLasLineas(
   ticketLineIds: string[],
 ): Promise<BonoDeUnaLinea[]> {
   if (ticketLineIds.length === 0) return [];
-  const filas = await tx.$queryRaw<
+  // DOS consultas y no una con `GROUP BY`, y la razón es de Postgres:
+  // **`FOR UPDATE` no se puede usar con `GROUP BY`** («FOR UPDATE is not
+  // allowed with GROUP BY clause»). Y el bloqueo no es opcional: de esta
+  // lectura depende si sale dinero de la caja, así que la fila del bono se
+  // bloquea antes de decidir.
+  const bonos = await tx.$queryRaw<
     Array<{
       id: string;
       code: string;
@@ -55,16 +60,21 @@ export async function bonosDeLasLineas(
       sessions_left: number;
       sold_ticket_id: string | null;
       es_prueba: boolean;
-      consumidas: bigint;
-      apartadas: bigint;
     }>
   >`
-    SELECT v."id",
-           v."code",
-           v."status",
-           v."sessions_left",
-           v."sold_ticket_id",
-           v."es_prueba",
+    SELECT "id", "code", "status", "sessions_left", "sold_ticket_id",
+           "es_prueba"
+      FROM "vouchers"
+     WHERE "tenant_id" = ${tenantId}::uuid
+       AND "sold_ticket_line_id" = ANY(${ticketLineIds}::uuid[])
+     FOR UPDATE`;
+  if (bonos.length === 0) return [];
+  // Las sesiones, contadas DEL LIBRO y no de las columnas de caché: en la
+  // decisión de la que depende devolver dinero no manda la caché.
+  const conteos = await tx.$queryRaw<
+    Array<{ voucher_id: string; consumidas: bigint; apartadas: bigint }>
+  >`
+    SELECT m."voucher_id",
            COALESCE(SUM(CASE WHEN m."tipo" = 'CONSUMIDA' THEN 1 ELSE 0 END), 0) AS consumidas,
            COALESCE(SUM(
              CASE m."tipo"
@@ -73,22 +83,24 @@ export async function bonosDeLasLineas(
                WHEN 'CONSUMIDA' THEN (CASE WHEN m."appointment_id" IS NOT NULL THEN -1 ELSE 0 END)
                ELSE 0
              END), 0) AS apartadas
-      FROM "vouchers" v
-      LEFT JOIN "voucher_movements" m ON m."voucher_id" = v."id"
-     WHERE v."tenant_id" = ${tenantId}::uuid
-       AND v."sold_ticket_line_id" = ANY(${ticketLineIds}::uuid[])
-     GROUP BY v."id"
-     FOR UPDATE OF v`;
-  return filas.map((f) => ({
-    id: f.id,
-    code: f.code,
-    status: f.status,
-    sesionesConsumidas: Number(f.consumidas),
-    sesionesApartadas: Number(f.apartadas),
-    sesionesLibres: Number(f.sessions_left),
-    tieneVenta: f.sold_ticket_id != null,
-    esPrueba: f.es_prueba,
-  }));
+      FROM "voucher_movements" m
+     WHERE m."tenant_id" = ${tenantId}::uuid
+       AND m."voucher_id" = ANY(${bonos.map((b) => b.id)}::uuid[])
+     GROUP BY m."voucher_id"`;
+  const porId = new Map(conteos.map((c) => [c.voucher_id, c]));
+  return bonos.map((f) => {
+    const c = porId.get(f.id);
+    return {
+      id: f.id,
+      code: f.code,
+      status: f.status,
+      sesionesConsumidas: Number(c?.consumidas ?? 0),
+      sesionesApartadas: Number(c?.apartadas ?? 0),
+      sesionesLibres: Number(f.sessions_left),
+      tieneVenta: f.sold_ticket_id != null,
+      esPrueba: f.es_prueba,
+    };
+  });
 }
 
 /** El primer «no» de la lista, o `null` si todos se pueden devolver. Con el
