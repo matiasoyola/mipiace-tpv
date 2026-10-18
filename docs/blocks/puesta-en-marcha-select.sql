@@ -38,8 +38,13 @@
 -- número en la contabilidad del cliente, y eso no se deshace anulando el
 -- ticket aquí.
 --
--- La columna `regla_vieja` queda al lado A PROPÓSITO: enseña qué cuentas
--- cambian de regla con el arreglo, que es lo único que hay que repasar.
+-- Las columnas `regla_vieja` y `es_de_pruebas_vieja` quedan al lado A
+-- PROPÓSITO: enseñan qué cuentas cambian con los arreglos del 18-10, que es
+-- lo único que hay que repasar. Tienen que cambiar DOS y sólo dos:
+--
+--   · Cafetería Sirope           → `regla` 3.b → 3.d (sus 20 anuladas)
+--   · el ensayo de La Maestranza → `es_de_pruebas` true → false (sus 11
+--     registros: entra por 3.a y se elimina después del despliegue)
 
 WITH primera_factura AS (
   SELECT "tenant_id", MIN("fecha_expedicion") AS "fecha", COUNT(*) AS "registros"
@@ -75,6 +80,18 @@ pruebas AS (
   SELECT t."id"
     FROM "tenants" t
    WHERE t."name" = 'PRUEBAS MIPIACE'
+),
+pruebas_vieja AS (
+  -- La lista de ANTES, para que la foto enseñe qué cambia. Igual que
+  -- `regla_vieja`: lo único que hay que repasar es la diferencia.
+  SELECT t."id"
+    FROM "tenants" t
+   WHERE t."name" = 'PRUEBAS MIPIACE'
+      OR EXISTS (
+        SELECT 1 FROM "users" u
+         WHERE u."tenant_id" = t."id"
+           AND u."email" LIKE 'm.oyola+maestranza-ensayo%'
+      )
 )
 SELECT
   t."name"                                              AS "cuenta",
@@ -105,12 +122,32 @@ SELECT
     (f."fecha"::timestamp AT TIME ZONE 'Europe/Madrid'),
     v."primera_real"
   )                                                     AS "factura_desde_quedaria",
-  (p."id" IS NOT NULL)                                  AS "es_de_pruebas_quedaria"
+  (p."id" IS NOT NULL)                                  AS "es_de_pruebas_quedaria",
+  (pv."id" IS NOT NULL)                                 AS "es_de_pruebas_vieja"
 FROM "tenants" t
-LEFT JOIN primera_factura f ON f."tenant_id" = t."id"
-LEFT JOIN ventas          v ON v."tenant_id" = t."id"
-LEFT JOIN pruebas         p ON p."id"        = t."id"
+LEFT JOIN primera_factura f  ON f."tenant_id"  = t."id"
+LEFT JOIN ventas          v  ON v."tenant_id"  = t."id"
+LEFT JOIN pruebas         p  ON p."id"         = t."id"
+LEFT JOIN pruebas_vieja   pv ON pv."id"        = t."id"
 ORDER BY t."name";
+
+-- ── Y las que cambian de MARCA (`es_de_pruebas`) ──────────────────────
+--
+-- Tiene que salir la cuenta de ensayo de La Maestranza (true → false) y
+-- nadie más.
+
+SELECT t."name",
+       (t."name" = 'PRUEBAS MIPIACE')                     AS "se_marca_ahora",
+       true                                               AS "se_marcaba_antes",
+       (SELECT COUNT(*) FROM "fiscal_records" fr WHERE fr."tenant_id" = t."id") AS "registros"
+  FROM "tenants" t
+ WHERE t."name" <> 'PRUEBAS MIPIACE'
+   AND EXISTS (
+     SELECT 1 FROM "users" u
+      WHERE u."tenant_id" = t."id"
+        AND u."email" LIKE 'm.oyola+maestranza-ensayo%'
+   )
+ ORDER BY 1;
 
 -- ── Las cuentas que CAMBIAN de regla con el arreglo ───────────────────
 --
