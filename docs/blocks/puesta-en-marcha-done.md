@@ -108,8 +108,21 @@ Dos migraciones aditivas:
 |---|---|---|
 | 3.a | Tiene registros fiscales → factura desde `min(fecha_expedicion)` | el que ya emite con nuestro TPV |
 | 3.b | Tiene ventas **reales** → factura desde `min(paid_at)` | Sole, Cachitos y cualquiera con Holded |
-| 3.c | Cuenta nuestra de pruebas → `es_de_pruebas = true`, en ensayo | PRUEBAS MIPIACE, ensayo de La Maestranza |
+| 3.c | **PRUEBAS MIPIACE** → `es_de_pruebas = true`, en ensayo | PRUEBAS MIPIACE, y nadie más |
 | 3.d | Ni registros ni ventas reales → se queda en ensayo (`null`) | Sirope, Fouzia, La Maestranza real, Rosario, Thalía |
+
+**La cuenta de ensayo de La Maestranza salió de 3.c el 18-10.** La foto de producción enseñó que
+tiene **11 registros fiscales y 16 ventas**: llegó a emitir facturas de verdad aquella noche del
+06-10, antes de que se decidiera montar una cuenta nueva desde cero. La comprobación final de la
+migración hacía su trabajo y **paraba el despliegue por ella**.
+
+Decisión de Matías: **no se marca**. Entra por 3.a como cualquier cuenta que ha facturado —su
+fecha es la de su primera factura— y se **elimina después del despliegue** con «Eliminar cuenta»,
+que es el camino que este mismo bloque construye y que le entrega al titular su export antes de
+borrar nada.
+
+Marcarla habría sido mentir sobre una cuenta con facturas emitidas, y además no habría colado: el
+CHECK `tenants_pruebas_no_facturan_ck` rechaza el `UPDATE`. Está medido en el sabotaje nº 15.
 
 **Y qué es una «venta real», que es lo que la foto de producción corrigió:**
 
@@ -156,10 +169,10 @@ Lo que queda **pendiente antes de desplegar**, y es de Matías:
 1. **Repetir el SELECT** (ahora saca al lado la `regla_vieja` y una consulta que lista las cuentas
    que cambian de regla). Tiene que salir **Sirope y nadie más**, y la tabla entera se pega aquí
    debajo.
-2. **Decidir qué se hace con la cuenta de ensayo de La Maestranza.** Tiene 11 registros fiscales y
-   16 ventas, así que la comprobación final de la migración **PARA el despliegue** con su nombre
-   dentro — que es justo para lo que está. Es una decisión suya y este bloque no la toca: no es
-   una cuenta de pruebas cualquiera, es una que llegó a emitir.
+2. ~~Decidir qué se hace con la cuenta de ensayo de La Maestranza.~~ **Decidido el 18-10**: no se
+   marca, entra por 3.a y se elimina después del despliegue desde la consola. Ya está aplicado en
+   la migración y en el SELECT. Lo que queda por hacer es **eliminarla**, después de desplegar:
+   ficha → «Eliminar cuenta» → descargar su export → teclear el nombre.
 
 > **Tabla real de producción (pegar aquí la salida del SELECT repetido):**
 >
@@ -351,6 +364,7 @@ los reales, copiados de la salida.**
 | 12 | El reseteo vuelve a borrar sólo los `TEST` | 2 unitarios + 4 del e2e | `expected [ { …(2) } ] to deeply equal [ Array(1) ]`, y en el e2e el borrado de turnos revienta contra la FK de los tickets que quedaron |
 | 13 | Se quita el guardián de la aplicación (`comprobarQueNadaEsReal`) | 2 unitarios + 3 del e2e | `expected { ticketsBorrados: 2, …(9) } to be an instance of EnsayoConVentaRealError` · y en el e2e **lo para la BASE**: `SELLO_VIOLADO: no se borra una venta sellada` |
 | 14 | El trigger se queda sin la condición de Holded | `y en una cuenta EN ENSAYO, tampoco la que llegó a Holded` | `expected '' to contain 'SELLO_VIOLADO'` |
+| 15 | La cuenta de ensayo de La Maestranza vuelve a 3.c | 2 del e2e | la comprobación final aborta (`promise rejected … instead of resolving`) **y**, si se la salta, el `UPDATE` rebota: `new row for relation "tenants" violates check constraint "tenants_pruebas_no_facturan_ck"` |
 
 El nº 1 y el nº 5 son los que más enseñan:
 
@@ -360,6 +374,9 @@ El nº 1 y el nº 5 son los que más enseñan:
   arranca**: la FK `RESTRICT` de los turnos lo para.
 - **El nº 5** cae por los dos lados a la vez: por el test que cuenta lo que se conserva y por la
   primera venta de después, que se cae con un 500 porque el producto ya no existe.
+- **El nº 15 cierra el círculo del CHECK.** La migración dice que marcar una cuenta con facturas
+  «no habría colado porque el CHECK lo rechaza»; el sabotaje lo enseña pasando por encima de la
+  comprobación y chocando con la base. Dos puertas, y la segunda es la que no se puede olvidar.
 - **El nº 13 es el que más tranquiliza.** Quitando el guardián de la aplicación, el reseteo no
   borra la venta que llegó a Holded: **la para la base**, con `SELLO_VIOLADO`. La puerta de la
   aplicación existe para dar un mensaje que se pueda leer —qué ticket, qué documento—, no para ser
@@ -441,12 +458,12 @@ las otras cuatro funciones que este bloque reemplaza tienen una sola definición
 | Suite | Resultado |
 |---|---|
 | `pnpm vitest run` (desde la raíz) | **379 ficheros, 5283 tests verdes**, 10 saltados |
-| `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **38 verdes** contra Postgres real |
+| `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **41 verdes** contra Postgres real |
 | `pnpm test:e2e` (los 40 ficheros) | **40 verdes, 788 tests** — corrida a las 09:40 (ver §8.1) |
 | El bucle visual | el panel y la banda, medidos (§8.2); un fallo encontrado y arreglado |
 
 Nuevos: `apps/api/test/puesta-en-marcha-ensayo.test.ts` (14), `test/puesta-en-marcha-arranque.test.ts`
-(19) y `test-e2e/puesta-en-marcha.e2e.ts` (38).
+(19) y `test-e2e/puesta-en-marcha.e2e.ts` (41).
 
 ### 8.1 La suite entera, en verde — y los cuatro que fallaban de madrugada
 

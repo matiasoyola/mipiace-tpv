@@ -67,9 +67,14 @@ default**.
   `emite: false` y el servidor descarta cualquier registro que llegue.
 - con fecha → **FACTURANDO.** Exactamente lo de siempre.
 
-Y `Tenant.esDePruebas Boolean @default(false)`: las cuentas del equipo (PRUEBAS MIPIACE, la de
-ensayo de La Maestranza) **no pueden arrancar nunca** y se resetean cuando haga falta. Su
-invariante vive en la base: `tenants_pruebas_no_facturan_ck`.
+Y `Tenant.esDePruebas Boolean @default(false)`: la cuenta del equipo (**PRUEBAS MIPIACE**) **no
+puede arrancar nunca** y se resetea cuando haga falta. Su invariante vive en la base:
+`tenants_pruebas_no_facturan_ck`.
+
+La cuenta de ensayo de La Maestranza estuvo en esa lista hasta el 18-10 y salió: tiene 11
+registros fiscales, o sea que llegó a emitir. Una cuenta que ha facturado **no es** una cuenta de
+pruebas por mucho que la llamemos así — el CHECK lo dice antes que nosotros. Entra por la regla
+3.a del backfill y se elimina desde la consola (§6).
 
 ### 3.1 `facturaDesde` es OBLIGATORIO en `TenantFiscalMode`
 
