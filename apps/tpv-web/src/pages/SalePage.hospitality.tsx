@@ -94,7 +94,7 @@ import {
   type FamilyTone,
 } from "../lib/hospitalityTheme.js";
 import {
-  etiquetaEnCocina,
+  etiquetaDeLoEnviado,
   partirComanda,
   puedeCorregirEnviado,
   sillaDeLinea,
@@ -295,7 +295,17 @@ export interface ComandaCocinaWiring {
   onAbrirAlergias: () => void;
   /** Las bandas «M4 · listo para servir», y el toque que marca «Servido». */
   avisosListo: AvisoListo[];
-  onServido: (orderId: string) => void;
+  /**
+   * hierro-sirope (H3) · qué secciones de ESTA cuenta están listas y
+   * cuáles siguen en marcha, para que el rótulo del ticket no diga «EN
+   * COCINA» de algo que ya está en el pase. `null` = no se sabe (módulo
+   * apagado, o una API anterior al bloque).
+   */
+  estadoDeLoEnviado?: {
+    listas: readonly string[];
+    enMarcha: readonly string[];
+  } | null;
+  onServido: (orderIds: string[]) => void;
   /** Las anulaciones dentro de su ventana de 5 s, con su «Deshacer». */
   anulaciones: AnulacionPendiente[];
   onDeshacer: (key: string) => void;
@@ -885,6 +895,14 @@ function FamilyButton({
 }
 
 /**
+ * hierro-sirope (H2) · lo que mide la insignia `×N` y cuánto se separa
+ * del borde. Vive aquí arriba porque lo usan DOS sitios —la insignia y
+ * el hueco que se le reserva al nombre— y separarlos es volver a taparlo.
+ */
+const BADGE_ANCHO_PX = 34;
+const BADGE_MARGEN_PX = 6;
+
+/**
  * Un botón de producto.
  *
  * Decisión 1 · **plano, con el color de la familia en todo el botón**.
@@ -917,7 +935,26 @@ function ProductButton({
   // se descuenta: desde #5 va en una esquina, superpuesta, y no le quita
   // sitio al nombre — que es lo que hacía que el mismo producto se
   // leyera distinto según estuviera o no en la comanda.
-  const anchoUtil = Math.max(40, cardWidth - 32);
+  // hierro-sirope (H2) · LA INSIGNIA NO PISA EL NOMBRE.
+  //
+  // #5 la sacó del flujo (a la esquina, superpuesta) para que aparecer no
+  // desplazara el texto. El efecto colateral salió el 18-10: con un
+  // nombre que llega al borde, la insignia se le sienta encima —«Tostada
+  // York y», «Café Americano» (capturas 09 y 21)— y lo que queda tapado
+  // es justo la parte por la que se distinguen dos productos parecidos.
+  //
+  // El hueco se reserva SÓLO cuando hay insignia, y a los DOS lados. A
+  // los dos porque el nombre va centrado: reservar únicamente a la
+  // derecha lo descentraría, que es el fallo que #5 arregló. Y sólo
+  // cuando la hay porque reservarlo siempre le quita 68 px de ancho a
+  // todos los botones del catálogo —el nombre encoge y se lee peor— para
+  // resolver un caso que sólo se da en los que están en la comanda.
+  //
+  // Lo que cuesta: al añadir la primera unidad el nombre puede partirse
+  // en otra línea. Pasa en el botón que acabas de tocar, una vez, y a
+  // cambio el nombre siempre se lee entero.
+  const reserva = units > 0 ? 2 * (BADGE_ANCHO_PX + BADGE_MARGEN_PX) : 0;
+  const anchoUtil = Math.max(40, cardWidth - 32 - reserva);
   const sizePx = tamanoNombreProducto(product.name, anchoUtil, 3, nameSizePx);
   return (
     <button
@@ -939,6 +976,8 @@ function ProductButton({
         data-testid="product-name"
         className="font-semibold text-center"
         style={{
+          paddingLeft: reserva / 2,
+          paddingRight: reserva / 2,
           fontSize: sizePx,
           lineHeight: 1.1,
           letterSpacing: "-0.01em",
@@ -960,9 +999,11 @@ function ProductButton({
         // unidades dentro.
         <span
           data-testid="product-units"
-          className="absolute top-1.5 right-1.5 box-border rounded-[10px] flex items-center justify-center font-semibold tabular-nums"
+          className="absolute box-border rounded-[10px] flex items-center justify-center font-semibold tabular-nums"
           style={{
-            minWidth: 34,
+            top: BADGE_MARGEN_PX,
+            right: BADGE_MARGEN_PX,
+            minWidth: BADGE_ANCHO_PX,
             height: 30,
             padding: "0 7px",
             background: DARK_QTY_BADGE,
@@ -1271,7 +1312,10 @@ function Comanda({
                     color: DARK_TEXT_MUTED,
                   }}
                 >
-                  {etiquetaEnCocina(props.lastSentAt)}
+                  {etiquetaDeLoEnviado(
+                    props.lastSentAt,
+                    props.kitchen.estadoDeLoEnviado ?? null,
+                  )}
                 </div>
                 {sent.map(({ line: l, units }) => (
                   <SentLineCocina

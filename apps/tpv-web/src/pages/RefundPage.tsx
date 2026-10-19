@@ -251,7 +251,11 @@ export function RefundOverlay(props: {
                         setUnits(l.id, Number(e.target.value) || 0, l.units)
                       }
                       inputMode="numeric"
-                      className="w-14 h-10 px-2 rounded-xl bg-mipiace-stone border border-transparent text-[14px] font-semibold text-center tabular-nums focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+                      // hierro-sirope (H1) · sin color propio heredaba el
+                      // gris del contenedor y el «0» del casillero no se
+                      // veía (captura 32): el número que dice cuánto se
+                      // devuelve era el más pálido de la pantalla.
+                      className="w-14 h-10 px-2 rounded-xl bg-mipiace-stone border border-transparent text-[14px] font-semibold text-center tabular-nums text-mipiace-ink focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
                     />
                     <button
                       onClick={() => setUnits(l.id, (unitsByLine[l.id] ?? 0) + 1, l.units)}
