@@ -5,14 +5,26 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
 
 import java.io.File;
 
@@ -60,6 +72,234 @@ public class MainActivity extends BridgeActivity {
         // `KitchenLanPlugin`, que tampoco abre un puerto al registrarse.
         registerPlugin(GuardiaAlarmPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // hierro-sirope (B) · la pantalla blanca que sólo arregla un
+        // reinicio. VA DESPUÉS de super.onCreate(): hasta aquí no existe el
+        // bridge ni, por tanto, el WebView al que escuchar.
+        armarVigilanteDelWebView();
+    }
+
+    // ── hierro-sirope (B) · EL VIGILANTE NATIVO ─────────────────────────
+    //
+    // Ver la cabecera de VigilanteNativo para la causa y la evidencia. Aquí
+    // sólo está el cableado con Android: escuchar al WebView, contar el
+    // tiempo y pintar la pantalla de rendición.
+    //
+    // Por qué nativo y no JavaScript: cuando el renderer no arranca NO SE
+    // EJECUTA JAVASCRIPT. El vigilante de arranque de auditoria-sirope
+    // (`apps/tpv-web/src/lib/vigilante-arranque.ts`) sigue en su sitio y
+    // cubre lo otro —el bundle que carga y se cuelga—; esto cubre el caso
+    // en que no llega a cargar nada.
+
+    /**
+     * El intento de recuperación se gasta UNA VEZ POR PROCESO, no una vez
+     * por actividad: recuperarse es `recreate()`, que construye una
+     * actividad nueva con un vigilante nuevo. Estático y no en el `Bundle`
+     * porque lo que no puede repetirse es el intento dentro de este
+     * arranque, y un proceso nuevo (reabrir la app) sí merece el suyo.
+     */
+    private static boolean rescateGastadoEnEsteProceso = false;
+
+    private final VigilanteNativo vigilante =
+            new VigilanteNativo(rescateGastadoEnEsteProceso);
+    private final Handler vigilanteHandler = new Handler(Looper.getMainLooper());
+    private Runnable vigilantePlazo;
+
+    private void armarVigilanteDelWebView() {
+        try {
+            // `onPageLoaded` sólo llega si el renderer está vivo y la página
+            // cargó: es exactamente «ha pintado». No vale `onPageStarted`,
+            // que ocurre antes de que el renderer tenga nada que enseñar.
+            //
+            // `onRenderProcessGone` devolviendo `true` es la otra mitad y
+            // vale por sí sola: le dice al sistema que la muerte del
+            // renderer está GESTIONADA. Sin eso, Android se lleva por
+            // delante el proceso de la app entera y la caja desaparece de
+            // la pantalla sin decir nada.
+            bridge.addWebViewListener(
+                    new WebViewListener() {
+                        @Override
+                        public void onPageLoaded(WebView webView) {
+                            desarmarVigilante();
+                        }
+
+                        @Override
+                        public boolean onRenderProcessGone(
+                                WebView webView, RenderProcessGoneDetail detail) {
+                            Log.e(TAG, "hierro-sirope B: el renderer del WebView se fue");
+                            decidirQueHacer();
+                            return true;
+                        }
+                    });
+            programarPlazo();
+        } catch (Throwable t) {
+            // Igual que el rescate de A4 y la orientación: esto corre en el
+            // camino crítico del arranque de una caja. Sin vigilante se
+            // arranca como hasta hoy.
+            Log.e(TAG, "hierro-sirope B: no pude armar el vigilante; el arranque sigue", t);
+        }
+    }
+
+    private void programarPlazo() {
+        if (vigilantePlazo != null) {
+            vigilanteHandler.removeCallbacks(vigilantePlazo);
+        }
+        vigilantePlazo =
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (vigilante.haPintado()) {
+                            return;
+                        }
+                        Log.e(
+                                TAG,
+                                "hierro-sirope B: el WebView no ha pintado en "
+                                        + vigilante.esperaMs()
+                                        + " ms");
+                        decidirQueHacer();
+                    }
+                };
+        vigilanteHandler.postDelayed(vigilantePlazo, vigilante.esperaMs());
+    }
+
+    private void desarmarVigilante() {
+        vigilante.pintado();
+        if (vigilantePlazo != null) {
+            vigilanteHandler.removeCallbacks(vigilantePlazo);
+            vigilantePlazo = null;
+        }
+    }
+
+    private void decidirQueHacer() {
+        VigilanteNativo.Decision decision = vigilante.noPinta();
+        switch (decision) {
+            case RECREAR:
+                rescateGastadoEnEsteProceso = true;
+                Log.w(TAG, "hierro-sirope B: un intento de recuperación (recreate)");
+                try {
+                    // El WebView muerto se tira ANTES de recrear: dejarlo
+                    // colgado de la jerarquía mantiene viva su conexión con
+                    // el servicio aislado, que es justo lo que hay que
+                    // soltar para que el siguiente intento pida un hueco
+                    // nuevo.
+                    WebView wv = bridge != null ? bridge.getWebView() : null;
+                    if (wv != null) {
+                        ViewGroup padre = (ViewGroup) wv.getParent();
+                        if (padre != null) {
+                            padre.removeView(wv);
+                        }
+                        wv.destroy();
+                    }
+                } catch (Throwable t) {
+                    Log.e(TAG, "hierro-sirope B: no pude tirar el WebView muerto", t);
+                }
+                try {
+                    recreate();
+                } catch (Throwable t) {
+                    Log.e(TAG, "hierro-sirope B: recreate() falló; me rindo", t);
+                    pintarRendicion();
+                }
+                return;
+            case RENDIRSE:
+                pintarRendicion();
+                return;
+            case NADA:
+            default:
+        }
+    }
+
+    /**
+     * La pantalla de rendición, construida EN CÓDIGO.
+     *
+     * <p>Sin inflar un layout y sin una sola referencia al WebView: lo que
+     * tiene que seguir funcionando cuando el WebView no funciona no puede
+     * depender de nada que el WebView toque. Es la misma razón por la que el
+     * rescate de A4 es Java puro.
+     */
+    private void pintarRendicion() {
+        try {
+            LinearLayout raiz = new LinearLayout(this);
+            raiz.setOrientation(LinearLayout.VERTICAL);
+            raiz.setGravity(Gravity.CENTER);
+            raiz.setBackgroundColor(Color.parseColor("#12161F"));
+            int pad = (int) TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, 32, getResources().getDisplayMetrics());
+            raiz.setPadding(pad, pad, pad, pad);
+
+            TextView titulo = new TextView(this);
+            titulo.setText(VigilanteNativo.TITULO_RENDICION);
+            titulo.setTextColor(Color.WHITE);
+            titulo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
+            titulo.setGravity(Gravity.CENTER);
+            raiz.addView(titulo);
+
+            TextView cuerpo = new TextView(this);
+            cuerpo.setText(VigilanteNativo.CUERPO_RENDICION);
+            cuerpo.setTextColor(Color.parseColor("#E6E8EC"));
+            cuerpo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
+            cuerpo.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = pad / 2;
+            cuerpo.setLayoutParams(lp);
+            raiz.addView(cuerpo);
+
+            Button reintentar = new Button(this);
+            reintentar.setText(VigilanteNativo.BOTON_RENDICION);
+            reintentar.setAllCaps(false);
+            reintentar.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+            LinearLayout.LayoutParams blp =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
+            blp.topMargin = pad;
+            reintentar.setLayoutParams(blp);
+            reintentar.setOnClickListener(
+                    new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            recreate();
+                        }
+                    });
+            raiz.addView(reintentar);
+
+            // La línea de diagnóstico, pequeña y abajo: es lo que Matías
+            // necesita leer por teléfono sin pedir un logcat.
+            TextView pie = new TextView(this);
+            pie.setText(diagnosticoDelWebView());
+            pie.setTextColor(Color.parseColor("#8A93A6"));
+            pie.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            pie.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams plp =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
+            plp.topMargin = pad;
+            pie.setLayoutParams(plp);
+            raiz.addView(pie);
+
+            setContentView(raiz);
+            Log.e(TAG, "hierro-sirope B: pantalla de rendición · " + diagnosticoDelWebView());
+        } catch (Throwable t) {
+            Log.e(TAG, "hierro-sirope B: ni la pantalla de rendición pude pintar", t);
+        }
+    }
+
+    private String diagnosticoDelWebView() {
+        String webview = "WebView desconocido";
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                PackageInfo p = WebView.getCurrentWebViewPackage();
+                if (p != null) {
+                    webview = p.packageName + " " + p.versionName;
+                }
+            }
+        } catch (Throwable ignored) {
+            /* el diagnóstico es un extra: nunca tumba la pantalla */
+        }
+        return webview + " · Android " + Build.VERSION.RELEASE;
     }
 
     /**
