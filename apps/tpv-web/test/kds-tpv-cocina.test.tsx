@@ -465,8 +465,10 @@ type SalePagePropsDeTest = React.ComponentProps<typeof SalePage>;
 async function render(opts: {
   lineas?: ServerDraftLine[];
   modulo?: boolean;
-  avisos?: Array<{ orderId: string; tableName: string | null; readyAt: string }>;
-  onServido?: (id: string) => void;
+  // hierro-sirope (D) · la banda es por MESA: lo que se le pasa a
+  // `SalePage` ya viene agrupado por `agruparAvisos`.
+  avisos?: SalePagePropsDeTest["avisosListo"];
+  onServido?: (ids: string[]) => void;
 } = {}) {
   root = createRoot(container);
   await act(async () => {
@@ -753,35 +755,59 @@ describe("kds-2b · SABOTAJE · la comanda de la wifi sale con el catálogo viej
   });
 });
 
+/** hierro-sirope (D) · un grupo de los que pinta `ListoBanner`. */
+function grupo(
+  p: Partial<NonNullable<SalePagePropsDeTest["avisosListo"]>[number]> & {
+    clave: string;
+    titulo: string;
+  },
+): NonNullable<SalePagePropsDeTest["avisosListo"]>[number] {
+  return {
+    clave: p.clave,
+    texto: p.texto ?? `${p.titulo} · listo para servir`,
+    orderIds: p.orderIds ?? [p.clave],
+    ticketIds: p.ticketIds ?? [],
+    secciones: p.secciones ?? ["COCINA"],
+    enMarcha: p.enMarcha ?? [],
+    readyAt: p.readyAt ?? "2026-10-08T10:20:00.000Z",
+  };
+}
+
 describe("kds-1 · decisión 5 · la banda «LISTO»", () => {
   it("sale con el nombre de la mesa y un toque marca «Servido»", async () => {
     banco({ pantalla: true, listas: [] });
-    const servidos: string[] = [];
+    const servidos: string[][] = [];
     await render({
-      avisos: [
-        { orderId: ORDER, tableName: "M4", readyAt: "2026-10-08T10:20:00.000Z" },
-      ],
-      onServido: (id) => servidos.push(id),
+      avisos: [grupo({ clave: "mesa:m4", titulo: "M4", orderIds: [ORDER] })],
+      onServido: (ids) => servidos.push(ids),
     });
 
     const banda = $('[data-testid="listo-banda"]')!;
     expect(banda.textContent).toMatch(/M4 · listo para servir/);
     await click(banda);
-    expect(servidos).toEqual([ORDER]);
+    expect(servidos).toEqual([[ORDER]]);
   });
 
   it("varias listas se apilan de MÁS ANTIGUA a más nueva", async () => {
     banco({ pantalla: true });
     await render({
       avisos: [
-        { orderId: "nueva", tableName: "T2", readyAt: "2026-10-08T10:25:00.000Z" },
-        { orderId: "vieja", tableName: "M1", readyAt: "2026-10-08T10:05:00.000Z" },
+        grupo({
+          clave: "nueva",
+          titulo: "T2",
+          readyAt: "2026-10-08T10:25:00.000Z",
+        }),
+        grupo({
+          clave: "vieja",
+          titulo: "M1",
+          readyAt: "2026-10-08T10:05:00.000Z",
+        }),
       ],
     });
     // El camarero coge lo que lleva más tiempo en el pase, así que lo
     // primero que lee tiene que ser eso.
     expect(
-      $$('[data-testid="listo-banda"]').map((b) => b.dataset.orderId),
+      $$('[data-testid="listo-banda"]').map((b) => b.dataset.clave),
     ).toEqual(["vieja", "nueva"]);
   });
 
@@ -789,9 +815,7 @@ describe("kds-1 · decisión 5 · la banda «LISTO»", () => {
     banco({ pantalla: false, modulo: false });
     await render({
       modulo: false,
-      avisos: [
-        { orderId: ORDER, tableName: "M4", readyAt: "2026-10-08T10:20:00.000Z" },
-      ],
+      avisos: [grupo({ clave: "mesa:m4", titulo: "M4", orderIds: [ORDER] })],
     });
     expect($$('[data-testid="listo-banner"]')).toHaveLength(0);
   });

@@ -20,7 +20,7 @@
 // pantalla de cocina — donde el bloque prohíbe el audio. Aquí no hay
 // fichero que reproducir.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   DARK_ON_CORAL,
@@ -29,10 +29,18 @@ import {
 } from "../../lib/hospitalityTheme.js";
 import { VERDE_LISTA } from "../../lib/kitchenTheme.js";
 
+/**
+ * hierro-sirope (D) · lo que pinta una banda es un GRUPO: una mesa con
+ * todo lo que tiene listo. Lo arma `agruparAvisos`.
+ */
 export interface AvisoListo {
-  orderId: string;
-  tableName: string | null;
-  /** ISO de cuándo se puso «Lista». Ordena la pila. */
+  /** Llave estable del grupo (mesa o mostrador). */
+  clave: string;
+  /** La línea entera: «M3 · barra lista (cocina en marcha)». */
+  texto: string;
+  /** Todo lo listo de esa mesa: un toque lo sirve entero. */
+  orderIds: string[];
+  /** ISO del más antiguo del grupo. Ordena la pila. */
   readyAt: string;
 }
 
@@ -40,11 +48,28 @@ export interface ListoBannerProps {
   avisos: AvisoListo[];
   /** `Store.kitchenReadyBeep`. Apagado de serie. */
   beep: boolean;
-  onServido: (orderId: string) => void;
+  onServido: (orderIds: string[]) => void;
 }
 
 /** 24 px: una banda y no una barra. Dos caben sin tapar la comanda. */
 const BANDA_PX = 52;
+
+/**
+ * hierro-sirope (D) · CUÁNTAS BANDAS PUEDEN EMPUJAR EL TICKET.
+ *
+ * Dos. A 1442 × 811 (el D8) dos bandas de 52 px más la franja «Urgente»
+ * todavía dejan el ticket y sus botones dentro de la pantalla; tres no
+ * (captura 25: la segunda línea del ticket quedaba bajo «Urgente»).
+ *
+ * A partir de la tercera se pinta la más antigua —la que lleva más tiempo
+ * en el pase, que es la que hay que atender— y una fila compacta «N
+ * listas más · ver» que despliega el resto en su PROPIO scroll. El ticket
+ * no se mueve: la pila nunca pasa de dos filas plegada.
+ */
+export const MAX_BANDAS = 2;
+
+/** Alto máximo del desplegable: tres bandas y pico, y scrollea. */
+const DESPLEGADO_MAX_PX = BANDA_PX * 3 + 24;
 
 export function ListoBanner(props: ListoBannerProps) {
   // Un pitido por comanda y SÓLO al aparecer: sin esto, cada repintado de
@@ -53,11 +78,24 @@ export function ListoBanner(props: ListoBannerProps) {
   useEffect(() => {
     if (!props.beep) return;
     for (const a of props.avisos) {
-      if (pitadosRef.current.has(a.orderId)) continue;
-      pitadosRef.current.add(a.orderId);
+      // La llave del pitido es el GRUPO + lo que tiene listo: si a M3 le
+      // queda lista la cocina después de la barra, eso es una comanda
+      // nueva y vuelve a pitar. Lo que no pita es el mismo grupo en cada
+      // repintado.
+      const llave = `${a.clave}|${[...a.orderIds].sort().join(",")}`;
+      if (pitadosRef.current.has(llave)) continue;
+      pitadosRef.current.add(llave);
       pitarCorto();
     }
   }, [props.avisos, props.beep]);
+
+  const [desplegado, setDesplegado] = useState(false);
+  // Al bajar de tres grupos no queda nada que desplegar: el estado se
+  // reinicia para que la próxima avalancha vuelva a entrar plegada.
+  const sobran = props.avisos.length > MAX_BANDAS;
+  useEffect(() => {
+    if (!sobran) setDesplegado(false);
+  }, [sobran]);
 
   if (props.avisos.length === 0) return null;
 
@@ -67,32 +105,86 @@ export function ListoBanner(props: ListoBannerProps) {
     a.readyAt.localeCompare(b.readyAt),
   );
 
+  const plegado = !desplegado && ordenadas.length > MAX_BANDAS;
+  const visibles = plegado ? ordenadas.slice(0, 1) : ordenadas;
+  const ocultas = ordenadas.length - visibles.length;
+
+  const banda = (a: AvisoListo) => (
+    <button
+      key={a.clave}
+      type="button"
+      data-testid="listo-banda"
+      data-clave={a.clave}
+      data-order-ids={a.orderIds.join(",")}
+      onClick={() => props.onServido(a.orderIds)}
+      className={`w-full rounded-[12px] px-4 flex items-center gap-3 font-bold text-left ${PRESS_FEEDBACK_CLASS}`}
+      style={{
+        minHeight: Math.max(BANDA_PX, MIN_TOUCH_PX),
+        background: VERDE_LISTA,
+        color: DARK_ON_CORAL,
+        fontSize: 21,
+      }}
+    >
+      <span className="min-w-0">{a.texto}</span>
+      <span className="ml-auto shrink-0 font-semibold" style={{ fontSize: 16 }}>
+        Servido
+      </span>
+    </button>
+  );
+
   return (
     <div
       data-testid="listo-banner"
+      data-grupos={ordenadas.length}
       className="shrink-0 flex flex-col gap-1 px-3 pt-2"
     >
-      {ordenadas.map((a) => (
+      {/* Desplegado, la pila tiene su PROPIO scroll: lo que no puede
+          pasar es que seis mesas listas empujen el ticket fuera de la
+          pantalla. Plegado no hace falta — nunca pasa de una banda más
+          la fila de «ver». */}
+      {desplegado && sobran ? (
+        <div
+          data-testid="listo-pila"
+          className="flex flex-col gap-1 overflow-y-auto"
+          style={{ maxHeight: DESPLEGADO_MAX_PX }}
+        >
+          {visibles.map(banda)}
+        </div>
+      ) : (
+        visibles.map(banda)
+      )}
+      {plegado && (
         <button
-          key={a.orderId}
           type="button"
-          data-testid="listo-banda"
-          data-order-id={a.orderId}
-          onClick={() => props.onServido(a.orderId)}
+          data-testid="listo-mas"
+          onClick={() => setDesplegado(true)}
           className={`w-full rounded-[12px] px-4 flex items-center gap-3 font-bold text-left ${PRESS_FEEDBACK_CLASS}`}
           style={{
-            minHeight: Math.max(BANDA_PX, MIN_TOUCH_PX),
+            minHeight: MIN_TOUCH_PX,
             background: VERDE_LISTA,
             color: DARK_ON_CORAL,
-            fontSize: 21,
+            fontSize: 17,
           }}
         >
-          <span>{a.tableName ?? "Comanda"} · listo para servir</span>
-          <span className="ml-auto font-semibold" style={{ fontSize: 16 }}>
-            Servido
+          <span>
+            {ocultas} {ocultas === 1 ? "mesa lista más" : "mesas listas más"}
+          </span>
+          <span className="ml-auto shrink-0 font-semibold" style={{ fontSize: 16 }}>
+            Ver
           </span>
         </button>
-      ))}
+      )}
+      {!plegado && ordenadas.length > MAX_BANDAS && (
+        <button
+          type="button"
+          data-testid="listo-menos"
+          onClick={() => setDesplegado(false)}
+          className="w-full text-center font-semibold opacity-80"
+          style={{ minHeight: 32, color: VERDE_LISTA, fontSize: 14 }}
+        >
+          Plegar
+        </button>
+      )}
     </div>
   );
 }

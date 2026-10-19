@@ -43,6 +43,12 @@ import { useCallback, useEffect, useState } from "react";
 import { apiWithCashier } from "../../api.js";
 import { newId } from "../../lib/ids.js";
 import type { KitchenSection } from "../secciones.js";
+import { EVENTO_COCINA } from "./avisoCocina.js";
+import {
+  agruparAvisos,
+  type AvisoAgrupado,
+  type ComandaEnMarchaMin,
+} from "./agruparAvisos.js";
 import {
   CAMINO_APAGADO,
   type CaminoDirecto,
@@ -70,11 +76,22 @@ export const REFRESCO_MS = 30_000;
 
 export interface AvisosListo {
   listas: ComandaLista[];
+  /**
+   * hierro-sirope (D) · lo mismo, UNA BANDA POR MESA. Es lo que pinta
+   * `ListoBanner`; `listas` se queda para lo que de verdad es por
+   * comanda (el mapa de sala sólo necesita los ids de mesa).
+   */
+  agrupados: AvisoAgrupado[];
   /** Los ids de mesa con algo listo: la etiqueta verde de la sala. */
   mesasListas: Set<string>;
   recargar: () => void;
-  /** Un toque en la banda o en la etiqueta = «Servido». */
-  marcarServido: (orderId: string) => Promise<void>;
+  /**
+   * Un toque en la banda o en la etiqueta = «Servido».
+   *
+   * Recibe una LISTA porque un toque sirve toda la mesa: el camarero fue
+   * una vez y recogió lo que había (hierro-sirope D).
+   */
+  marcarServido: (orderIds: readonly string[]) => Promise<void>;
 }
 
 export function useAvisosListo(opts: {
@@ -84,15 +101,29 @@ export function useAvisosListo(opts: {
   camino?: CaminoDirecto;
 }): AvisosListo {
   const [listas, setListas] = useState<ComandaLista[]>([]);
+  // hierro-sirope (D) · lo que sigue en marcha, para que la banda pueda
+  // decir «(cocina en marcha)» en vez de un «listo» que no es toda la
+  // verdad. Viene en el mismo GET.
+  const [enMarcha, setEnMarcha] = useState<ComandaEnMarchaMin[]>([]);
   const camino = opts.camino ?? CAMINO_APAGADO;
 
   const recargar = useCallback(() => {
     if (!opts.moduloEncendido) {
       setListas([]);
+      setEnMarcha([]);
       return;
     }
-    void apiWithCashier<{ ready: ComandaLista[] }>("/kitchen/listas")
-      .then((d) => setListas(d.ready))
+    void apiWithCashier<{
+      ready: ComandaLista[];
+      pending?: ComandaEnMarchaMin[];
+    }>("/kitchen/listas")
+      .then((d) => {
+        setListas(d.ready);
+        // `?? []` y no un error: una API anterior al bloque no manda
+        // `pending`, y entonces la banda dice lo de siempre en vez de
+        // dejar al camarero sin aviso.
+        setEnMarcha(d.pending ?? []);
+      })
       .catch(() => {
         // Sin red el TPV sigue vendiendo («cobrar siempre se puede»). Lo
         // que no se puede es borrar un aviso que a lo mejor sigue vivo, así
@@ -105,6 +136,21 @@ export function useAvisosListo(opts: {
     if (!opts.moduloEncendido) return;
     const id = setInterval(recargar, REFRESCO_MS);
     return () => clearInterval(id);
+  }, [recargar, opts.moduloEncendido]);
+
+  // hierro-sirope (H4) · LA FORMA 2 DE LA CABECERA, QUE NO EXISTÍA.
+  //
+  // «Se refresca con el evento del bus» decía arriba desde kds-1, y era
+  // mentira: nadie suscribía esto a nada. El WebSocket de la tienda lo
+  // abren la pantalla de venta y la de sala, que están DEBAJO; el aviso
+  // sube como evento del navegador (ver `avisoCocina.ts`) y aquí se
+  // escucha. Sin esto el único camino era el repaso de 30 s, que es el
+  // retraso que se midió en el hierro.
+  useEffect(() => {
+    if (!opts.moduloEncendido) return;
+    const alCambiar = () => recargar();
+    window.addEventListener(EVENTO_COCINA, alCambiar);
+    return () => window.removeEventListener(EVENTO_COCINA, alCambiar);
   }, [recargar, opts.moduloEncendido]);
 
   // kds-2-wifi · lo que las pantallas dicen por la wifi que tienen listo,
@@ -142,13 +188,8 @@ export function useAvisosListo(opts: {
     ),
   ].sort((a, b) => Date.parse(a.readyAt) - Date.parse(b.readyAt));
 
-  const marcarServido = useCallback(
+  const servirUna = useCallback(
     async (orderId: string) => {
-      // Optimista: la banda desaparece en el acto y no cuando el servidor
-      // conteste. Si el POST falla, el refresco la devuelve — y mientras,
-      // el camarero ya está andando hacia la mesa.
-      setListas((prev) => prev.filter((l) => l.orderId !== orderId));
-
       // kds-2-wifi · una tarjeta que sólo llegó por la wifi no tiene id de
       // servidor: su «Servido» sale SÓLO por la wifi, y la hora en el pase
       // la sube la tablet con su libro de marcas cuando vuelva la red.
@@ -164,27 +205,49 @@ export function useAvisosListo(opts: {
         return;
       }
 
+      // Los dos caminos. `allSettled` y no `all`: sin internet la nube
+      // falla y el «Servido» tiene que llegar igual a la tablet.
+      await Promise.allSettled([
+        apiWithCashier(`/kitchen/comandas/${orderId}/servido`, {
+          method: "POST",
+        }),
+        camino.mandarPorWifi("SERVIDO", newId(), {
+          clientSendId: orderId,
+          section: "COCINA",
+        }),
+      ]);
+    },
+    [camino],
+  );
+
+  const marcarServido = useCallback(
+    async (orderIds: readonly string[]) => {
+      const ids = [...orderIds];
+      if (ids.length === 0) return;
+      // Optimista: la banda desaparece en el acto y no cuando el servidor
+      // conteste. Si el POST falla, el refresco la devuelve — y mientras,
+      // el camarero ya está andando hacia la mesa.
+      setListas((prev) => prev.filter((l) => !ids.includes(l.orderId)));
       try {
-        // Los dos caminos. `allSettled` y no `all`: sin internet la nube
-        // falla y el «Servido» tiene que llegar igual a la tablet.
-        await Promise.allSettled([
-          apiWithCashier(`/kitchen/comandas/${orderId}/servido`, {
-            method: "POST",
-          }),
-          camino.mandarPorWifi("SERVIDO", newId(), {
-            clientSendId: orderId,
-            section: "COCINA",
-          }),
-        ]);
+        // hierro-sirope (D) · toda la mesa de una. En serie y no en
+        // paralelo: son dos o tres, y una ráfaga simultánea sobre la misma
+        // mesa es justo lo que hace que la tablet aplique marcas fuera de
+        // orden.
+        for (const id of ids) await servirUna(id);
       } finally {
         recargar();
       }
     },
-    [recargar, camino],
+    [recargar, servirUna],
   );
 
   return {
     listas: todas,
+    // Lo que sigue en marcha entra tal cual: `agruparAvisos` ya descarta
+    // las secciones que esa misma mesa tiene ya listas, que es lo que
+    // impide el «barra lista (barra en marcha)» de la ventana entre el
+    // GET y el evento.
+    agrupados: agruparAvisos(todas, enMarcha),
     mesasListas: new Set(
       todas.map((l) => l.tableId).filter((x): x is string => x != null),
     ),
