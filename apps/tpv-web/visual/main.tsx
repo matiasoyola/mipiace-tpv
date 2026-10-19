@@ -63,7 +63,7 @@
 //     "Fiado" en el cobro) y `?fiado=1` enciende la venta a crédito, que
 //     nace apagada y hace falta para ver que el botón desaparece.
 
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "../src/index.css";
@@ -1213,18 +1213,18 @@ function listasDelBanco(): { ready: unknown[]; pending: unknown[] } {
   const ready: unknown[] = [
     {
       orderId: "lista-m3-cocina",
-      ticketId: "tk-m3",
-      tableId: "mesa-m3",
-      tableName: "M3",
+      ticketId: "tk-m1",
+      tableId: "t3",
+      tableName: "M1",
       section: "COCINA",
       number: 1,
       readyAt: new Date(Date.parse(KDS_AHORA) - 6 * 60_000).toISOString(),
     },
     {
       orderId: "lista-m3-barra",
-      ticketId: "tk-m3",
-      tableId: "mesa-m3",
-      tableName: "M3",
+      ticketId: "tk-m1",
+      tableId: "t3",
+      tableName: "M1",
       section: "BARRA",
       number: 1,
       readyAt: new Date(Date.parse(KDS_AHORA) - 5 * 60_000).toISOString(),
@@ -1244,7 +1244,7 @@ function listasDelBanco(): { ready: unknown[]; pending: unknown[] } {
   // Y una mesa a medias: la barra lista y la cocina todavía en marcha.
   const pending =
     benchParam("en-marcha") === "1"
-      ? [{ orderId: "p1", ticketId: "tk-m3", tableId: "mesa-m3", section: "SALON" }]
+      ? [{ orderId: "p1", ticketId: "tk-m1", tableId: "t3", section: "SALON" }]
       : [];
   return { ready, pending };
 }
@@ -1255,6 +1255,29 @@ function listasDelBanco(): { ready: unknown[]; pending: unknown[] } {
 function bandasDelBanco() {
   const { ready, pending } = listasDelBanco();
   return agruparAvisos(ready as never, pending as never);
+}
+
+/**
+ * hierro-sirope (H1) · EL FONDO DEL QUE HEREDAN ESTAS PANTALLAS.
+ *
+ * El histórico y la devolución se abren DESDE la pantalla de venta de
+ * hostelería, que es oscura y fija `color: #F1F3F5` (`DARK_TEXT`) en su
+ * contenedor. Sus hojas son blancas pero no se ponen color propio, así
+ * que lo heredan: por eso en el D8 los importes de línea salían en
+ * blanco roto sobre blanco (captura 31) y el «0» del casillero de la
+ * devolución no se veía (captura 32). Medido en el PNG de la pasada: el
+ * píxel más oscuro de «1,50 €» es exactamente (241, 243, 245).
+ *
+ * Montarlas sueltas en el banco las pinta sobre el `color` del `body`
+ * (#1f2937) y el fallo NO se reproduce. Este envoltorio devuelve la
+ * herencia real.
+ */
+function EnLaSalaOscura({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ background: "#0E1013", color: "#F1F3F5", minHeight: "100vh" }}>
+      {children}
+    </div>
+  );
 }
 
 /** ¿La venta del banco lleva el módulo «Cocina» encendido? */
@@ -2142,14 +2165,16 @@ function Bench() {
   if (screen === "hierro-ticket-detalle") {
     const t = ticketsDelBanco();
     return (
-      <Screens.TicketDetailDrawer
-        ticket={t.items[1] as never}
-        multiCaja={t.multiCaja}
-        businessType="HOSPITALITY"
-        onClose={() => {}}
-        onRefund={() => {}}
-        onChanged={() => {}}
-      />
+      <EnLaSalaOscura>
+        <Screens.TicketDetailDrawer
+          ticket={t.items[1] as never}
+          multiCaja={t.multiCaja}
+          businessType="HOSPITALITY"
+          onClose={() => {}}
+          onRefund={() => {}}
+          onChanged={() => {}}
+        />
+      </EnLaSalaOscura>
     );
   }
 
@@ -2157,11 +2182,13 @@ function Bench() {
   if (screen === "hierro-devolucion") {
     const t = ticketsDelBanco();
     return (
-      <Screens.RefundOverlay
-        ticket={t.items[1] as never}
-        onClose={() => {}}
-        onConfirmed={() => {}}
-      />
+      <EnLaSalaOscura>
+        <Screens.RefundOverlay
+          ticket={t.items[1] as never}
+          onClose={() => {}}
+          onConfirmed={() => {}}
+        />
+      </EnLaSalaOscura>
     );
   }
 
