@@ -120,6 +120,15 @@ export async function registerTicketPrintRoute(
           "tickets.print.escpos: no se pudo armar el desglose IVA; se imprime sin desglose",
         );
       }
+      // hierro-sirope (G) · ¿hay más de una caja en esta tienda? Sólo
+      // entonces el papel lleva «C2·» delante del número.
+      const storeId = ticket.register.storeId;
+      const multiCaja =
+        storeId == null
+          ? false
+          : (await prisma.register.count({
+              where: { storeId, deletedAt: null },
+            })) > 1;
       const bytes = buildTicketReceipt(
         ticketToEscposInput(
           ticket,
@@ -127,6 +136,7 @@ export async function registerTicketPrintRoute(
           ticketTotals,
           copy === true,
           verifactu,
+          multiCaja,
         ),
       );
 
@@ -247,6 +257,10 @@ async function loadTicketForPrint(
       register: {
         select: {
           name: true,
+          // hierro-sirope (G) · la serie de la caja, para el «C2·» del
+          // papel cuando la tienda tiene más de una.
+          fiscalSeries: true,
+          storeId: true,
           store: { select: { name: true, fiscalAddress: true } },
         },
       },

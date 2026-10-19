@@ -11,6 +11,7 @@ import {
   leyendaExencion,
   mensajeNoDevolvible,
   motivoNoDevolvible,
+  numeroConCaja,
 } from "@mipiacetpv/ticket-model";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -184,7 +185,15 @@ interface TicketRow {
   paidAt: string | null;
   syncedAt: string | null;
   syncError: unknown;
-  register?: { id: string; name: string; storeName: string };
+  // hierro-sirope (G) · `cajaEtiqueta` es «C2»: la serie de la caja, la
+  // misma que lleva su factura simplificada. Opcional porque un TPV
+  // recién actualizado puede leer del caché una respuesta anterior.
+  register?: {
+    id: string;
+    name: string;
+    storeName: string;
+    cajaEtiqueta?: string | null;
+  };
   lines: Array<{
     id: string;
     nameSnapshot: string;
@@ -231,6 +240,9 @@ export function TicketsHistoryPage(props: {
   // así que aquí el copy importa más que en RETAIL.
   const businessType = getCachedBusinessType();
   const [tickets, setTickets] = useState<TicketRow[]>([]);
+  // hierro-sirope (G) · la tienda tiene más de una caja: hay que decir
+  // de cuál es cada número.
+  const [multiCaja, setMultiCaja] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -268,10 +280,15 @@ export function TicketsHistoryPage(props: {
         params.set("to", new Date(`${dateTo}T23:59:59.999`).toISOString());
       }
       params.set("limit", "50");
-      const res = await apiWithCashier<{ items: TicketRow[] }>(
-        `/tickets?${params.toString()}`,
-      );
+      const res = await apiWithCashier<{
+        items: TicketRow[];
+        multiCaja?: boolean;
+      }>(`/tickets?${params.toString()}`);
       setTickets(res.items);
+      // hierro-sirope (G) · lo dice el servidor contando las cajas de la
+      // TIENDA, no esta página: si lo decidiera el contenido, el prefijo
+      // aparecería y desaparecería al filtrar.
+      setMultiCaja(res.multiCaja === true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado");
     } finally {
@@ -451,6 +468,7 @@ export function TicketsHistoryPage(props: {
               <TicketRowCard
                 key={t.id}
                 ticket={t}
+                multiCaja={multiCaja}
                 showAttendedBy={businessType === "SERVICES"}
                 onOpen={() => setSelected(t)}
               />
@@ -462,6 +480,7 @@ export function TicketsHistoryPage(props: {
       {selected && (
         <TicketDetailDrawer
           ticket={selected}
+          multiCaja={multiCaja}
           businessType={businessType}
           onClose={() => setSelected(null)}
           onRefund={() => {
@@ -512,11 +531,14 @@ function FilterChip({
 }
 
 function TicketRowCard({
+  multiCaja,
   ticket,
   showAttendedBy,
   onOpen,
 }: {
   ticket: TicketRow;
+  /** hierro-sirope (G) · la tienda tiene más de una caja. */
+  multiCaja: boolean;
   showAttendedBy: boolean;
   onOpen: () => void;
 }) {
@@ -528,6 +550,7 @@ function TicketRowCard({
   // verdad y cuenta lo que pasó. El "hint" ya no puede decir "enviado"
   // sin que el transporte lo haya confirmado.
   const { state: reprintState, run: runReprint, reset } = useReprint(ticket.id);
+  const etiquetaCaja = multiCaja ? (ticket.register?.cajaEtiqueta ?? null) : null;
   const reprinting = reprintState.phase === "printing";
   const canReprint = ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
   async function reprint(e: React.MouseEvent) {
@@ -563,7 +586,13 @@ function TicketRowCard({
               estados. El texto largo (fecha, caja, líneas) sigue en la
               línea de abajo, que sí trunca. */}
           <div className="text-[14.5px] font-medium text-mipiace-ink flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="tabular-nums">#{ticket.internalNumber}</span>
+            {/* hierro-sirope (G) · «#C2·000001» con dos cajas en la
+                tienda, «#000001» con una. La Caja 2 de Sirope empezó en
+                #000001 con la Caja 1 por el #000028, en la misma lista y
+                sin nada que las distinguiera (captura 30). */}
+            <span className="tabular-nums" data-testid="ticket-numero">
+              #{numeroConCaja(ticket.internalNumber, etiquetaCaja)}
+            </span>
             {ticket.holdedDocNumber && (
               <span className="text-[12.5px] text-slate-400 tabular-nums">
                 · {ticket.holdedDocNumber}
@@ -719,12 +748,15 @@ function StatusBadge({ status }: { status: TicketRow["status"] }) {
 // botón de devolución sobre tickets TEST en modo prueba).
 export function TicketDetailDrawer({
   ticket,
+  multiCaja = false,
   businessType,
   onClose,
   onRefund,
   onChanged,
 }: {
   ticket: TicketRow;
+  /** hierro-sirope (G) · la tienda tiene más de una caja. */
+  multiCaja?: boolean;
   businessType: import("../lib/catalog.js").BusinessType | null;
   onClose: () => void;
   onRefund: () => void;
@@ -844,9 +876,23 @@ export function TicketDetailDrawer({
       >
         <div className="flex items-start justify-between mb-3">
           <div>
-            <div className="text-[18px] font-semibold text-mipiace-ink tabular-nums">
-              #{ticket.internalNumber}
+            <div
+              className="text-[18px] font-semibold text-mipiace-ink tabular-nums"
+              data-testid="ticket-detalle-numero"
+            >
+              #
+              {numeroConCaja(
+                ticket.internalNumber,
+                multiCaja ? (ticket.register?.cajaEtiqueta ?? null) : null,
+              )}
             </div>
+            {/* hierro-sirope (G) · y el nombre largo debajo, por si
+                «C2» no le dice nada a quien acaba de entrar. */}
+            {multiCaja && ticket.register && (
+              <div className="text-[12.5px] text-slate-500">
+                {ticket.register.name}
+              </div>
+            )}
             {ticket.holdedDocNumber && (
               <div className="text-[12.5px] text-slate-500 tabular-nums">
                 Fiscal {ticket.holdedDocNumber}
@@ -871,7 +917,14 @@ export function TicketDetailDrawer({
                   <div className="text-[12px] text-slate-500">{formatModifierBreadcrumb(l.modifiers)}</div>
                 )}
               </div>
-              <div className="text-[13.5px] font-medium tabular-nums">{formatEur(l.total)}</div>
+              {/* hierro-sirope (H1) · el importe de la línea no llevaba
+                  color propio, así que heredaba el gris del contenedor y
+                  en el D8 quedaba casi invisible (captura 31): la cifra
+                  que el cajero compara con lo que le dice el cliente era
+                  lo menos legible de la hoja. */}
+              <div className="text-[13.5px] font-medium tabular-nums text-mipiace-ink">
+                {formatEur(l.total)}
+              </div>
             </div>
           ))}
         </div>

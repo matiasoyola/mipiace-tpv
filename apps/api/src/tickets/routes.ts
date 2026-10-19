@@ -16,8 +16,10 @@ import { Prisma, TicketStatus } from "@mipiacetpv/db";
 // auditoria-sirope (#17) · la regla de «¿es devolvible?» la escribe una
 // sola función, y la miran el servidor y el TPV.
 import {
+  etiquetaDeCaja,
   mensajeNoDevolvible,
   motivoNoDevolvible,
+  parsearBusquedaDeTicket,
 } from "@mipiacetpv/ticket-model";
 import type { FastifyInstance } from "fastify";
 
@@ -2071,11 +2073,28 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       if (q.q) {
         // Búsqueda: número interno (correlativo), externalId completo,
         // o docNumber fiscal.
+        //
+        // hierro-sirope (G) · y «C2·000001». Con dos cajas hay dos
+        // #000001, así que:
+        //
+        //   · «000001» devuelve LOS DOS. Quien teclea un número a secas
+        //     no sabe de qué caja es —se lo está leyendo a un cliente por
+        //     teléfono— y esconderle la mitad es la peor respuesta.
+        //   · «C2·000001» (o con espacio, guion o barra) devuelve sólo el
+        //     de esa caja, porque ahí ya lo ha dicho.
+        //
+        // El filtro por caja va con un AND sobre `register.fiscalSeries`
+        // y no dentro del OR: lo que acota es la caja, no otra forma de
+        // encontrar el ticket.
+        const busqueda = parsearBusquedaDeTicket(q.q);
         where.OR = [
-          { internalNumber: q.q },
+          { internalNumber: busqueda.numero },
           { holdedDocNumber: q.q },
           { externalId: q.q as string },
         ];
+        if (busqueda.caja) {
+          where.register = { fiscalSeries: busqueda.caja };
+        }
       }
       if (q.method) {
         where.payments = { some: { method: q.method as "CASH" } };
@@ -2094,6 +2113,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       return {
         items,
         nextCursor: hasMore ? items[items.length - 1]!.id : null,
+        // hierro-sirope (G) · ¿hay que distinguir la caja en la lista?
+        // Lo decide el SERVIDOR y no el contenido de la página: una
+        // página en la que por casualidad sólo salen tickets de la Caja 1
+        // no es una tienda de una caja, y el prefijo no puede aparecer y
+        // desaparecer al pasar de página.
+        multiCaja: await tiendaConVariasCajas(prisma, cashier.rid),
       };
     },
   );
@@ -2700,6 +2725,28 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   );
 }
 
+/**
+ * hierro-sirope (G) · ¿la tienda de esta caja tiene más de una caja?
+ *
+ * Es lo que enciende el prefijo «C2·» en el número de ticket. Por TIENDA
+ * y no por tenant: una cadena con un bar de una caja y otro de tres no
+ * tiene por qué ensuciar el histórico del primero.
+ */
+async function tiendaConVariasCajas(
+  prisma: ReturnType<typeof getPrisma>,
+  registerId: string,
+): Promise<boolean> {
+  const reg = await prisma.register.findUnique({
+    where: { id: registerId },
+    select: { storeId: true },
+  });
+  if (!reg) return false;
+  const cajas = await prisma.register.count({
+    where: { storeId: reg.storeId, deletedAt: null },
+  });
+  return cajas > 1;
+}
+
 function ticketInclude() {
   return {
     lines: true,
@@ -2719,7 +2766,19 @@ function ticketInclude() {
       orderBy: { paidAt: "asc" },
     },
     refunds: { select: { id: true, externalId: true, total: true, createdAt: true, status: true } },
-    register: { select: { id: true, name: true, store: { select: { name: true } } } },
+    register: {
+      select: {
+        id: true,
+        name: true,
+        // hierro-sirope (G) · la serie de la caja («C2»): es lo que el
+        // TPV pinta delante del número cuando la tienda tiene más de una
+        // caja, y es la MISMA letra que ya lleva la factura simplificada
+        // de esa caja. NULL mientras la caja no ha emitido todavía, y
+        // entonces la etiqueta se deriva del nombre.
+        fiscalSeries: true,
+        store: { select: { name: true } },
+      },
+    },
     // Sole · el histórico del TPV enseña el estado REAL del envío por
     // email. Sólo el último job: un reenvío correcto tapa el fallo de
     // antes, que es lo que pasó con el 000257 el 18-09.
@@ -2948,6 +3007,9 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
           id: ticket.register.id,
           name: ticket.register.name,
           storeName: ticket.register.store.name,
+          // hierro-sirope (G) · «C2». La compone una sola función para
+          // que la lista, el detalle y el papel digan lo mismo.
+          cajaEtiqueta: etiquetaDeCaja(ticket.register),
         }
       : undefined,
     lines: ticket.lines.map((l) => ({
