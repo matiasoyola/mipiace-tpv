@@ -63,7 +63,7 @@ export interface FakeTicket {
   id: string;
   tenantId: string;
   registerId: string;
-  status: "DRAFT" | "PAID";
+  status: "DRAFT" | "PAID" | "VOIDED" | "TEST";
   tableId: string | null;
   diners: number | null;
   notes: string | null;
@@ -235,7 +235,16 @@ export interface EstadoFalso {
       kitchenReadyBeep: boolean;
     }
   >;
-  tenants: Map<string, { id: string; kitchenDisplayEnabled: boolean; cajaEnabled: boolean }>;
+  tenants: Map<
+    string,
+    {
+      id: string;
+      kitchenDisplayEnabled: boolean;
+      cajaEnabled: boolean;
+      /** hierro-sirope (A) · la hora de corte, para el barrido de huérfanas. */
+      dayCutHour?: number;
+    }
+  >;
   /** Ids que el falso reparte, para que los tests puedan predecirlos. */
   seq: number;
 }
@@ -506,6 +515,11 @@ export function construirFakePrisma(state: EstadoFalso) {
         return {
           ...o,
           ticket: {
+            // hierro-sirope (A) · `recuperar` pregunta si el ticket sigue
+            // vivo antes de devolver la tarjeta a la pantalla. Sin
+            // `status` aquí, el falso contestaba `undefined` y el 409 de
+            // «ya no hay cuenta abierta» saltaba sobre un DRAFT.
+            status: t?.status ?? "DRAFT",
             diners: t?.diners ?? null,
             notes: t?.notes ?? null,
             allergies: t?.allergies ?? [],
@@ -518,6 +532,21 @@ export function construirFakePrisma(state: EstadoFalso) {
         };
       }
       return null;
+    }),
+    // hierro-sirope (A) · `marcarListaYServirSiHuerfana` relee la tarjeta
+    // por su id para decidir si su ticket sigue vivo.
+    findUnique: vi.fn(async ({ where }: any) => {
+      const o = state.orders.get(where.id);
+      if (!o) return null;
+      const t = state.tickets.get(o.ticketId);
+      return {
+        ...o,
+        ticket: {
+          status: t?.status ?? "DRAFT",
+          tenantId: t?.tenantId ?? null,
+          allergies: t?.allergies ?? [],
+        },
+      };
     }),
     findMany: vi.fn(async ({ where, select }: any) => {
       const out: FakeOrder[] = [];
@@ -538,9 +567,18 @@ export function construirFakePrisma(state: EstadoFalso) {
         if (where?.sentAt && !coincide(o.sentAt, where.sentAt)) continue;
         const t = state.tickets.get(o.ticketId);
         const disp = state.dispatches.get(o.dispatchId);
+        const ten = t ? state.tenants.get(t.tenantId) : undefined;
         out.push({
           ...o,
-          ticket: { allergies: t?.allergies ?? [] },
+          ticket: {
+            allergies: t?.allergies ?? [],
+            // hierro-sirope (A) · lo que mira el barrido de comandas
+            // huérfanas: si su cuenta sigue viva y a qué hora corta el día
+            // su tenant.
+            status: t?.status ?? "DRAFT",
+            tenantId: t?.tenantId ?? null,
+            tenant: { dayCutHour: ten?.dayCutHour ?? 5 },
+          },
           // kds-2b · el `clientSendId` del envío, que es lo que la vista
           // manda a la pantalla para cruzar la tarjeta de la wifi con la
           // suya sin adivinar por mesa + sección + nº.

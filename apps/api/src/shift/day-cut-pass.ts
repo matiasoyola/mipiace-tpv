@@ -19,6 +19,10 @@
 
 import type { getPrisma } from "../context.js";
 import {
+  runComandasHuerfanasSweep,
+  type HuerfanaBarrida,
+} from "../kitchen/huerfanas.js";
+import {
   runAbandonedTableSweep,
   type AbandonedSweepOutcome,
 } from "../tables/abandoned.js";
@@ -37,6 +41,15 @@ export interface DayCutPassResult {
   // (el worker lo manda a Sentry). La pasada NO lo relanza: los turnos ya
   // están cerrados y ese trabajo no se tira por una mesa.
   tablesError: unknown | null;
+  // hierro-sirope (A) · las comandas de tickets muertos que se sirvieron
+  // solas. `null` sólo si el barrido lanzó (ver `huerfanasError`).
+  huerfanas: {
+    scanned: number;
+    servidas: HuerfanaBarrida[];
+    vivas: number;
+    failed: number;
+  } | null;
+  huerfanasError: unknown | null;
 }
 
 export async function runDayCutPass(args: {
@@ -49,14 +62,39 @@ export async function runDayCutPass(args: {
 
   const shifts = await runShiftDayCut({ prisma, log, now });
 
+  let tables: DayCutPassResult["tables"] = null;
+  let tablesError: unknown | null = null;
   try {
-    const tables = await runAbandonedTableSweep({ prisma, log, now });
-    return { shifts, tables, tablesError: null };
+    tables = await runAbandonedTableSweep({ prisma, log, now });
   } catch (err) {
+    tablesError = err;
     log.error(
       { err, event: "shift.day_cut.abandoned_sweep_failed" },
       "corte de día: el barrido de mesas abandonadas falló; los turnos ya están cerrados",
     );
-    return { shifts, tables: null, tablesError: err };
   }
+
+  // hierro-sirope (A) · EL TERCER BARRIDO: las comandas huérfanas.
+  //
+  // Va aquí y no en un job propio por lo mismo que el de mesas: esta
+  // pasada ya sabe la hora local de cada tenant, y lo que se barre es la
+  // misma clase de cosa —estado que nadie apaga—. Aislado igual: una
+  // comanda no puede tirar el cierre de caja de nadie.
+  //
+  // Y va DESPUÉS del barrido de mesas a propósito: ese barrido vacía
+  // drafts abandonados, o sea que puede crear huérfanas nuevas en esta
+  // misma pasada. Al revés se quedarían un día más.
+  let huerfanas: DayCutPassResult["huerfanas"] = null;
+  let huerfanasError: unknown | null = null;
+  try {
+    huerfanas = await runComandasHuerfanasSweep({ prisma, log, now });
+  } catch (err) {
+    huerfanasError = err;
+    log.error(
+      { err, event: "shift.day_cut.huerfanas_sweep_failed" },
+      "corte de día: el barrido de comandas huérfanas falló; los turnos ya están cerrados",
+    );
+  }
+
+  return { shifts, tables, tablesError, huerfanas, huerfanasError };
 }

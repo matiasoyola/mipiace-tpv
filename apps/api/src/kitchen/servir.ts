@@ -92,3 +92,110 @@ export function avisarComandasServidas(
     });
   }
 }
+
+// ── hierro-sirope (A) · LA COMANDA HUÉRFANA ───────────────────────────
+//
+// Lo que la pasada del 18-10 reprodujo (capturas 37–41):
+//
+//   1. M5 con un café enviado a BARRA, SIN marcar Lista.
+//   2. «Vaciar mesa» → Invitación. La mesa queda libre. La tarjeta sigue
+//      en el AP11, que es la decisión de arriba y se mantiene.
+//   3. Cocina pulsa «Lista» → la tarjeta pasa a «Listas» y AHÍ SE QUEDA
+//      PARA SIEMPRE: M5 sale con LISTO en el mapa estando libre y la
+//      banda «M5 · listo para servir» tapa cualquier venta en todos los
+//      TPV. Nadie la puede servir: su ticket ya no existe.
+//
+// Es el estado exacto de la T6 (nueve horas «esperando» en el AP11) y de
+// M1. `servirComandasListas` sólo sirve lo que YA tiene `readyAt`; el
+// `readyAt` que llega DESPUÉS no lo miraba nadie.
+//
+// ── La regla ──────────────────────────────────────────────────────────
+//
+// Una comanda cuyo ticket ya no está vivo se SIRVE SOLA en el momento en
+// que se marca Lista, en la misma transacción que pone `readyAt`, con
+// `servedByUserId = null` —no fue nadie— y con el mismo evento
+// `kitchen.order_served` que el toque del camarero. Así cocina ve que la
+// ha terminado (sale de pendientes) y desaparece a la vez de «Listas»,
+// del mapa y de las bandas.
+//
+// Los DOS caminos que ponen `readyAt` pasan por aquí —el toque online del
+// KDS (`kitchen/routes.ts`) y la marca que sube por LAN (`kitchen/lan.ts`)—
+// porque una regla escrita dos veces es una regla que se arregla una vez.
+// Tiene su fila en la tabla de sabotajes.
+//
+// `servedAt = readyAt` y no `now`: el CHECK `kitchen_orders_cronologia`
+// exige que servir no sea anterior a estar listo, y la marca de la tablet
+// puede venir del pasado (subida al volver la red). El mismo instante es
+// además lo honesto: no la sirvió nadie, se cerró en el momento en que
+// quedó lista.
+
+/** Un ticket vivo es el que todavía se puede cobrar: el borrador. */
+export function ticketSigueVivo(status: string): boolean {
+  return status === "DRAFT";
+}
+
+export interface MarcarListaOpts {
+  orderId: string;
+  /** La pantalla que la marcó. */
+  deviceId: string;
+  /** La hora que se escribe en `readyAt` (la de la tablet por LAN). */
+  at: Date;
+  /**
+   * LAN: una tarjeta ya lista con una hora ANTERIOR no se mueve —la
+   * primera vez que estuvo lista es la que cuenta para el tiempo de
+   * cocina—. El toque online no lo necesita: comprueba antes que no
+   * estaba lista.
+   */
+  soloSiPosterior?: boolean;
+}
+
+/**
+ * Pone «Lista» y, si su ticket ya no está vivo, la sirve en el acto.
+ *
+ * Devuelve la comanda servida para que el llamante emita su evento
+ * **fuera** de la transacción, por el mismo motivo que
+ * `servirComandasListas`: el evento hace que una pantalla pida el GET de
+ * cocina, y emitirlo dentro la haría pedirlo antes del commit.
+ */
+export async function marcarListaYServirSiHuerfana(
+  tx: Prisma.TransactionClient,
+  opts: MarcarListaOpts,
+): Promise<ComandaServida | null> {
+  await tx.kitchenOrder.updateMany({
+    where: opts.soloSiPosterior
+      ? {
+          id: opts.orderId,
+          OR: [{ readyAt: null }, { readyAt: { gt: opts.at } }],
+        }
+      : { id: opts.orderId },
+    data: { readyAt: opts.at, readyByDeviceId: opts.deviceId },
+  });
+
+  const order = await tx.kitchenOrder.findUnique({
+    where: { id: opts.orderId },
+    select: {
+      id: true,
+      storeId: true,
+      ticketId: true,
+      tableId: true,
+      readyAt: true,
+      servedAt: true,
+      ticket: { select: { status: true } },
+    },
+  });
+  // Sin `readyAt` no hay nada que servir (el `updateMany` no casó y la
+  // tarjeta no estaba lista), y servida ya no se vuelve a servir.
+  if (!order || order.readyAt == null || order.servedAt != null) return null;
+  if (ticketSigueVivo(order.ticket.status)) return null;
+
+  await tx.kitchenOrder.update({
+    where: { id: order.id },
+    data: { servedAt: order.readyAt, servedByUserId: null },
+  });
+  return {
+    orderId: order.id,
+    storeId: order.storeId,
+    ticketId: order.ticketId,
+    tableId: order.tableId,
+  };
+}

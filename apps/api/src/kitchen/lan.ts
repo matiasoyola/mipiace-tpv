@@ -37,6 +37,11 @@ import { Prisma, type PrismaClient } from "@mipiacetpv/db";
 import { generarClaveTienda } from "@mipiacetpv/kitchen-lan";
 
 import { getPrisma } from "../context.js";
+import {
+  avisarComandasServidas,
+  marcarListaYServirSiHuerfana,
+  type ComandaServida,
+} from "./servir.js";
 
 type Tx = PrismaClient | Prisma.TransactionClient;
 
@@ -171,9 +176,17 @@ export async function sincronizarDesdeLaTablet(opts: {
 
   // ── 3 · aplicar lo que tenga tarjeta ────────────────────────────────
   let aplicadas = 0;
+  const servidas: ComandaServida[] = [];
   for (const clientSendId of new Set([...nuevas, ...opts.recibidas])) {
-    aplicadas += await aplicarMarcasPendientes(clientSendId, prisma);
+    const r = await aplicarMarcasPendientes(clientSendId, prisma);
+    aplicadas += r.aplicadas;
+    servidas.push(...r.servidas);
   }
+  // hierro-sirope (A) · lo que se sirvió solo al aplicar un «Lista» de la
+  // tablet sobre un ticket muerto. El aviso sale aquí, fuera del bucle y
+  // con la hora de ahora: lo que la banda y el mapa necesitan saber es
+  // que se apaguen, no cuándo quedó lista.
+  avisarComandasServidas(servidas, new Date());
 
   const pendientes = await prisma.kitchenLanMark.count({
     where: { storeId: opts.storeId, appliedAt: null },
@@ -196,10 +209,20 @@ export async function sincronizarDesdeLaTablet(opts: {
  * en el libro para siempre y el informe del dueño diría que ese plato no
  * se tachó nunca.
  */
+export interface ResultadoAplicar {
+  aplicadas: number;
+  /**
+   * hierro-sirope (A) · las que se sirvieron solas porque su ticket ya no
+   * estaba vivo. Suben hasta el llamante para que emita el evento fuera
+   * de cualquier transacción, igual que `servirComandasListas`.
+   */
+  servidas: ComandaServida[];
+}
+
 export async function aplicarMarcasPendientes(
   clientSendId: string,
   prisma: Tx,
-): Promise<number> {
+): Promise<ResultadoAplicar> {
   const pendientes = await prisma.kitchenLanMark.findMany({
     where: { clientSendId, appliedAt: null },
     // Por `at` ascendente: las marcas se aplican en el orden en que
@@ -216,16 +239,17 @@ export async function aplicarMarcasPendientes(
       at: true,
     },
   });
-  if (pendientes.length === 0) return 0;
+  if (pendientes.length === 0) return { aplicadas: 0, servidas: [] };
 
   const orders = await prisma.kitchenOrder.findMany({
     where: { dispatch: { clientSendId } },
     select: { id: true, section: true, readyAt: true },
   });
-  if (orders.length === 0) return 0;
+  if (orders.length === 0) return { aplicadas: 0, servidas: [] };
   const porSeccion = new Map(orders.map((o) => [o.section, o]));
 
   let aplicadas = 0;
+  const servidas: ComandaServida[] = [];
   for (const m of pendientes) {
     const order = porSeccion.get(m.section);
     if (!order) {
@@ -241,7 +265,12 @@ export async function aplicarMarcasPendientes(
       continue;
     }
     try {
-      await aplicarMarca({ marca: m, orderId: order.id, prisma });
+      const servida = await aplicarMarca({
+        marca: m,
+        orderId: order.id,
+        prisma,
+      });
+      if (servida) servidas.push(servida);
     } catch (err) {
       // UNA marca que no se puede escribir NO se lleva por delante a las
       // demás del lote, y **se ve**. Así es como se escondió el fallo que
@@ -271,7 +300,7 @@ export async function aplicarMarcasPendientes(
     });
     aplicadas += 1;
   }
-  return aplicadas;
+  return { aplicadas, servidas };
 }
 
 /**
@@ -294,30 +323,37 @@ async function aplicarMarca(opts: {
   };
   orderId: string;
   prisma: Tx;
-}): Promise<void> {
+}): Promise<ComandaServida | null> {
   const { marca, orderId, prisma } = opts;
 
   if (marca.kind === "LISTA") {
-    // Una tarjeta ya lista con una hora ANTERIOR no se mueve: la primera
-    // vez que estuvo lista es la que cuenta para el tiempo de cocina.
-    await prisma.kitchenOrder.updateMany({
-      where: {
-        id: orderId,
-        OR: [{ readyAt: null }, { readyAt: { gt: marca.at } }],
-      },
-      data: { readyAt: marca.at, readyByDeviceId: marca.deviceId },
+    // hierro-sirope (A) · LA MISMA FUNCIÓN QUE EL TOQUE ONLINE.
+    //
+    // «Una tarjeta ya lista con una hora ANTERIOR no se mueve» (la
+    // primera vez que estuvo lista es la que cuenta para el tiempo de
+    // cocina) viaja ahora en `soloSiPosterior`. Y con ella viene la regla
+    // de la comanda huérfana: una mesa que se vació mientras la tablet
+    // estaba sin red sube su «Lista» al volver internet, y esa comanda
+    // tiene que servirse sola igual que si se hubiera marcado online.
+    //
+    // Escribirla aquí a mano otra vez es la fila «La regla de A sólo en
+    // `routes.ts`, no en `lan.ts`» de la tabla de sabotajes.
+    return marcarListaYServirSiHuerfana(prisma, {
+      orderId,
+      deviceId: marca.deviceId,
+      at: marca.at,
+      soloSiPosterior: true,
     });
-    return;
   }
 
-  if (marca.ticketLineId == null) return;
+  if (marca.ticketLineId == null) return null;
 
   if (marca.kind === "VISTO") {
     await prisma.kitchenOrderLine.updateMany({
       where: { orderId, ticketLineId: marca.ticketLineId },
       data: { voidSeenAt: marca.at, changeSeenAt: marca.at },
     });
-    return;
+    return null;
   }
 
   // HECHO · tachar o destachar.
@@ -336,7 +372,7 @@ async function aplicarMarca(opts: {
     },
     select: { markId: true },
   });
-  if (masNueva) return;
+  if (masNueva) return null;
 
   await prisma.kitchenOrderLine.updateMany({
     where: { orderId, ticketLineId: marca.ticketLineId },
@@ -344,4 +380,5 @@ async function aplicarMarca(opts: {
       ? { doneAt: marca.at, doneByDeviceId: marca.deviceId }
       : { doneAt: null, doneByDeviceId: null },
   });
+  return null;
 }

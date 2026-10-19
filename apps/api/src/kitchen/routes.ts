@@ -40,6 +40,12 @@ import {
   emitirPlatoHecho,
   emitirUrgente,
 } from "./eventos.js";
+import {
+  avisarComandasServidas,
+  marcarListaYServirSiHuerfana,
+  ticketSigueVivo,
+  type ComandaServida,
+} from "./servir.js";
 import { construirVista, inicioDelDia } from "./vista.js";
 
 const LINE_ID = {
@@ -227,15 +233,14 @@ export async function registerKitchenRoutes(
         ).length;
         if (pendientes === 0) {
           ready = true;
-          await marcarLista(line.order.id, k.deviceId, now);
-          emitirComandaLista({
+          const servida = await marcarLista(line.order.id, k.deviceId, now);
+          avisarDeQueEstaLista(servida, now, {
             storeId: k.storeId,
             orderId: line.order.id,
             ticketId: line.order.ticketId,
             tableId: line.order.tableId,
             tableName: line.order.tableName,
             section: line.order.section,
-            at: now,
           });
         }
       }
@@ -289,17 +294,16 @@ export async function registerKitchenRoutes(
       if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
       if (order.readyAt) return { ok: true, alreadyReady: true };
       const now = new Date();
-      await marcarLista(order.id, k.deviceId, now);
-      emitirComandaLista({
+      const servida = await marcarLista(order.id, k.deviceId, now);
+      avisarDeQueEstaLista(servida, now, {
         storeId: k.storeId,
         orderId: order.id,
         ticketId: order.ticketId,
         tableId: order.tableId,
         tableName: order.tableName,
         section: order.section,
-        at: now,
       });
-      return { ok: true, alreadyReady: false };
+      return { ok: true, alreadyReady: false, huerfana: servida != null };
     },
   );
 
@@ -358,9 +362,28 @@ export async function registerKitchenRoutes(
       const prisma = getPrisma();
       const order = await prisma.kitchenOrder.findFirst({
         where: { id: orderId, storeId: k.storeId, section: { in: k.sections } },
-        select: { id: true },
+        select: { id: true, ticket: { select: { status: true } } },
       });
       if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
+      // hierro-sirope (A) · DESHACER NO PUEDE FABRICAR UNA HUÉRFANA.
+      //
+      // Borrar `readyAt` y `servedAt` de una comanda cuyo ticket ya se
+      // cobró o se vació la devolvería a la pantalla como pendiente de
+      // servir, y nadie podría servirla nunca: es el estado que este
+      // bloque existe para que no exista. Y deshacer tampoco tendría
+      // sentido operativo — lo que se recupera es un plato que se tachó
+      // sin querer y que todavía hay que hacer; aquí ya no hay cuenta a
+      // la que llevárselo.
+      //
+      // Se dice por qué en vez de desaparecer el botón: la cocina tiene
+      // derecho a saber que la mesa se fue.
+      if (!ticketSigueVivo(order.ticket.status)) {
+        return reply.code(409).send({
+          error: "ORDER_TICKET_CERRADO",
+          message:
+            "Esta comanda ya no tiene cuenta abierta: la mesa se cobró o se vació.",
+        });
+      }
       const now = new Date();
       await prisma.$transaction([
         prisma.kitchenOrder.update({
@@ -515,13 +538,52 @@ export async function registerKitchenRoutes(
   );
 }
 
+/**
+ * hierro-sirope (A) · el toque online del KDS, por la función compartida.
+ *
+ * Antes era un `update` pelado de `readyAt`. Ahora pasa por
+ * `marcarListaYServirSiHuerfana`, que es la MISMA función por la que pasa
+ * la marca que sube por LAN: la regla de la comanda huérfana se escribe
+ * una vez. Devuelve la comanda si se sirvió sola (ticket muerto).
+ *
+ * En transacción porque poner «Lista» y servirla son el mismo hecho: una
+ * comanda huérfana marcada lista y NO servida es exactamente el estado
+ * roto que este bloque cierra, y no puede existir ni un instante.
+ */
 async function marcarLista(
   orderId: string,
   deviceId: string,
   now: Date,
-): Promise<void> {
-  await getPrisma().kitchenOrder.update({
-    where: { id: orderId },
-    data: { readyAt: now, readyByDeviceId: deviceId },
-  });
+): Promise<ComandaServida | null> {
+  return getPrisma().$transaction((tx) =>
+    marcarListaYServirSiHuerfana(tx, { orderId, deviceId, at: now }),
+  );
+}
+
+/**
+ * hierro-sirope (A) · qué avisa cada caso.
+ *
+ * Una comanda normal levanta la banda «M4 · listo para servir» en todos
+ * los TPV (`kitchen.order_ready`). Una HUÉRFANA no: levantar una banda
+ * que nadie puede apagar —porque su ticket ya no existe— es el fallo que
+ * se está arreglando. Sale sólo `kitchen.order_served`, que es lo que
+ * quita la etiqueta LISTO del mapa y la tarjeta de «Listas».
+ */
+function avisarDeQueEstaLista(
+  servida: ComandaServida | null,
+  at: Date,
+  lista: {
+    storeId: string;
+    orderId: string;
+    ticketId: string;
+    tableId: string | null;
+    tableName: string | null;
+    section: "BARRA" | "COCINA" | "SALON";
+  },
+): void {
+  if (servida) {
+    avisarComandasServidas([servida], at);
+    return;
+  }
+  emitirComandaLista({ ...lista, at });
 }

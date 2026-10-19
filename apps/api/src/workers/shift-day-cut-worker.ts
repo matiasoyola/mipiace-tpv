@@ -35,6 +35,12 @@ export function startShiftDayCutWorker(): Worker<ShiftDayCutJob> {
           extra: { queue: SHIFT_DAY_CUT_QUEUE_NAME, step: "abandoned-tables" },
         });
       }
+      if (pass.huerfanasError) {
+        const err = pass.huerfanasError;
+        captureError(err instanceof Error ? err : new Error(String(err)), {
+          extra: { queue: SHIFT_DAY_CUT_QUEUE_NAME, step: "comandas-huerfanas" },
+        });
+      }
       return {
         source: job.data.source,
         scanned: pass.shifts.scanned,
@@ -43,13 +49,20 @@ export function startShiftDayCutWorker(): Worker<ShiftDayCutJob> {
         tablesReleased: pass.tables?.released.length ?? 0,
         tablesKeptWithLines: pass.tables?.keptWithLines ?? 0,
         tablesFailed: pass.tables?.failed ?? 0,
+        huerfanasServidas: pass.huerfanas?.servidas.length ?? 0,
+        huerfanasFailed: pass.huerfanas?.failed ?? 0,
       };
     },
     { connection: getRedis(), concurrency: 1 },
   );
   worker.on("completed", (job) => {
     const r = job.returnvalue as
-      | { closed?: number; failed?: number; tablesReleased?: number }
+      | {
+          closed?: number;
+          failed?: number;
+          tablesReleased?: number;
+          huerfanasServidas?: number;
+        }
       | undefined;
     if ((r?.closed ?? 0) > 0 || (r?.failed ?? 0) > 0) {
       console.log(
@@ -59,6 +72,11 @@ export function startShiftDayCutWorker(): Worker<ShiftDayCutJob> {
     if ((r?.tablesReleased ?? 0) > 0) {
       console.log(
         `[shift-day-cut] ${r?.tablesReleased} mesa(s) liberadas (draft vacío de antes del corte)`,
+      );
+    }
+    if ((r?.huerfanasServidas ?? 0) > 0) {
+      console.log(
+        `[shift-day-cut] ${r?.huerfanasServidas} comanda(s) huérfanas servidas (su ticket ya no existía)`,
       );
     }
   });
