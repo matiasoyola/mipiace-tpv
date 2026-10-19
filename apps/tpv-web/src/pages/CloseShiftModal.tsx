@@ -99,6 +99,24 @@ const DENOMINATIONS: readonly Denominacion[] = [
   ...BILLETES_GRANDES,
 ];
 
+/**
+ * hierro-sirope (F) · la denominación que viene después de ésta.
+ *
+ * Dentro de su grupo y nada más: desde «1 ct» NO se salta a los billetes
+ * grandes, que viven plegados en un `<details>` y se abren a propósito
+ * una vez al mes. Saltar ahí dejaría al cajero tecleando dentro de un
+ * bloque que no ve. `null` = era el último, y entonces el botón cierra.
+ */
+export function siguienteDenominacion(key: string | null): string | null {
+  if (key == null) return null;
+  for (const grupo of [DENOMINACIONES_DIARIAS, BILLETES_GRANDES]) {
+    const i = grupo.findIndex((d) => d.key === key);
+    if (i === -1) continue;
+    return grupo[i + 1]?.key ?? null;
+  }
+  return null;
+}
+
 interface FailedDoc {
   id: string;
   kind: "ticket" | "refund";
@@ -745,8 +763,22 @@ export function CloseShiftModal(props: {
   // acciones + CashPad clavados abajo. Antes scrolleaba la tarjeta
   // entera y, con 15 denominaciones, el pad y el botón quedaban fuera
   // de pantalla: había que buscarlos con el pulgar mientras se contaba.
+  // hierro-sirope (F) · EL MODAL NO CAMBIA DE TAMAÑO AL ABRIR EL TECLADO.
+  //
+  // Hasta aquí el ancho dependía de `padDenom`: tocar un casillero
+  // ensanchaba la tarjeta a `max-w-3xl` para hacerle sitio al CashPad, y
+  // «Listo» la volvía a estrechar (capturas 45–47). Los casilleros se
+  // movían DEBAJO DEL DEDO entre denominación y denominación, así que
+  // tocar el siguiente sin mirar —que es como se cuenta un cajón— caía en
+  // otro sitio.
+  //
+  // El hueco se reserva: toda la fase de conteo mide lo mismo, con y sin
+  // teclado. Cuesta 300 px de tarjeta vacía los dos segundos que hay
+  // entre abrir el arqueo y tocar la primera moneda; los paga de sobra
+  // que la rejilla no se mueva.
+  const contando = !xResult;
   return (
-    <Shell onClose={props.onClose} wide={!xResult && padDenom !== null}>
+    <Shell onClose={props.onClose} wide={contando}>
       <div className="bg-white w-full rounded-3xl border border-slate-200 p-5 sm:p-7 flex flex-col max-h-[94vh]">
         <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1 shrink-0">
           {isZ ? "Cuadrar caja y cerrar turno" : "Arqueo X (control)"}
@@ -760,7 +792,7 @@ export function CloseShiftModal(props: {
         <div
           className={
             "flex-1 min-h-0 flex flex-col" +
-            (!xResult && padDenom ? " sm:flex-row sm:gap-5" : "")
+            (contando ? " sm:flex-row sm:gap-5" : "")
           }
         >
         <div className="flex-1 min-h-0 flex flex-col">
@@ -954,7 +986,22 @@ export function CloseShiftModal(props: {
             coma. En pantalla estrecha va debajo de las acciones; a
             partir de `sm` se va a su propia columna, y así la tabla
             sigue enseñando ocho denominaciones mientras se teclea. */}
-        {!xResult && padDenom && (
+        {/* hierro-sirope (F) · la columna del teclado SIEMPRE está en la
+            fase de conteo; lo que cambia es si dentro hay pad o el aviso
+            de qué hacer. En pantalla estrecha (< sm) no se reserva: ahí
+            el pad va debajo y reservarle 300 px de alto a un teclado que
+            no está sería peor que el problema. */}
+        {contando && !padDenom && (
+          <div
+            data-testid="cuadre-hueco-teclado"
+            className="hidden sm:flex sm:w-[300px] shrink-0 flex-col justify-end"
+          >
+            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-center text-[12.5px] text-slate-400">
+              Toca un casillero para contarlo.
+            </div>
+          </div>
+        )}
+        {contando && padDenom && (
           <div className="mt-3 pt-3 border-t border-slate-200 shrink-0 sm:mt-0 sm:pt-0 sm:border-t-0 sm:w-[300px] sm:flex sm:flex-col sm:justify-end">
             <div className="flex items-center justify-between gap-3 mb-2">
               <span className="text-[13px] font-medium text-mipiace-ink truncate">
@@ -973,12 +1020,20 @@ export function CloseShiftModal(props: {
                 >
                   {counts[padDenom] || "0"}
                 </span>
+                {/* hierro-sirope (F) · «Listo» PASA AL SIGUIENTE, no
+                    cierra. Contar un cajón es recorrer la rejilla entera
+                    de arriba abajo: cerrar el pad en cada denominación
+                    obliga a dos toques por casillero (cerrar + abrir el
+                    siguiente) y a buscar con la vista dónde se quedó
+                    uno. En el último de su grupo sí cierra — ahí ya no
+                    hay siguiente. */}
                 <button
                   type="button"
-                  onClick={() => setPadDenom(null)}
+                  data-testid="cuadre-listo"
+                  onClick={() => setPadDenom(siguienteDenominacion(padDenom))}
                   className="h-touch px-4 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] font-medium text-mipiace-ink"
                 >
-                  Listo
+                  {siguienteDenominacion(padDenom) ? "Siguiente" : "Listo"}
                 </button>
               </div>
             </div>

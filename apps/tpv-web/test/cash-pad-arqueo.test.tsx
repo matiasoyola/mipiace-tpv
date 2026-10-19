@@ -170,12 +170,28 @@ describe("v1.12 · «Cerrar turno» fuera de la zona de tecleo (H7)", () => {
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("«Listo» cierra el pad y deja el recuento intacto", async () => {
+  // hierro-sirope (F) · el botón ya no cierra: PASA AL SIGUIENTE
+  // casillero. Contar un cajón es recorrer la rejilla entera, y cerrar
+  // el pad en cada denominación costaba dos toques por casillero.
+  it("«Siguiente» deja el recuento intacto y abre la denominación de abajo", async () => {
     await renderModal();
     await click(countField("20 €"));
     await click(padKey("3"));
+    await click(buttonWith("Siguiente"));
+    // El pad sigue abierto, contando ya los de 10 €.
+    expect(pad()).not.toBeNull();
+    expect(countField("20 €").value).toBe("3");
+    await click(padKey("5"));
+    expect(countField("10 €").value).toBe("5");
+  });
+
+  // Y en el último de su grupo sí cierra: ahí no hay siguiente.
+  it("en la última denominación diaria el botón dice «Listo» y cierra", async () => {
+    await renderModal();
+    await click(countField("1 ct"));
+    await click(padKey("2"));
     await click(buttonWith("Listo"));
     expect(pad()).toBeNull();
-    expect(countField("20 €").value).toBe("3");
+    expect(countField("1 ct").value).toBe("2");
   });
 });
