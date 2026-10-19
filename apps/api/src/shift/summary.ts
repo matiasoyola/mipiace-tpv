@@ -20,6 +20,7 @@
 import type { getPrisma } from "../context.js";
 import { cashierLabelFrom } from "../users/display.js";
 import { loadShiftBreakdownSums } from "./breakdown-sums.js";
+import { contarMesasVaciadas, ETIQUETA_MOTIVO } from "./mesas-vaciadas.js";
 import { computeZBreakdown, type ZBreakdown } from "./z-breakdown.js";
 
 export interface ShiftDaySummary {
@@ -45,6 +46,18 @@ export interface ShiftDaySummary {
   };
   ticketsCount: number;
   refundsCount: number;
+  // hierro-sirope (C) · LO QUE SE VACIÓ, TAMBIÉN EN LA PANTALLA.
+  //
+  // `contarMesasVaciadas` existía desde auditoria-sirope (#18) pero sólo
+  // llegaba al PDF del Z. Quien cierra el día en el TPV no veía que se
+  // habían tirado 1,50 € de M5 (capturas 43, 44, 50): para enterarse
+  // tenía que abrir el PDF, que es justo lo que nadie hace.
+  //
+  // Va aquí, en el payload que arman los cuatro consumidores del resumen,
+  // y sale de la MISMA función que el PDF. Que la pantalla y el papel
+  // puedan decir números distintos es la fila «El resumen de cierre
+  // cuenta las vaciadas distinto que el PDF» de la tabla de sabotajes.
+  mesasVaciadas: MesasVaciadasPayload;
   breakdown: ZBreakdown;
   // S1-sello · los Z archivados del turno, del más reciente al más
   // antiguo. El primero es el vigente; los que llevan `supersededAt` son
@@ -99,6 +112,21 @@ interface ShiftSummaryRow {
   register: { id: string; name: string; store: { id: string; name: string; tenantId: string } };
 }
 
+/** Espejo de `MesasVaciadas` con la etiqueta ya resuelta: la pantalla no
+ *  tiene por qué saber traducir `SE_FUERON_SIN_PAGAR`, y así el papel y la
+ *  pantalla escriben la misma palabra. */
+export interface MesasVaciadasPayload {
+  count: number;
+  total: number;
+  porMotivo: Array<{
+    motivo: string | null;
+    /** «Invitación», «Sin motivo». */
+    label: string;
+    count: number;
+    total: number;
+  }>;
+}
+
 export interface ZReportRef {
   id: string;
   sequence: number;
@@ -118,7 +146,7 @@ export async function buildShiftDaySummary(
   const cashCounted =
     shift.cashCounted != null ? Number(shift.cashCounted.toString()) : null;
 
-  const [sums, ticketsCount, refundsCount, cashierUser, closedByUser] =
+  const [sums, ticketsCount, refundsCount, cashierUser, closedByUser, vaciadas] =
     await Promise.all([
       loadShiftBreakdownSums(prisma, shift.id),
       // Mismo criterio que el Z PDF: DRAFT (mesa sin cobrar) y VOIDED
@@ -139,6 +167,7 @@ export async function buildShiftDaySummary(
             select: { email: true, alias: true },
           })
         : Promise.resolve(null),
+      contarMesasVaciadas(prisma, shift.id),
     ]);
 
   const breakdown = computeZBreakdown({
@@ -180,6 +209,16 @@ export async function buildShiftDaySummary(
     },
     ticketsCount,
     refundsCount,
+    mesasVaciadas: {
+      count: vaciadas.count,
+      total: vaciadas.total,
+      porMotivo: vaciadas.porMotivo.map((m) => ({
+        motivo: m.motivo,
+        label: m.motivo ? ETIQUETA_MOTIVO[m.motivo] : "Sin motivo",
+        count: m.count,
+        total: m.total,
+      })),
+    },
     breakdown,
     zReports: zReports.map((z) => ({
       id: z.id,
