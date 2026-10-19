@@ -23,6 +23,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { tituloDeComandaEnPantalla } from "@mipiacetpv/ticket-model";
+
 import { apiWithDevice } from "../api.js";
 import {
   memoriaDeOrdenVacia,
@@ -83,7 +85,7 @@ import {
   ZONA_PADDING_PX,
 } from "../lib/kitchenTheme.js";
 import { ComandaCard } from "./ComandaCard.js";
-import { TITULO_SECCION } from "./secciones.js";
+import { ETIQUETA_SECCION, TITULO_SECCION } from "./secciones.js";
 import type { Comanda, KitchenMe } from "./types.js";
 import { useKitchenFeed } from "./useKitchenFeed.js";
 
@@ -636,9 +638,35 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
                 color: VERDE_LISTA_TEXT,
               }}
             >
-              <span className="font-bold leading-none" style={{ fontSize: LISTAS_MESA_PX }}>
-                {c.tableName ?? `#${c.number}`}
+              {/* hierro-sirope (E) · en 160 px, «Mostrador nº 1» salía
+                  cortado a «Mostrado» (captura 12c). Se pinta el título
+                  corto, y lo que aun así no quepa se recorta con puntos
+                  suspensivos en vez de desbordar. */}
+              <span
+                data-testid="kds-lista-titulo"
+                className="font-bold leading-none truncate"
+                style={{ fontSize: LISTAS_MESA_PX }}
+              >
+                {tituloDeComandaEnPantalla(c.tableName, c.number)}
               </span>
+              {/* hierro-sirope (D) · QUÉ ESTÁ LISTO, no sólo de quién.
+                  En una pantalla «Cocina · Barra» dos tarjetas «M3» sin
+                  más eran la misma mesa dos veces y nadie sabía cuál era
+                  cuál (captura 24). Con una sola sección no se pinta: lo
+                  dice la pantalla entera. */}
+              {mostrarSeccion && (
+                <span
+                  data-testid="kds-lista-seccion"
+                  className="uppercase font-bold"
+                  style={{
+                    fontSize: EYEBROW_COCINA_PX,
+                    letterSpacing: EYEBROW_COCINA_TRACKING,
+                    marginTop: 2,
+                  }}
+                >
+                  {ETIQUETA_SECCION[c.section]}
+                </span>
+              )}
               {/* «esperando · 3 min», que es lo que dice la maqueta. La
                   primera captura ponía «1 plato»: cuántos platos lleva no
                   es asunto de nadie una vez están hechos — lo que hay que
