@@ -402,9 +402,32 @@ Captura `22-venta-buscando-teclado-360x449.png`.
 
 ## 8 · La APK
 
-**PENDIENTE.** 1.28.0 con `build-release-apk.sh`, árbol limpio, sin publicar:
-mientras el «process is bad» del N1 siga abierto, la publicación la decide
-Matías.
+Construida y firmada. **Sin publicar**: mientras el «process is bad» del N1 siga
+abierto, la publicación la decide Matías.
+
+```
+fichero   apps/tpv-android/build-releases/mipiacetpv-1.28.0-12800.apk
+versión   1.28.0 (versionCode 12800)
+commit    d893ec4
+tamaño    8.741.097 bytes
+SHA-256   5dbff9bff2d9e778495f9844e659a930f8208335105e655a242097fe1a06b0fc
+```
+
+Los cuatro chequeos del guion, en verde: `VITE_API_URL` apunta a
+`https://api.mipiacetpv.com` (hallazgo A2), **sin Service Worker** en los assets
+del proyecto nativo (A4), origen del WebView correcto (R5) y APK firmada
+(`Signer #1 … SHA-1 1256a71e…`).
+
+Dos cosas del worktree que no viajan y hacen falta para repetir la build:
+`apps/tpv-android/android/keystore.properties` (se copia del árbol principal;
+está en `.gitignore`, así que el árbol sigue limpio) y el `.jks` al que apunta,
+en `~/keys/mipiacetpv-release.jks`.
+
+Instalar por cable:
+
+```bash
+adb install -r apps/tpv-android/build-releases/mipiacetpv-1.28.0-12800.apk
+```
 
 ---
 
