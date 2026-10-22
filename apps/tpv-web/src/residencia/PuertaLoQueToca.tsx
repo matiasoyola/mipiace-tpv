@@ -168,6 +168,22 @@ export function PuertaLoQueToca({
         </p>
       )}
 
+      {/* ── residencia-6 · SIN RED, ESTO ES LO QUE ESTA TABLET SABE ──
+          residencia-3 §15.3 dejaba la lista entera por hacer. Ahora lo
+          propio consta, con su marca. Lo que sigue sin poderse saber es
+          lo que se registró desde OTRA pantalla sin red, **y se dice**:
+          una pantalla que se calla eso es una pantalla que afirma que no
+          se hizo. */}
+      {datos.residentes.some((r) =>
+        r.registros.some((g) => g.enLaTablet),
+      ) && (
+        <p className="mx-8 mt-4 rounded-xl bg-slate-100 text-slate-700 px-6 py-3 text-[20px]">
+          Lo marcado «en la tablet» está apuntado aquí y sube cuando vuelva
+          la red. Lo que se haya registrado desde otra pantalla sin red no
+          se puede saber todavía.
+        </p>
+      )}
+
       <main className="flex-1 px-8 py-6 grid gap-6 lg:grid-cols-2">
         {datos.residentes.map((r) => (
           <section
@@ -294,6 +310,9 @@ function ComoEstaHoy({
         <p className="mt-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 px-6 py-4 text-[22px]">
           {ya.todoComoSiempre ? "Como siempre" : "No como siempre"} · lo
           marcó {ya.firmadoPor} a las {hhmm(ya.recordedAt)}
+          {ya.enLaTablet && (
+            <span className="text-emerald-700/70"> · en la tablet</span>
+          )}
         </p>
       ) : (
         <div className="mt-3 flex gap-3">
@@ -378,6 +397,13 @@ function TocaAhora({
                   <div className="text-right">
                     <p className="text-[18px]">
                       {hecho.firmadoPor} · {hhmm(hecho.recordedAt)}
+                      {/* residencia-6 · de dónde sale este «hecho». Sin
+                          la marca, lo que está sólo en la tablet y lo que
+                          consta en el servidor se verían igual — y no son
+                          lo mismo: lo de aquí no lo ve el relevo todavía. */}
+                      {hecho.enLaTablet && (
+                        <span className="text-slate-400"> · en la tablet</span>
+                      )}
                     </p>
                     <button
                       type="button"

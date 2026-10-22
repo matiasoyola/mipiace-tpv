@@ -30,12 +30,20 @@
 // borrar lo que no toca. Y la **DEK** del centro no sale nunca de la API:
 // lo que viaja es la subclave del PIN, que no descifra nada.
 
-import type { PuertaArranque } from "./puerta-tipos.js";
+import type { PuertaArranque, RegistroDeLaPuerta } from "./puerta-tipos.js";
 
 const DB_NAME = "mipiacetpv-puerta";
-const DB_VERSION = 1;
+/** residencia-6 · sube a 2 por el almacén `registros` (lo que ESTA tablet
+ *  acaba de apuntar). Subir la versión es lo que dispara
+ *  `onupgradeneeded`; el almacén `arranque` **no se toca**, que es lo que
+ *  hace que una tablet que se actualiza a media noche siga sabiendo qué
+ *  toca. */
+const DB_VERSION = 2;
 const STORE = "arranque";
 const CLAVE = "arranque";
+/** residencia-6 · el almacén de lo propio. Clave: el `id` del registro,
+ *  que lo genera la tablet. */
+const STORE_REGISTROS = "registros";
 
 /** Fallback a `localStorage` cuando el navegador no expone IndexedDB (modo
  *  privado restrictivo), igual que `lib/catalog.ts`. Sin esto, una tablet
@@ -53,6 +61,12 @@ function abrir(): Promise<IDBDatabase> {
         const db = req.result;
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE);
+        }
+        // residencia-6 · sin `keyPath`: la clave se pasa a mano, igual que
+        // en `arranque`. Un `keyPath` obligaría a que el objeto guardado
+        // tuviera exactamente esa forma para siempre.
+        if (!db.objectStoreNames.contains(STORE_REGISTROS)) {
+          db.createObjectStore(STORE_REGISTROS);
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -74,10 +88,11 @@ function comoPromesa<T>(req: IDBRequest<T>): Promise<T> {
 async function conStore<T>(
   modo: IDBTransactionMode,
   fn: (store: IDBObjectStore) => Promise<T>,
+  cual: string = STORE,
 ): Promise<T> {
   const db = await abrir();
-  const tx = db.transaction(STORE, modo);
-  const res = await fn(tx.objectStore(STORE));
+  const tx = db.transaction(cual, modo);
+  const res = await fn(tx.objectStore(cual));
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("tx (puerta) falló"));
@@ -131,10 +146,181 @@ export async function olvidarLaPuerta(): Promise<void> {
   } catch {
     /* ya no estaba */
   }
+  // residencia-6 · y lo apuntado en la tablet, que lleva dentro QUÉ se le
+  // hizo a quién y cuándo. Una tablet desemparejada no se queda con eso,
+  // por lo mismo que no se queda con el plan.
   try {
-    localStorage.removeItem(LS_KEY);
+    await conStore(
+      "readwrite",
+      (store) => comoPromesa(store.clear()),
+      STORE_REGISTROS,
+    );
   } catch {
     /* ya no estaba */
+  }
+  try {
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(LS_REGISTROS);
+  } catch {
+    /* ya no estaba */
+  }
+}
+
+// ── residencia-6 · LO QUE ESTA TABLET ACABA DE APUNTAR ──────────────
+//
+// residencia-3 §15.3 dejó esto dicho: *«sin red, "lo que toca" sale todo
+// como por hacer: la tablet no sabe qué se registró desde otra pantalla
+// ni lo que no llegó a subir»*. La mitad de ese problema **no hay que
+// resolverla con red**: lo que la propia tablet acabó de registrar lo
+// sabe ella.
+//
+// El síntoma era concreto y costaba trabajo de más: la auxiliar marca los
+// siete cuidados de la 112 sin wifi, sale, vuelve a entrar con su PIN y
+// la lista le sale entera por hacer. O los hace dos veces —el servidor lo
+// recoge como corrección, así que no es un cuidado de más, pero sí es un
+// viaje de más— o se queda sin saber qué le falta.
+//
+// ── POR QUÉ UN ALMACÉN PROPIO Y NO EL OUTBOX ────────────────────────
+//
+// El outbox **se vacía al subir**, que es su trabajo. Cinco minutos
+// después de que vuelva el wifi ya no hay nada dentro, y entonces la
+// pantalla volvería a mentir — justo cuando se vuelve a caer. Aquí lo
+// apuntado se queda hasta que caduca por días.
+//
+// ── Y SE PODA POR `care_day`, no por antigüedad del reloj ───────────
+//
+// Dos días del CENTRO: el de hoy y el de ayer. Es lo que la pantalla
+// puede llegar a pintar (la noche cruza medianoche, residencia-5 §3) y
+// nada más. Sin poda, una tablet acumularía meses de registros de dos
+// personas en un IndexedDB que nadie mira.
+
+/** Fallback a `localStorage`, igual que el arranque: lo que importa es
+ *  que la pantalla PUEDA saberlo, no que sea rápido. */
+const LS_REGISTROS = "mipiacetpv-puerta-registros";
+
+/** Lo apuntado en esta tablet, con la marca puesta. El `enLaTablet` va
+ *  dentro y no se calcula al leer: es lo que la pantalla pinta y lo que
+ *  dice que ese «hecho» no viene del servidor. */
+export type RegistroEnLaTablet = RegistroDeLaPuerta & { enLaTablet: true };
+
+/** Cuántos días del centro se guardan. Hoy y ayer. */
+export const DIAS_EN_LA_TABLET = 2;
+
+/**
+ * Apunta en la tablet lo que se acaba de registrar.
+ *
+ * Va **después** de meterlo en la cola y no antes: la cola es lo que no
+ * se puede perder (residencia-3 §7, «un cuidado hecho se apunta»), y esto
+ * es para que se vea. Si esto falla, lo registrado sigue subiendo.
+ */
+export async function apuntarEnLaTablet(
+  registros: RegistroEnLaTablet[],
+): Promise<void> {
+  if (registros.length === 0) return;
+  try {
+    await conStore(
+      "readwrite",
+      async (store) => {
+        for (const r of registros) await comoPromesa(store.put(r, r.id));
+      },
+      STORE_REGISTROS,
+    );
+    return;
+  } catch {
+    /* sin IDB — al localStorage */
+  }
+  try {
+    const previos = leerDeLocalStorage();
+    const porId = new Map(previos.map((r) => [r.id, r]));
+    for (const r of registros) porId.set(r.id, r);
+    localStorage.setItem(LS_REGISTROS, JSON.stringify([...porId.values()]));
+  } catch {
+    /* cuota llena: sin red la lista volverá a salir entera por hacer, que
+       es lo que había antes de este bloque. No tumba nada. */
+  }
+}
+
+/**
+ * Lo apuntado en esta tablet para estos días del centro, **podando** lo
+ * que ya no se puede pintar.
+ *
+ * La poda va aquí y no en un temporizador: la pantalla lee esto cada vez
+ * que alguien entra con su PIN, así que la limpieza ocurre sola y no hace
+ * falta un `setInterval` en una tablet que lleva seis meses encendida.
+ */
+export async function loApuntadoEnLaTablet(
+  diasVivos: string[],
+): Promise<RegistroEnLaTablet[]> {
+  const vivos = new Set(diasVivos);
+  let todos: RegistroEnLaTablet[] = [];
+  let desdeIdb = false;
+  try {
+    todos = await conStore(
+      "readonly",
+      (store) =>
+        comoPromesa(store.getAll() as IDBRequest<RegistroEnLaTablet[]>),
+      STORE_REGISTROS,
+    );
+    desdeIdb = true;
+  } catch {
+    todos = leerDeLocalStorage();
+  }
+  const quedan = todos.filter((r) => vivos.has(r.careDay));
+  if (quedan.length !== todos.length) {
+    const sobran = todos.filter((r) => !vivos.has(r.careDay)).map((r) => r.id);
+    if (desdeIdb) {
+      try {
+        await conStore(
+          "readwrite",
+          async (store) => {
+            for (const id of sobran) await comoPromesa(store.delete(id));
+          },
+          STORE_REGISTROS,
+        );
+      } catch {
+        /* se podará la próxima vez */
+      }
+    } else {
+      try {
+        localStorage.setItem(LS_REGISTROS, JSON.stringify(quedan));
+      } catch {
+        /* se podará la próxima vez */
+      }
+    }
+  }
+  return quedan;
+}
+
+/** Al deshacer un registro CON red: el servidor lo anuló, así que lo
+ *  apuntado en la tablet ya no es verdad. Sin esto, perder el wifi justo
+ *  después dejaría la pantalla diciendo que aquello sigue hecho. */
+export async function olvidarApuntado(id: string): Promise<void> {
+  try {
+    await conStore(
+      "readwrite",
+      (store) => comoPromesa(store.delete(id)),
+      STORE_REGISTROS,
+    );
+    return;
+  } catch {
+    /* sin IDB */
+  }
+  try {
+    const quedan = leerDeLocalStorage().filter((r) => r.id !== id);
+    localStorage.setItem(LS_REGISTROS, JSON.stringify(quedan));
+  } catch {
+    /* ya no estaba */
+  }
+}
+
+function leerDeLocalStorage(): RegistroEnLaTablet[] {
+  const raw = localStorage.getItem(LS_REGISTROS);
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? (v as RegistroEnLaTablet[]) : [];
+  } catch {
+    return [];
   }
 }
 

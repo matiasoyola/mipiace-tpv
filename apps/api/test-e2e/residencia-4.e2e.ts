@@ -105,9 +105,9 @@ const { parteDeResidencia } = await import("../src/residencia/exportacion.js");
 const { gravedadDe } = await import("@mipiacetpv/residencia-plan");
 
 const PIN_ANA = "4071"; // auxiliar, zona primera planta
-const PIN_ROSA = "9182"; // DUE, alcance total — la del móvil de enfermería
-const PIN_PILAR = "3344"; // dirección — el móvil de responsable
-const PIN_SOTO = "5566"; // médico — el único que pauta un umbral
+const PIN_ROSA = "918256"; // DUE, alcance total — SEIS cifras (D-68)
+const PIN_PILAR = "334455"; // dirección — alcance total, seis cifras
+const PIN_SOTO = "556677"; // médico — alcance total, seis cifras
 
 /** El canario de este fichero: si aparece en un volcado, el bloque no
  *  sirve. Es el texto de una acción, que va cifrado (D-63). */

@@ -625,6 +625,7 @@ describe("las frases de la biblioteca", () => {
       "EXCEPCION_NUEVA",
       "REGISTRO_SIN_TURNO",
       "AVISO_QUE_NO_SALIO",
+      "SIN_PLAN_DE_CUIDADOS",
     ]) {
       expect(NOMBRE_DE_LA_CLASE[clase], clase).toBeTruthy();
       expect(NOMBRE_DE_LA_CLASE[clase]).not.toBe(clase);

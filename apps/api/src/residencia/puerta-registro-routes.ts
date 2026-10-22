@@ -53,7 +53,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
+  FRASE_PIN_POR_RENOVAR,
   diaDelTurno,
+  pinPorRenovar,
   queToca,
   turnoDe,
   utcToWallDate,
@@ -478,6 +480,9 @@ export async function registerResidenciaPuertaRegistroRoutes(
           select: {
             userId: true,
             pinLookup: true,
+            // residencia-6 (D-68) · para calcular aquí el `porRenovar`
+            // que viaja. El LARGO **no** viaja (ver abajo).
+            pinLength: true,
             user: {
               select: {
                 id: true,
@@ -614,19 +619,40 @@ export async function registerResidenciaPuertaRegistroRoutes(
           minutosDeEscalado: guardia.minutosDeEscalado,
           servicio: guardia.servicio,
         },
-        roster: pins.map((p) => ({
-          userId: p.userId,
-          nombre: p.user.alias ?? (p.user.email.split("@")[0] ?? p.user.email),
-          pinLookup: p.pinLookup,
-          roles: p.user.careRoleAssignments
-            .filter((a) => a.fromAt <= ahora && (a.toAt == null || a.toAt > ahora))
-            .map((a) => ({
+        // ── residencia-6 (D-68) · `porRenovar` SÍ, EL LARGO NO ──────
+        //
+        // La tablet tiene que llegar a la misma conclusión que el
+        // servidor **sin red**: un PIN de cuatro cifras de alguien que ha
+        // pasado a verlo todo no abre esta puerta. Para eso le basta un
+        // booleano.
+        //
+        // Y **el número de cifras no viaja**, aunque esté en la tabla.
+        // Una tablet robada ya lleva la huella de cada PIN y la subclave
+        // (residencia-3 §15.2): decirle además que el PIN de la DUE sigue
+        // siendo de cuatro sería decirle que pruebe diez mil
+        // combinaciones en vez de un millón — justo lo que D-68 viene a
+        // encarecer. El booleano no da eso: cuando es `true`, ese PIN no
+        // abre nada; cuando es `false`, no dice cuántas cifras tiene.
+        roster: pins.map((p) => {
+          const vivos = p.user.careRoleAssignments.filter(
+            (a) => a.fromAt <= ahora && (a.toAt == null || a.toAt > ahora),
+          );
+          return {
+            userId: p.userId,
+            nombre: p.user.alias ?? (p.user.email.split("@")[0] ?? p.user.email),
+            pinLookup: p.pinLookup,
+            porRenovar: pinPorRenovar({
+              largoDelPin: p.pinLength,
+              roles: vivos.map((a) => ({ alcanceTotal: a.careRole.fullScope })),
+            }),
+            roles: vivos.map((a) => ({
               assignmentId: a.id,
               code: a.careRole.code,
               name: a.careRole.name,
               alcanceTotal: a.careRole.fullScope,
             })),
-        })),
+          };
+        }),
         pinSubclave: subclave,
         // La hora del SERVIDOR, para que la tablet mida su desvío de reloj
         // (kds-2, residencia-1). Sin desvío no puede adscribir un registro
@@ -725,6 +751,8 @@ export async function registerResidenciaPuertaRegistroRoutes(
         select: {
           userId: true,
           pinHash: true,
+          // residencia-6 (D-68) · cuántas cifras tiene el que hay puesto.
+          pinLength: true,
           user: {
             select: {
               id: true,
@@ -739,7 +767,9 @@ export async function registerResidenciaPuertaRegistroRoutes(
                   id: true,
                   fromAt: true,
                   toAt: true,
-                  careRole: { select: { code: true, name: true } },
+                  careRole: {
+                    select: { code: true, name: true, fullScope: true },
+                  },
                 },
               },
             },
@@ -770,6 +800,30 @@ export async function registerResidenciaPuertaRegistroRoutes(
           error: "SIN_ROL_DE_CUIDADO",
           message:
             "Tu PIN es correcto pero no tienes ningún rol de cuidado vigente. Avisa a dirección.",
+        });
+      }
+
+      // ── residencia-6 (D-68) · EL PIN QUE SE QUEDÓ CORTO ────────────
+      //
+      // Tiene cuatro cifras y esta persona ha pasado a tener un rol que ve
+      // todo el centro: su PIN está **por renovar** y no abre la puerta.
+      // No es un intento fallido —el PIN es el suyo— así que el
+      // rate-limit se resetea igual que en `SIN_ROL_DE_CUIDADO`: dejarla
+      // sumando intentos la candaría por algo que no puede arreglar.
+      //
+      // Y va DESPUÉS de verificar el hash: contestar esto antes diría que
+      // ese PIN existe, que es lo que la frase única de «PIN incorrecto»
+      // evita.
+      if (
+        pinPorRenovar({
+          largoDelPin: fila.pinLength,
+          roles: vivos.map((a) => ({ alcanceTotal: a.careRole.fullScope })),
+        })
+      ) {
+        await reset(limite);
+        return reply.code(403).send({
+          error: "PIN_POR_RENOVAR",
+          message: FRASE_PIN_POR_RENOVAR,
         });
       }
 

@@ -41,6 +41,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  FRASE_PIN_POR_RENOVAR,
+  addDays,
   diaDelTurno,
   gravedadDe,
   queToca,
@@ -60,11 +62,16 @@ import {
 } from "../lib/outbox.js";
 import { newId } from "../lib/ids.js";
 import {
+  DIAS_EN_LA_TABLET,
+  apuntarEnLaTablet,
   guardarArranque,
   guardarSesion,
   leerArranque,
   leerSesion,
+  loApuntadoEnLaTablet,
+  olvidarApuntado,
   quienTeclea,
+  type RegistroEnLaTablet,
   type SesionDePuerta,
 } from "./puerta-cache.js";
 import {
@@ -483,6 +490,15 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
           setErrorDelPin("Ese PIN no es correcto.");
           return;
         }
+        // residencia-6 (D-68) · **y sin red tampoco entra el PIN que se
+        // quedó corto.** El servidor manda el booleano ya calculado, así
+        // que la tablet llega a la misma conclusión sin volver a escribir
+        // la regla. Con red lo contesta la ruta (403 `PIN_POR_RENOVAR`) y
+        // la frase es la misma: una sola, en las tres pantallas.
+        if (quien.porRenovar) {
+          setErrorDelPin(FRASE_PIN_POR_RENOVAR);
+          return;
+        }
         if (quien.roles.length > 1 && !assignmentId) {
           setEligiendoRol({
             nombre: quien.nombre,
@@ -509,7 +525,7 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         };
         setSesion(s);
         setEligiendoRol(null);
-        abrirLoQueTocaEnLocal(s);
+        await abrirLoQueTocaEnLocal(s);
       } finally {
         setComprobando(false);
       }
@@ -535,7 +551,7 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
           setVista({ v: "pin" });
           return;
         }
-        abrirLoQueTocaEnLocal(s);
+        await abrirLoQueTocaEnLocal(s);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -544,7 +560,7 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
 
   /** Lo mismo, con `queToca` en la tablet y la caché. */
   const abrirLoQueTocaEnLocal = useCallback(
-    (_s: SesionDePuerta) => {
+    async (_s: SesionDePuerta) => {
       if (!arranque) return;
       const ahora = new Date();
       const turno = turnoDe(ahora, arranque.turnos);
@@ -584,6 +600,19 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         alias.get(code) ??
         arranque.controles.find((c) => c.code === code)?.name ??
         code;
+      // ── residencia-6 · LO QUE ESTA TABLET YA APUNTÓ ───────────────
+      //
+      // residencia-3 §15.3: sin red la lista salía ENTERA por hacer,
+      // porque la tablet no sabía nada. La mitad que sí sabe es lo
+      // propio: lo que se registró aquí, aunque no haya subido.
+      //
+      // Dos días del centro —hoy y ayer— porque la noche cruza
+      // medianoche y es lo que esta pantalla puede llegar a pintar.
+      const dias = Array.from({ length: DIAS_EN_LA_TABLET }, (_, i) =>
+        addDays(careDay, -i),
+      );
+      const apuntado = await loApuntadoEnLaTablet(dias);
+
       const comoOcurrencia = (o: Ocurrencia): OcurrenciaDeLaPuerta => ({
         controlCode: o.controlCode,
         nombre: nombreDe(o.controlCode),
@@ -612,12 +641,16 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
                 (turno == null || oc.shiftCode === turno.code),
             )
             .map(comoOcurrencia),
-          // **Vacío**: la tablet no sabe qué se registró. Lo que esto
-          // significa en pantalla es que sin red todo sale como «por
-          // hacer», y eso es lo prudente: el servidor es idempotente por
-          // ocurrencia, así que si se vuelve a marcar algo que ya estaba,
-          // entra como corrección y no como un cuidado de más.
-          registros: [],
+          // residencia-6 · **lo que ESTA tablet apuntó**, con su marca.
+          // Lo registrado desde OTRA tablet sin red sigue sin poderse
+          // saber —y la pantalla lo dice, ver `PuertaLoQueToca`— pero lo
+          // suyo ya no se le olvida.
+          //
+          // El servidor sigue siendo idempotente por ocurrencia, así que
+          // volver a marcar algo entra como corrección y no como un
+          // cuidado de más: lo que esto quita no es un riesgo, es un
+          // viaje de más por el pasillo.
+          registros: apuntado.filter((r) => r.clientId === o.clientId),
         })),
         controles: arranque.controles.map((c) => ({
           code: c.code,
@@ -688,6 +721,50 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         // euros.
         total: 0,
       });
+
+      // ── residencia-6 · Y SE APUNTA EN LA TABLET ──────────────────
+      //
+      // **Después de la cola**, no antes: la cola es lo que no se puede
+      // perder (residencia-3 §7). Esto es para que SE VEA — que «lo que
+      // toca» sin red no vuelva a salir entero por hacer cuando la
+      // auxiliar sale y vuelve a entrar con su PIN.
+      //
+      // Se escribe aunque haya red: la red puede irse entre este gesto y
+      // el siguiente, y entonces lo de hace un minuto tiene que seguir
+      // constando.
+      //
+      // Lo que se guarda es lo que la pantalla necesita para pintar «ya
+      // hecho»: la ocurrencia, la hora y quién firmó. Nada que no esté ya
+      // en la cola de esta misma tablet.
+      const quien = sesion;
+      await apuntarEnLaTablet(
+        registros.map(
+          (r): RegistroEnLaTablet => ({
+            id: r.id,
+            controlCode: r.controlCode,
+            clientId: r.clientId,
+            valor: r.valor,
+            nota: r.nota ?? null,
+            tieneVoz: r.voz != null,
+            recordedAt: r.recordedAt,
+            careDay: r.careDay,
+            occurrenceAt: r.occurrenceAt ?? null,
+            shiftCode: null,
+            sinTurno: r.centerShiftId == null,
+            firmadoPor: quien?.nombre ?? "",
+            firmadoPorUserId: quien?.userId ?? "",
+            rolCode: quien?.rolCode ?? "",
+            anulado: false,
+            corrigeA: null,
+            // `vigente` porque es el valor de ahora de su ocurrencia: lo
+            // que lo dejaría de ser es una corrección posterior, y ésa
+            // llega por aquí y sobrescribe esta misma fila por su `id`.
+            vigente: true,
+            enLaTablet: true,
+          }),
+        ),
+      );
+
       setApuntadas(
         registros.map((r, i) => ({
           id: r.id,
@@ -699,7 +776,7 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
       setVista({ v: "apuntado" });
       void flushOutbox();
     },
-    [],
+    [sesion],
   );
 
   if (!arranque) {
@@ -1025,6 +1102,11 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
                     `/residencia/puerta/registros/${ultimoId}/anular`,
                     { method: "POST" },
                   );
+                  // residencia-6 · y se borra lo apuntado en la tablet:
+                  // el servidor lo anuló, así que ya no es verdad. Sin
+                  // esto, perder el wifi justo después dejaría «lo que
+                  // toca» diciendo que aquello sigue hecho.
+                  await olvidarApuntado(ultimoId);
                   setApuntadas((ls) => ls.filter((l) => l.id !== ultimoId));
                   setUltimoId(null);
                 } catch (err) {

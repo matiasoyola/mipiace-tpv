@@ -48,7 +48,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { recortarAlAlcance } from "@mipiacetpv/residencia-plan";
+import {
+  FRASE_PIN_POR_RENOVAR,
+  recortarAlAlcance,
+} from "@mipiacetpv/residencia-plan";
 
 import { ApiError, apiConSala, apiWithDevice } from "../api.js";
 import { flushOutbox, outboxAdd } from "../lib/outbox.js";
@@ -249,6 +252,10 @@ export function SalaApp({ me }: SalaAppProps) {
           );
           return;
         }
+        if ("porRenovar" in local) {
+          setErrorDePin(FRASE_PIN_POR_RENOVAR);
+          return;
+        }
         if ("necesitaElegirRol" in local) {
           setEligiendoRol(local.necesitaElegirRol);
           setPinPendiente(pin);
@@ -274,6 +281,10 @@ export function SalaApp({ me }: SalaAppProps) {
   ): Promise<
     | { sesion: SesionDeSala }
     | { necesitaElegirRol: { nombre: string; roles: RolParaElegir[] } }
+    /** residencia-6 (D-68) · el PIN es suyo y se quedó corto. Es un
+     *  resultado propio y no un `null`: la frase que hay que leer no es
+     *  «ese PIN no cuadra» sino a dónde ir a arreglarlo. */
+    | { porRenovar: true }
     | null
   > {
     const a = arranque ?? (await leerArranqueDeSala());
@@ -281,6 +292,7 @@ export function SalaApp({ me }: SalaAppProps) {
     const huella = await huellaDePinEnLaTablet(pin, a.pinSubclave, a.centro.id);
     const quien = a.roster.find((p) => p.pinLookup === huella);
     if (!quien || quien.roles.length === 0) return null;
+    if (quien.porRenovar) return { porRenovar: true };
     let rol = quien.roles[0]!;
     if (quien.roles.length > 1) {
       if (!careRoleAssignmentId) {

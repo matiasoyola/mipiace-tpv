@@ -99,11 +99,19 @@ const MARI = "99999999-0000-4000-8000-000000000014";
  *  escritos aquí porque el bucle visual los teclea. */
 export const TOKEN_DE_LA_PUERTA = "gredos-puerta-112-0001-0001-0001";
 export const PIN_DE_ANA = "4071";
-export const PIN_DE_ROSA = "9182";
+// ── residencia-6 (D-68) · CUATRO CIFRAS O SEIS, SEGÚN EL ALCANCE ─────
+//
+// Ana y Mari son auxiliares (alcance por zona): cuatro. Rosa es DUE,
+// Pilar dirige y Soto es la médica —los tres con roles de alcance total—,
+// así que **seis**. Puestos aquí con el largo que les toca y no de cuatro
+// y «ya se verá»: el sembrador es lo que el bucle visual teclea y lo que
+// el e2e usa, y un PIN que el sistema rechaza al ponerlo no sirve para
+// enseñar nada.
+export const PIN_DE_ROSA = "918256";
 /** residencia-4 · la dirección y la médica también tienen PIN: una para
  *  coger el móvil de responsable, la otra para pautar una excepción. */
-export const PIN_DE_PILAR = "3344";
-export const PIN_DE_SOTO = "5566";
+export const PIN_DE_PILAR = "334455";
+export const PIN_DE_SOTO = "556677";
 export const CLAVE_DE_DIRECCION = "Gredos2026!";
 /** Y los tokens de los dos móviles de guardia. */
 export const TOKEN_DE_ENFERMERIA = "gredos-guardia-enf-0001-0001-0001";
@@ -380,10 +388,13 @@ async function main(): Promise<void> {
   ] as const) {
     const hash = await hashPassword(pin);
     const lookup = huellaDePinDePuerta(pin, subclave, T);
+    // residencia-6 · `pin_length` con el largo de verdad. Dejarlo al
+    // DEFAULT de la columna (4) dejaría a Rosa, Pilar y Soto con el PIN
+    // «por renovar» y el sembrador montaría un centro que no funciona.
     await prisma.$executeRawUnsafe(
-      `INSERT INTO care_pins (user_id, tenant_id, pin_hash, pin_lookup, set_by_user_id, updated_at)
-       VALUES ('${u}', '${T}', '${hash}', '${lookup}', '${DIRECCION}', now())
-       ON CONFLICT (user_id) DO UPDATE SET pin_hash = '${hash}', pin_lookup = '${lookup}', updated_at = now()`,
+      `INSERT INTO care_pins (user_id, tenant_id, pin_hash, pin_lookup, pin_length, set_by_user_id, updated_at)
+       VALUES ('${u}', '${T}', '${hash}', '${lookup}', ${pin.length}, '${DIRECCION}', now())
+       ON CONFLICT (user_id) DO UPDATE SET pin_hash = '${hash}', pin_lookup = '${lookup}', pin_length = ${pin.length}, updated_at = now()`,
     );
   }
 
@@ -491,11 +502,11 @@ async function main(): Promise<void> {
       `  tenant            ${T}`,
       `  dirección         pilar@gredos.local / ${CLAVE_DE_DIRECCION}`,
       `  PIN de Ana        ${PIN_DE_ANA}   (auxiliar, primera planta)`,
-      `  PIN de Rosa       ${PIN_DE_ROSA}   (DUE, todo el centro)`,
+      `  PIN de Rosa       ${PIN_DE_ROSA} (DUE, todo el centro · 6 cifras, D-68)`,
       `  token de la 112   ${TOKEN_DE_LA_PUERTA}`,
       `  habitación        112 · Carmen Gómez Ruiz (con foto) y Luis Núñez Bravo (sin consentimiento)`,
-      `  PIN de Pilar      ${PIN_DE_PILAR}   (dirección, el móvil de responsable)`,
-      `  PIN de la médica  ${PIN_DE_SOTO}   (la única que pauta un umbral)`,
+      `  PIN de Pilar      ${PIN_DE_PILAR} (dirección, el móvil de responsable · 6 cifras)`,
+      `  PIN de la médica  ${PIN_DE_SOTO} (la única que pauta un umbral · 6 cifras)`,
       `  móvil enfermería  ${TOKEN_DE_ENFERMERIA}`,
       `  móvil dirección   ${TOKEN_DE_RESPONSABLE}`,
       `  tablet de la sala ${TOKEN_DE_LA_SALA}`,

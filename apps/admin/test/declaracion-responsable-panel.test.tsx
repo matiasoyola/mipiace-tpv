@@ -236,6 +236,37 @@ describe("el enlace en la barra lateral", () => {
     }
   });
 
+  it("mide el mínimo táctil de la casa, en la barra y en el drawer", async () => {
+    // residencia-6 · lo arrastraban tres bloques (residencia-5 §19.20):
+    // `py-2` sobre 12 px daban 34 px de alto, por debajo del mínimo de la
+    // casa (48) y de los 44 de la WCAG. En el escritorio se pulsa con el
+    // ratón y nadie lo notaba; en la tablet con la que se configura un
+    // centro, sí.
+    //
+    // jsdom no aplica Tailwind, así que se comprueba la clase, que es el
+    // mecanismo — igual que el scroll de la barra de aquí arriba. La
+    // altura de verdad la mide el bucle visual.
+    await render(
+      <AdminShell title="Lo que sea">
+        <p>contenido</p>
+      </AdminShell>,
+    );
+    const menu = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Abrir menú"]',
+    );
+    await act(async () => {
+      menu!.click();
+    });
+    const enlaces = enlacesALaDeclaracion();
+    expect(enlaces).toHaveLength(2);
+    for (const a of enlaces) {
+      expect(
+        a.className,
+        "el enlace del art. 15 vuelve a medir menos que un dedo",
+      ).toContain("min-h-touch");
+    }
+  });
+
   it("está también en el drawer móvil, no sólo en el escritorio", async () => {
     await render(
       <AdminShell title="Lo que sea">

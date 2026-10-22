@@ -351,12 +351,17 @@ export function observacionDelTurno(
     firmadoPor: string;
     recordedAt: string;
     valor: unknown;
+    /** residencia-6 · lo apuntado por ESTA tablet y que puede no haber
+     *  subido. Sale en la franja («· en la tablet») porque «consta» y
+     *  «consta aquí» no son lo mismo. */
+    enLaTablet?: boolean;
   }>,
   dimensiones: Array<{ code: string; comoSiempre: string }>,
 ): {
   firmadoPor: string;
   recordedAt: string;
   todoComoSiempre: boolean;
+  enLaTablet: boolean;
 } | null {
   const codigos = new Set(dimensiones.map((d) => d.code));
   const suyos = registros.filter(
@@ -384,6 +389,10 @@ export function observacionDelTurno(
     firmadoPor: ultimo.firmadoPor,
     recordedAt: ultimo.recordedAt,
     todoComoSiempre,
+    // residencia-6 · basta con que UNO de los que sostienen la franja
+    // esté sólo en la tablet: entonces la frase todavía no es lo que el
+    // relevo va a leer, y eso hay que decirlo.
+    enLaTablet: suyos.some((r) => r.enLaTablet === true),
   };
 }
 

@@ -106,8 +106,8 @@ const { ocurrenciasDeObligacion, wallTimeToUtc } = await import(
 
 const PIN_ANA = "4071"; // auxiliar, PRIMERA planta
 const PIN_MARI = "7788"; // auxiliar, SEGUNDA planta
-const PIN_ROSA = "9182"; // DUE, alcance total
-const PIN_PILAR = "3344"; // dirección
+const PIN_ROSA = "918256"; // DUE, alcance total — SEIS cifras (D-68)
+const PIN_PILAR = "334455"; // dirección — alcance total, seis cifras
 
 /** El canario de este fichero: si aparece en claro en un volcado, el
  *  bloque no sirve. Es el texto de «algo no va bien», que entra en el
@@ -1225,8 +1225,17 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
          FROM management_duties WHERE tenant_id = '${tenantId}'`,
       );
       expect(duties.length).toBeGreaterThan(20);
-      const hoy = new Date().toISOString().slice(0, 10);
-      const { addDays } = await import("@mipiacetpv/residencia-plan");
+      // residencia-6 · **la hora de pared del centro, no la de UTC.**
+      // `toISOString().slice(0, 10)` da el día de UTC, y entre las 00:00
+      // y las 02:00 de aquí ése es el día ANTERIOR: la ventana de 90 días
+      // salía corrida un día respecto a la que generó la API (que usa
+      // `utcToWallDate`) y el test se ponía rojo sólo de madrugada. En la
+      // CI nunca pasa —corre en UTC— así que llevaba aquí desde
+      // residencia-5 sin verse. Misma lección que el e2e de fichaje.
+      const { addDays, utcToWallDate } = await import(
+        "@mipiacetpv/residencia-plan"
+      );
+      const hoy = utcToWallDate(new Date());
       for (const d of duties) {
         const esperadas = ocurrenciasDeObligacion(
           {

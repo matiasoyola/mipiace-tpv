@@ -94,6 +94,12 @@ export function PanelPage() {
   }
 
   const { abierto, relevos, obligaciones, turno, indicadores } = panel;
+  const porArreglar = panel.porArreglar ?? {
+    pinesPorRenovar: [],
+    residentesSinPlan: [],
+  };
+  const cosasPorArreglar =
+    porArreglar.pinesPorRenovar.length + porArreglar.residentesSinPlan.length;
   const conDato = indicadores.filter((i) => i.valor != null);
   const fuera = conDato.filter((i) => i.dentro === false);
 
@@ -418,6 +424,85 @@ export function PanelPage() {
           </div>
         )}
       </section>
+
+      {/* ══ 4b · residencia-6 · LO QUE HAY QUE ARREGLAR ══════════
+          Va **detrás del turno y delante de los indicadores**, y no
+          arriba: no es una urgencia de hoy —nadie está en el hospital por
+          esto— pero sí algo que deja el centro a medio configurar, y lo
+          arregla quien ve esta pantalla. Y **no se pinta cuando no hay
+          nada**: una tarjeta vacía con un «0» enseña a no mirar la
+          sección. */}
+      {cosasPorArreglar > 0 && (
+        <section className="mb-7">
+          <h2 className="mb-2 text-[16px] font-semibold text-mipiace-ink">
+            Lo que hay que arreglar
+          </h2>
+          <div className="space-y-3">
+            {porArreglar.pinesPorRenovar.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                <p className="text-[13.5px] font-medium text-amber-900">
+                  {porArreglar.pinesPorRenovar.length === 1
+                    ? "1 PIN por renovar"
+                    : `${porArreglar.pinesPorRenovar.length} PIN por renovar`}
+                </p>
+                <p className="mt-1 text-[13px] text-amber-900">
+                  Tienen PIN de 4 cifras y un rol que ve todo el centro, así
+                  que <strong>ahora no entran</strong> en la puerta, en la
+                  sala ni en el móvil de guardia. Ponles uno de 6.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {porArreglar.pinesPorRenovar.map((p) => (
+                    <li key={p.userId} className="text-[13.5px]">
+                      <Link to="/admin/staff" className="underline">
+                        {p.nombre}
+                      </Link>
+                      {p.roles.length > 0 && (
+                        <span className="text-slate-600">
+                          {" · "}
+                          {p.roles.join(", ")}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {porArreglar.residentesSinPlan.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                <p className="text-[13.5px] font-medium text-amber-900">
+                  {porArreglar.residentesSinPlan.length === 1
+                    ? "1 residente sin plan de cuidados"
+                    : `${porArreglar.residentesSinPlan.length} residentes sin plan de cuidados`}
+                </p>
+                <p className="mt-1 text-[13px] text-amber-900">
+                  No les toca nada, así que{" "}
+                  <strong>no aparecen en «lo que toca» de su puerta</strong> y
+                  no cuentan en los indicadores. Hasta que tengan plan, lo
+                  que se les haga no queda registrado.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {porArreglar.residentesSinPlan.map((r) => (
+                    <li key={r.clientId} className="text-[13.5px]">
+                      <Link
+                        to={`/admin/residencia/residentes/${r.clientId}/plan`}
+                        className="underline"
+                      >
+                        {r.nombre}
+                      </Link>
+                      {r.habitacion && (
+                        <span className="text-slate-600">
+                          {" · habitación "}
+                          {r.habitacion}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ══ 5 · LOS INDICADORES ══════════════════════════════════ */}
       <section>

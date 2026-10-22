@@ -59,7 +59,7 @@ const DEL_ADMIN = frasesDe(
 );
 
 describe("los nombres de las clases de línea", () => {
-  it("el servidor tiene las NUEVE del prompt", () => {
+  it("el servidor tiene las nueve del prompt de residencia-5 y la de residencia-6", () => {
     expect(Object.keys(DEL_SERVIDOR).sort()).toEqual(
       [
         "ALGO_NO_VA_BIEN",
@@ -71,6 +71,11 @@ describe("los nombres de las clases de línea", () => {
         "INCIDENCIA_NUEVA",
         "NO_HECHO",
         "REGISTRO_SIN_TURNO",
+        // residencia-6 (punto 4) · los residentes sin plan de cuidados,
+        // una línea por zona. No es algo que haya pasado en el turno: es
+        // algo que falta por configurar, y sin decirlo el residente es
+        // invisible (no genera ni un «no hecho»).
+        "SIN_PLAN_DE_CUIDADOS",
       ].sort(),
     );
   });
