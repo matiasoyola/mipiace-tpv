@@ -431,7 +431,88 @@ adb install -r apps/tpv-android/build-releases/mipiacetpv-1.28.0-12800.apk
 
 ---
 
-## 9 · La pasada en el hierro — PENDIENTE, Y QUÉ HACE FALTA
+## 9 · La pasada en el hierro — EMPEZADA, con un hallazgo que la corta
+
+**23-10-2026**, N1 (Android 14, WebView **155**, 720×1440 a densidad 320 →
+360×720 CSS) contra **producción con Cafetería Sirope en ensayo**, APK 1.28.0
+(12800) — la instalada ya era byte a byte la construida aquí
+(`5dbff9bf…`), así que no hizo falta reinstalar. adb inalámbrico; los toques
+son `input tap` sobre las coordenadas que da el CDP (**el driver táctil, no el
+espejo**) y las capturas son `screencap`.
+
+### 9.1 · El 🔴 del mapa, cerrado en hierro
+
+| | pasada 18-10 | 23-10 en el N1 |
+|---|---|---|
+| `innerWidth` del mapa | **845** | **360** |
+| `clientWidth` / `scrollWidth` | 360 / 845 → 485 px fuera | **360 / 360 → 0 fuera** |
+| desborde horizontal | sí | **no** |
+| alto de la página | **4.020** | **720** = `clientHeight` |
+| cabecera | 1 fila | **120 px, 2 filas** |
+| lado de mesa | 144 | **88** |
+| chip «Terraza» | right 512, **inalcanzable** | dentro, y con el filtro puesto **8/8 mesas a la vista** |
+| chips | sin contenedor que desplace | desplazador propio, `scrollWidth 334 > clientWidth 191` |
+
+Capturas `00-estado-al-empezar`, `01-mapa-terraza`, `04-tras-back`. Tres mesas
+por fila, marcos de zona y mostrador compacto, tal como se diseñó.
+
+### 9.2 · 🟡 HALLAZGO · con el teclado abierto el primer resultado SIGUE fuera
+
+El criterio del §2 —«con "tost" y el teclado abierto (360×449) el primer
+resultado se ve entero por encima del teclado»— **falla en el aparato**, y en el
+banco no se veía porque el tenant del banco no está en ensayo y no paga la banda.
+
+Medido con «tost» tecleado y el teclado abierto (`innerHeight` 449):
+
+```
+cabecera de comanda   112 … 180   (68)
+buscador              194 … 250   (56)
+fila de cantidad      291 … 411   (120)   ← NO cede
+primer resultado      425 … 493           ← fuera de 449
+```
+
+La rejilla de familias **sí** cede: con texto en el buscador no se pinta, que es
+lo que este bloque arregló. Lo que no cede es la **fila de cantidad 1–6**, que en
+estrecho mide 120 px porque `n1-vertical` la repartió en 3×2 (seis teclas de 56
+en una fila piden 376 y a 360 no caben).
+
+El §2 pide que «los resultados van **justo debajo del buscador**», y con esos
+120 px en medio no lo están. La cuenta del arreglo, medida en el propio aparato:
+
+```
+ahorro si la fila de cantidad cede   134 px (120 + su hueco)
+primer resultado pasaría a           291 … 359   → DENTRO de 449
+y caben DOS
+```
+
+Sin teclado el caso ya está bien: 28 resultados, el primero en 425 … 493
+**visible**, y **6 a la vista**.
+
+**Decisión propuesta:** que `repartoDelCatalogo` decida también la fila de
+cantidad, y que en la mano **no se pinte mientras hay texto en el buscador**. La
+cantidad no se pierde: se corrige sobre la propia línea con los `−`/`+` de 56 px,
+que es lo que `principio-venta-bajo-estres` (regla 6) ya manda.
+
+Captura `03-buscando-teclado-tost`.
+
+### 9.3 · Lo que queda de la pasada
+
+Sin hacer todavía: 3–6 líneas con dos cafés distintos, comanda revisada, envío a
+cocina visto en el AP11, «Tickets pasados» y volver (hoja cerrada) y cobro en
+efectivo. **No se han creado tickets `TEST`**: la mesa T1 que se abrió se cerró
+sin líneas y la sala quedó en «0 abiertas · 0,00 €».
+
+Se hará de una sola pasada **después** de arreglar 9.2 y reconstruir la APK: con
+el criterio del §2 fallando, la pasada habría que repetirla igual.
+
+El AP11 está conectado y listo (`adb connect 192.168.5.74:5555` →
+`model:AP11_1006`).
+
+---
+
+## 9.bis · Qué hace falta para rehacerla
+
+
 
 El criterio de cierre del bloque. Hace falta, y es de Matías:
 
