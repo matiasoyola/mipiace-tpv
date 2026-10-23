@@ -55,6 +55,7 @@ import {
   fechaLarga,
   numeroDeColegiado,
 } from "./consentimientos.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { huellaDe } from "./ficheros.js";
 import { vistaDeLaHistoria } from "./historia.js";
 import { edadDe } from "./sesion.js";
@@ -168,7 +169,10 @@ export async function armarInforme(
     informe,
     centro,
     profesional: {
-      nombre: quien.alias?.trim() || quien.email,
+      // clinica-8 (fase B, 11) · quien firma el informe va con su
+      // nombre: el email de trabajo de la podóloga no es un nombre, y
+      // este PDF se lo lleva la paciente.
+      nombre: nombreParaMostrar(quien),
       colegiado: numeroDeColegiado(quien.clinicianLicense),
       titulo: TITULO_DEL_PROFESIONAL,
     },

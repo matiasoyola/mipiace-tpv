@@ -383,6 +383,24 @@ async function pulsar(b: HTMLElement | undefined) {
   });
 }
 
+/**
+ * clinica-8 (fase B, 12) · firma en la hoja de confirmación, si está.
+ *
+ * Cerrar la sesión dejó de ser un toque: entre el botón y el POST hay
+ * una hoja con el resumen de lo que se va a firmar («Cerrar la sesión es
+ * irreversible y se hace con un toque, sin confirmar», auditoría del
+ * 18-10). Estos tests fijan QUÉ viaja en el cierre, no cuántos toques
+ * cuesta, así que atraviesan la hoja con este helper — y el que sí fija
+ * la hoja es `clinica-8-sesion.test.tsx`.
+ *
+ * Tolerante a propósito: en el camino de los pendientes, el primer toque
+ * abre el diálogo de la pregunta y la hoja no está todavía.
+ */
+async function firmarSiSePregunta() {
+  const hoja = host.querySelector('[data-test="firmar-cierre"]');
+  if (hoja) await pulsar(hoja as HTMLElement);
+}
+
 /** El cuerpo del último POST al cierre. */
 function cuerpoDelCierre(): Record<string, unknown> {
   const ultimo = [...enviado].reverse().find((e) => e.url.endsWith("/cerrar"));
@@ -503,6 +521,7 @@ describe("clinica-5 · los tipos de visita", () => {
     await pulsar(chipDeTipo("Cirugía"));
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
     expect(cuerpoDelCierre().tipos).toEqual([
       "QUIROPODIA",
       "CIRUGIA",
@@ -561,6 +580,7 @@ describe("clinica-5 · el nivel sale de lo que se hace", () => {
 
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
     const bloques = cuerpoDelCierre().bloques as Record<string, any>;
     expect(bloques.QUIROPODIA.nivelElegido).toBe(3);
     expect(bloques.QUIROPODIA.actos).toEqual(["corte", "helomas"]);
@@ -687,6 +707,7 @@ describe("clinica-5 · el riesgo del pie (IWGDF)", () => {
     });
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
     const b = (cuerpoDelCierre().bloques as Record<string, any>).PIE_RIESGO;
     expect(b).toEqual({
       sensibilidad: "PERDIDA",
@@ -795,6 +816,7 @@ describe("clinica-5 · el aviso aparece al marcar lo que choca", () => {
     await pulsar(botonPorTexto("Enucleaciónhelomas"));
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
     expect(cuerpoDelCierre().avisos).toBeUndefined();
   });
 });
@@ -862,6 +884,7 @@ describe("clinica-5 · «Hoy toca»", () => {
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
     await pulsar(botonPorTexto("Sí, hecho"));
+    await firmarSiSePregunta();
     await act(async () => {
       await Promise.resolve();
     });
@@ -877,6 +900,7 @@ describe("clinica-5 · «Hoy toca»", () => {
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
     await pulsar(botonPorTexto("Todavía no"));
+    await firmarSiSePregunta();
     await act(async () => {
       await Promise.resolve();
     });
@@ -890,6 +914,7 @@ describe("clinica-5 · «Hoy toca»", () => {
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
     expect(host.querySelector('[data-test="dialogo-de-pendiente"]')).toBeNull();
+    await firmarSiSePregunta();
     expect(enviado.filter((e) => e.url.endsWith("/cerrar"))).toHaveLength(1);
   });
 });
@@ -900,6 +925,7 @@ describe("clinica-5 · «Para la próxima visita»", () => {
     await pulsar(botonPorTexto("Control de pie de riesgo"));
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
     expect(cuerpoDelCierre().pendientesNuevos).toEqual([
       { id: "control_riesgo", zona: null, nota: null },
     ]);
@@ -923,6 +949,7 @@ describe("clinica-5 · «Para la próxima visita»", () => {
     );
     await pulsar(botonPorTexto("4"));
     await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
     expect(cuerpoDelCierre().pendientesNuevos).toEqual([
       { id: "revisar_una", zona: ZONA, nota: null },
     ]);

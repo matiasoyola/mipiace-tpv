@@ -47,6 +47,7 @@ import {
 import { renderConsentimientoPdf } from "@mipiacetpv/ticket-pdf";
 
 import { CENTER_TZ } from "../agenda/time.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { asegurarDek, dekONada } from "./claves.js";
 import {
   cifrarTexto,
@@ -156,12 +157,9 @@ type FilaDeBase = Prisma.ClientConsentGetPayload<{
   select: typeof SELECT_CONSENTIMIENTO;
 }>;
 
-function nombreDeUsuario(u: {
-  alias: string | null;
-  email: string;
-}): string {
-  return u.alias?.trim() || u.email;
-}
+// clinica-8 (fase B, 11) · el nombre, no el email. Era una copia local
+// que caía al email entero; ahora es `lib/nombre-para-mostrar.ts`.
+const nombreDeUsuario = nombreParaMostrar;
 
 /**
  * EL NÚMERO DE COLEGIADO, sin el «Col.» que a veces viene dentro.

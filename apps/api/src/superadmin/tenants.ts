@@ -3021,12 +3021,27 @@ export async function registerSuperAdminTenantsRoutes(
           data: {
             tenantId: id,
             email: lowerEmail,
+            // clinica-8 (fase B, 11) · EL NOMBRE DE LA ACTIVACIÓN LLEGA A
+            // PERSONAL.
+            //
+            // `ownerName` se pedía en el formulario, se usaba para el
+            // email de bienvenida y para la auditoría, y **no se
+            // escribía en la fila**. Así que la propietaria nacía sin
+            // `alias` y su EMAIL era lo que el TPV pintaba en «Atiende»,
+            // en «Firmada por», en el informe de la paciente y en la
+            // barra de abajo (auditoría del 18-10, punto 17).
+            //
+            // Va en el mismo `create` y no en un `update` después: el
+            // nombre es parte de nacer, no un arreglo posterior, y un
+            // `update` best-effort fuera de la transacción dejaría
+            // cuentas con nombre y cuentas sin él según si falló.
+            alias: body.ownerName.trim(),
             passwordHash,
             pinHash,
             role: "OWNER",
             mustChangePasswordAt: new Date(),
           },
-          select: { id: true, email: true },
+          select: { id: true, email: true, alias: true },
         });
         const t = await tx.tenant.update({
           where: { id },
@@ -3210,15 +3225,19 @@ export async function registerSuperAdminTenantsRoutes(
         : null;
       const signals = extractRequestSignals(request);
 
-      // El modelo User no guarda `name` (sí lo guarda el email/audit y
-      // se imprime en el welcome email). Sólo actualizamos email +
-      // password + tokenVersion en el User; el nombre viaja al email y
-      // al audit para que el histórico recuerde a quién se transfirió.
+      // clinica-8 (fase B, 11) · el nombre del nuevo propietario también
+      // se ESCRIBE, no sólo se manda por email y se apunta en la
+      // auditoría. Antes este comentario decía «el modelo User no guarda
+      // `name`» — y es verdad, pero sí guarda `alias`, que es el nombre
+      // visible desde v1.7. Transferir el OWNER a otra persona y dejar
+      // el `alias` de la anterior es peor que no tener nombre: el TPV
+      // seguiría pintando a quien ya no está.
       await prisma.$transaction(async (tx) => {
         await tx.user.update({
           where: { id: owner.id },
           data: {
             email: lowerEmail,
+            alias: body.newOwnerName.trim(),
             ...(newPasswordHash
               ? {
                   passwordHash: newPasswordHash,

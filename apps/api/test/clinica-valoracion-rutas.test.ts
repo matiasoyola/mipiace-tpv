@@ -273,6 +273,13 @@ const fakePrisma = {
       name: "Clínica Podológica Demo",
     })),
   },
+  // clinica-8 (fase B, 14) · los tipos de visita que el centro declara,
+  // de donde sale la ESPECIALIDAD que el test del paciente nombra.
+  tagVisitType: {
+    findMany: vi.fn(async () => [
+      { slug: "quiropodia", visitType: "QUIROPODIA" },
+    ]),
+  },
   user: {
     findFirst: vi.fn(async ({ where }: any) => {
       for (const u of users.values()) {
@@ -829,7 +836,12 @@ describe("clinica-2 · con el módulo apagado las rutas NO EXISTEN", () => {
 // ── 2 · el enlace ────────────────────────────────────────────────────
 
 describe("clinica-2 · EL ENLACE caduca y es de un solo uso", () => {
-  it("un enlace vivo abre, y devuelve las TRES cosas y nada más", async () => {
+  // clinica-8 (fase B, 14) · ahora son CUATRO: entra `especialidad`, que
+  // es a qué se dedica la clínica y no un dato de salud (sale de los
+  // tipos de visita que el centro declaró en su catálogo). Lo que este
+  // test sigue fijando es que no sale NADA MÁS: ni una respuesta, ni una
+  // alerta, ni el apellido.
+  it("un enlace vivo abre, y devuelve las CUATRO cosas y nada más", async () => {
     const token = conEnlace();
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: `/valoracion/${token}` });
@@ -838,9 +850,30 @@ describe("clinica-2 · EL ENLACE caduca y es de un solo uso", () => {
       "canal",
       "clinica",
       "cuestionario",
+      "especialidad",
       "nombrePila",
     ]);
     expect(res.json().nombrePila).toBe("Carmen");
+    await app.close();
+  });
+
+  // Y si la especialidad no se puede leer, el test SE ABRE IGUAL. Es la
+  // forma de fallar que importa aquí: al otro lado hay una persona
+  // mayor con una tablet, y lo que está en juego es el complemento de
+  // una frase.
+  it("con la tabla de tipos de visita ilegible, el test abre sin especialidad", async () => {
+    const token = conEnlace();
+    const app = await buildApp();
+    fakePrisma.tagVisitType.findMany = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const res = await app.inject({ method: "GET", url: `/valoracion/${token}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().especialidad).toBeNull();
+    expect(res.json().cuestionario).toBeTruthy();
+    fakePrisma.tagVisitType.findMany = vi.fn(async () => [
+      { slug: "quiropodia", visitType: "QUIROPODIA" },
+    ]);
     await app.close();
   });
 

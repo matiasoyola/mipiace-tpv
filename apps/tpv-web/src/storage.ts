@@ -52,12 +52,29 @@ export interface CashierSession {
 
 // Label de display del cajero: alias si existe, email si no. Único
 // punto de decisión para header, botón Bloquear, relogin, etc.
+//
+// clinica-8 (fase B, 11) · y el «si no» ya NO es el email entero: es su
+// local-part.
+//
+// La auditoría del 18-10 leyó `m.oyola+clinica-demo@mipiace.es` en la
+// barra de abajo del TPV y en «Bloquear (…)». El esquema ya dice lo que
+// toca —«el email queda como credencial y canal», `User.alias` v1.7— y
+// la API hace ese mismo fallback a la local-part desde este bloque
+// (`lib/nombre-para-mostrar.ts`). Aquí hay que repetirlo porque esta
+// etiqueta se pinta SIN RED, con lo que hay en la sesión guardada: una
+// sesión de antes del bloque no trae `alias`, y el TPV de la clínica
+// abre con ella.
+//
+// El dominio es lo único que se quita. No se devuelve «—»: hay que poder
+// saber quién tiene la caja abierta.
 export function cashierDisplayLabel(c: {
   alias?: string | null;
   email: string;
 }): string {
   const alias = c.alias?.trim();
-  return alias && alias.length > 0 ? alias : c.email;
+  if (alias && alias.length > 0) return alias;
+  const corte = c.email.indexOf("@");
+  return corte > 0 ? c.email.slice(0, corte) : c.email;
 }
 
 export function getCashierSession(): CashierSession | null {
