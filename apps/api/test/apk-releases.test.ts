@@ -579,6 +579,14 @@ describe("GET /apk, la pagina del terminal roto", () => {
     expect(body.indexOf("puede dañar tu dispositivo")).toBeLessThan(
       body.indexOf("Descargar la app"),
     );
+    // Y QUE SE VEA. Lo encontro la tabla de sabotajes de la fase B: con
+    // `hidden` en el parrafo, el aviso sigue en el HTML y este test
+    // pasaba en verde — o sea que estaba comprobando que la cadena
+    // existe, no que la duena la lea. Esta pagina no lleva JavaScript
+    // (lo fija el primer test del describe), asi que lo unico que la
+    // puede esconder es la propia etiqueta.
+    expect(body).toContain('<p class="aviso">');
+    expect(body).not.toMatch(/class="aviso"[^>]/);
     await app.close();
   });
 
