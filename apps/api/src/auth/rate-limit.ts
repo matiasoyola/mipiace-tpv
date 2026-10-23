@@ -23,6 +23,24 @@ const PWD_RESET_MAX = 5;
 // dentro de la ventana de validez.
 const PWD_RESET_CONFIRM_TTL_SECONDS = 15 * 60;
 const PWD_RESET_CONFIRM_MAX = 10;
+// primer-acceso · EL BUCKET PROPIO DE LA INVITACIÓN, y por qué no vale
+// el del reset.
+//
+// Las rutas de la invitación hacen el mismo `argon2.verify` por token
+// vivo, así que necesitan el mismo candado por IP. Pero el GASTO es otro:
+// abrir el enlace ya cuesta una petición (`consultar`), elegir la
+// contraseña cuesta otra (`aceptar`), y entre medias la propietaria
+// recarga, se equivoca al teclear o abre el correo en dos sitios. Con el
+// techo del reset —10 en 15 min, compartido con el reset de verdad— el
+// bucle visual del 23-10 se quedó fuera de su propia pantalla con un 429
+// y catorce minutos de espera: el panel en modo desarrollo monta los
+// efectos dos veces (`StrictMode`), así que cada visita cuenta dos.
+//
+// Veinte en quince minutos es lo que cabe de uso real sin dejar de acotar
+// el coste del argon2. El token sigue siendo de 256 bits: lo que esto
+// limita es el gasto de CPU, no la adivinanza.
+const INVITACION_TTL_SECONDS = 15 * 60;
+const INVITACION_MAX = 20;
 const TWO_FA_VERIFY_TTL_SECONDS = 15 * 60;
 const TWO_FA_VERIFY_MAX = 5;
 
@@ -200,6 +218,26 @@ export async function passwordResetConfirmThrottle(
     `pwd-reset-confirm:${ip}`,
     PWD_RESET_CONFIRM_MAX,
     PWD_RESET_CONFIRM_TTL_SECONDS,
+    redis,
+  );
+}
+
+/**
+ * primer-acceso · el candado por IP de las rutas de la invitación.
+ *
+ * Separado del `passwordResetConfirmThrottle` a propósito: compartir el
+ * bucket hacía que usar «olvidé mi contraseña» le gastara los intentos a
+ * la propietaria que todavía no ha entrado nunca — dos caminos distintos
+ * del mismo día, cerrándose el uno al otro.
+ */
+export async function invitacionThrottle(
+  ip: string,
+  redis: Redis = getRedis(),
+): Promise<ThrottleState> {
+  return throttle(
+    `invitacion:${ip}`,
+    INVITACION_MAX,
+    INVITACION_TTL_SECONDS,
     redis,
   );
 }
