@@ -1,0 +1,32 @@
+{
+ "AP11": {
+  "clip": {
+   "x": 613,
+   "y": 367,
+   "width": 188,
+   "height": 188
+  },
+  "mesa": "M5",
+  "etiqueta": {
+   "color": "rgb(255, 255, 255)",
+   "fondo": "rgb(143, 217, 168)",
+   "px": "15px",
+   "alto": 30
+  }
+ },
+ "D8": {
+  "clip": {
+   "x": 677,
+   "y": 383,
+   "width": 204,
+   "height": 204
+  },
+  "mesa": "M5",
+  "etiqueta": {
+   "color": "rgb(255, 255, 255)",
+   "fondo": "rgb(143, 217, 168)",
+   "px": "15px",
+   "alto": 30
+  }
+ }
+}

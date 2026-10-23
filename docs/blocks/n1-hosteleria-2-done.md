@@ -32,10 +32,34 @@ invisible— y pasan a `VERDE_LISTA_TEXT`, la constante que existía al lado sin
 usar desde kds-1: **10,82:1**. Sin tapar, el diff da 0,04–0,07 % y las cajas de
 cambio caen exactamente encima de esos dos elementos.
 
-Se tocó en los dos tamaños a propósito, y es la única decisión del bloque que se
-sale de la restricción: 1,66:1 no es un reparto que un tamaño de pantalla pueda
-justificar. **Si Matías prefiere que el AP11 y el D8 se queden como estaban, es
-una línea.**
+Se tocó en los dos tamaños a propósito, y **es la ÚNICA excepción a la
+restricción de este bloque**. Decisión de Matías, 23-10: se queda arreglado.
+1,66:1 no es un reparto que un tamaño de pantalla pueda justificar — es texto
+que no se lee en ningún tamaño.
+
+#### La captura que las cuatro de 0 px no incluían
+
+Las cuatro capturas de arriba **tapan** este elemento, que es lo que les permite
+dar cero. Así que la excepción tiene su propio par de capturas, sin tapar nada,
+recortadas sobre la mesa M5 —que es la que lleva el aviso— en los dos tamaños:
+
+```
+listo-antes-AP11.png   ·  listo-despues-AP11.png
+listo-antes-D8.png     ·  listo-despues-D8.png
+```
+
+| | antes | después |
+|---|---|---|
+| color de la tinta | `rgb(255,255,255)` | `rgb(21,23,27)` |
+| contraste | **1,66:1** | **10,82:1** |
+| alto de la etiqueta | 30 px | 30 px |
+| tamaño de letra | 15 px | 15 px |
+| tamaño del recorte | 376×376 (AP11) · 408×408 (D8) | **idéntico** |
+
+Y el diff del recorte dice exactamente lo que tiene que decir: **925 píxeles
+distintos, todos dentro de una caja de 81×23** —los glifos de la palabra
+«LISTO»— y el recorte mide lo mismo antes y después, así que **la maquetación no
+se mueve: sólo cambia el color de la tinta.** Lo rehace `diff-listo.mjs`.
 
 Y los números del terminal, antes y después, idénticos uno a uno:
 
@@ -357,9 +381,31 @@ de cantidad se haya ido en §2.1.
 3. **quedarse en 3 de 6 y desplazar**, que es lo que está ahora. La lista desborda
    293 px: un gesto de pulgar.
 
-Mi recomendación es la **3**, y por eso la he dejado puesta: de las tres, es la
-única que no deshace un arreglo que ya se midió en el hierro. Pero esto lo decide
-Matías con el aparato en la mano, y lo que diga va aquí tal cual.
+**DECISIÓN (Matías, 23-10): la 3.** Se queda en **3 de 6 líneas y se desplaza**,
+y es la única de las tres que no deshace un arreglo ya medido en el hierro: ni
+vuelve a truncar el nombre del producto (el 🔴 del 18-10) ni deja la comanda sin
+corrección rápida de cantidad (que es lo que hace aceptable haber quitado la fila
+1–6 en §2.1).
+
+Lo que queda abierto no es la decisión, es **el juicio con el aparato en la
+mano**: si desplazar 293 px con el pulgar para ver las tres últimas líneas se
+puede hacer en pleno servicio, o si al tenerlo delante prefiere pagar una de las
+dos cosas de arriba. Eso se contesta en §9.4 y lo que diga va aquí tal cual.
+
+Y queda dicho en voz alta para que nadie lo lea como un olvido: **el criterio
+«con seis líneas, las seis a la vista sin desplazar» no se cumple, y no se puede
+cumplir** sin tocar una de las dos piezas intocables. No es que falte trabajo: es
+que 720 px no dan.
+
+---
+
+## 2.9 · Las tres que decidió Matías (23-10, tras leer las medidas)
+
+| | decisión | dónde |
+|---|---|---|
+| hallazgo 1 | **3 de 6 líneas y desplazar.** Queda por juzgar en la mano, no por decidir | §2.8 |
+| `BILLING` | **fuera de este bloque**, con bloque propio `mesa-pide-cuenta`. Sin tocar la API | §4.1 |
+| color de LISTO | **se queda arreglado en AP11 y D8**: única excepción a la restricción, con su captura | §0 |
 
 ---
 
@@ -408,8 +454,20 @@ tarjeta (§2.6) está hecho y medido en el banco visual, pero **no se puede
 fotografiar en el aparato** porque no hay forma de poner una mesa en ese estado.
 Y por eso el banco en servicio siembra mesas en todos los estados **menos** ése.
 
-**No se toca aquí**: es un cambio de la API y este bloque es de maquetación en la
-mano. Pero es, con diferencia, el hallazgo más gordo de la pasada.
+**DECISIÓN (Matías, 23-10): fuera de este bloque, y con bloque propio.**
+
+> **Pendiente · bloque `mesa-pide-cuenta`.** Que una mesa pueda pasar a «pide la
+> cuenta» y que el camarero lo vea en el mapa. Toca la API —quién marca que una
+> mesa pidió la cuenta y por dónde entra— y desbloquea el botón «Cobrar X €» de
+> la tarjeta, o sea la derivada principal de `principio-cobro-en-mesa`. Lo que
+> este bloque deja hecho y medido para cuando llegue: la geometría del botón en
+> la forma de 88 px (cuerda, peor importe, dos renglones al suelo de letra) y su
+> contraste. Lo que NO se puede hacer hasta entonces: fotografiarlo en el
+> aparato, porque no hay forma de poner una mesa en ese estado.
+
+Aquí **no se toca ni una línea de la API**. Pero es, con diferencia, el hallazgo
+más gordo de la pasada, y conviene que no se quede enterrado en un `-done`: hoy
+la leyenda del mapa enseña un estado que un camarero no puede ver.
 
 ### 4.2 `BAR_COUNTER_HEIGHT` contaba 18 px de más en la mano
 
