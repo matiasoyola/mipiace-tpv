@@ -605,7 +605,7 @@ corrida de las 23:58 los dos pasaron. **No se corre el e2e de madrugada.**
 |---|---|
 | `api/test/clinica-8-cobro-de-la-sesion.test.ts` (5) | los tres valores de la respuesta y qué hace el cobro con cada uno |
 | `api/test/clinica-8-csv-clinico.test.ts` (24) | el CSV real de Rosario, el de La Maestranza intacto y las ocho negativas |
-| `api/test/clinica-8-catalogo-clinico.test.ts` (7) | el check que bloquea la activación, y a quién no aplica |
+| `api/test/clinica-8-catalogo-clinico.test.ts` (7, y 9 con los dos del §14.2) | el check que bloquea la activación, y a quién no aplica |
 | `api/test/clinica-8-cajeros.test.ts` (8) | la lista y las tres rutas que escriben |
 | `api/test/clinica-8-marca-sanitaria.test.ts` (5) | la marca al día, y que falla hacia «no sé» |
 | `tpv-web/test/clinica-8-agenda.test.tsx` (9) | cancelar pregunta, y el orden de la cita en una clínica |
@@ -1269,15 +1269,23 @@ primera, y es porque los bancos miran la petición que sale, no la pantalla:
 
 | Suite | Resultado |
 |---|---|
-| `npx vitest run` (workspace, desde la raíz) | **453 ficheros · 6.504 tests**, 10 saltados (tras el segundo merge de master, §14.1) |
-| `pnpm test:e2e` (Postgres real, base propia de esta sesión) | **49 ficheros · 1.099 tests** (tras el segundo merge y el arreglo del §14.2) |
-| `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio |
+| `npx vitest run` (workspace, desde la raíz) | **453 ficheros · 6.512 tests**, 10 saltados (contra HEAD, con el arreglo del §14.2 y el import del §14.1.b dentro) |
+| `pnpm test:e2e` (Postgres real, base propia de cada sesión) | **49 ficheros · 1.099 tests** (tras el segundo merge y el arreglo del §14.2) |
+| `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio **contra HEAD**, no contra el árbol (§14.1.b) |
 
-El e2e corrió sobre `mipiacetpv_clinica8_e2eb`, una base propia de esta
-sesión: la suite hace `DROP SCHEMA`, así que compartirla con otro worktree es
-tirarle la base a la sesión de al lado. Y **no de madrugada**: la primera
-pasada de la fase B se lanzó a las 14:31 de Madrid, lejos de la franja mala de
-00:00 a N:00 que documenta puesta-en-marcha §8.1.
+La última cifra de la suite —6.512— es la del árbol limpio en HEAD. La tabla
+llegó a decir 6.504 y era de antes de los dos bancos del §14.2 y de los del
+póster de la cámara: **un número de «verde» que no se vuelve a medir después
+del último commit es un número de otra rama**.
+
+El e2e corrió sobre `mipiacetpv_clinica8_e2eb` y, en la segunda sesión que
+tocó este árbol (§14.1.b), sobre `mipiacetpv_e2e_clinica8`: **una base por
+sesión, nunca la misma**. La suite hace `DROP SCHEMA`, así que compartirla es
+tirarle la base a quien esté corriendo al lado — y dos sesiones en un mismo
+worktree es justo el caso en que apetece reutilizarla. Y **no de madrugada**:
+la primera pasada de la fase B se lanzó a las 14:31 de Madrid y la de
+verificación a las 18:48, lejos de la franja mala de 00:00 a N:00 que
+documenta puesta-en-marcha §8.1.
 
 **Lo que el e2e encontró al mergear master.** Seis tests rojos en
 `residencia-5.e2e.ts` y `residencia-6.e2e.ts`, los dos con el mismo
@@ -1401,6 +1409,13 @@ El front del TPV cambia en las dos fases, y en la B bastante:
   final de las listas de pistas, y hay test de los de hostelería);
 - el nombre del producto pasa a tres líneas en la tarjeta, sin cambiar su
   alto.
+
+**Las residencias (Jardín de Gredos, y el piloto es en semanas):** el check
+«Catálogo clínico completo» les sale **«No aplica · no es una consulta
+clínica»** y **no bloquea su activación**. Importa decirlo en esta lista
+porque durante unas horas sí la bloqueó: ver §14.2. Si al activar una
+residencia saliera `ONBOARDING_NOT_READY · ["Catálogo clínico completo"]`, lo
+que está desplegado es la fase A sin ese arreglo.
 
 **Lo que cambia para TODOS, clínica o no:**
 
