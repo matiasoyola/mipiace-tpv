@@ -69,6 +69,12 @@ import {
   resolverEnlace,
 } from "../enlaces/puerta.js";
 import { REGLAS_VALORACION } from "../enlaces/reglas.js";
+import {
+  especialidadDeLosTipos,
+  type Especialidad,
+} from "@mipiacetpv/clinica-sesion";
+
+import { tipoPorEtiqueta } from "./tipos-de-visita.js";
 import { responderValoracion } from "./valoracion.js";
 
 const PARAMS_TOKEN = {
@@ -110,13 +116,52 @@ export async function registerValoracionPublicaRoutes(
         return noSirve(reply);
       }
 
-      // LAS TRES COSAS. Nada más sale por aquí. Y NO se gasta el enlace:
-      // el paciente puede recargar las veces que quiera (y lo hace). El
-      // uso se gasta al CONTESTAR.
+      // LAS TRES COSAS —ahora cuatro—. Nada más sale por aquí. Y NO se
+      // gasta el enlace: el paciente puede recargar las veces que quiera
+      // (y lo hace). El uso se gasta al CONTESTAR.
+      //
+      // clinica-8 (fase B, 14) · LA ESPECIALIDAD, para que el test deje
+      // de decir «la podóloga» en un centro que no hace podología
+      // (auditoría del 18-10, punto 18).
+      //
+      // Sale de los tipos de visita que el centro ha DECLARADO en su
+      // catálogo —la misma tabla que mira el check de «Catálogo clínico
+      // completo» de la fase A—, pasados por la función pura del paquete
+      // que ya decide la especialidad de una sesión. No es un ajuste
+      // nuevo que alguien tenga que rellenar: el centro ya lo dijo al
+      // cargar su CSV.
+      //
+      // `null` si no ha declarado nada, y entonces el test habla sin
+      // nombrar especialidad. Inventar «podología» porque es lo que hay
+      // hoy sería escribirle a la paciente de un fisioterapeuta que su
+      // visita es de podología.
+      //
+      // Y NO es un dato de salud: es a qué se dedica la clínica, lo
+      // mismo que su nombre, que ya sale por aquí.
+      //
+      // Entre `try`: si la lectura revienta, el test SE ABRE IGUAL sin
+      // nombrar la especialidad. Lo que hay al otro lado es una persona
+      // de 78 años con una tablet en la mano, y la frase de la que
+      // hablamos es «…su primera visita de podología». Un 500 por un
+      // complemento del sujeto sería la peor forma de fallar que tiene
+      // esta ruta.
+      let especialidad: Especialidad | null = null;
+      try {
+        especialidad = especialidadDeLosTipos(
+          Object.values(await tipoPorEtiqueta(getPrisma(), enlace.tenantId)),
+        );
+      } catch (err) {
+        request.log.warn(
+          { event: "clinica_valoracion_especialidad_ilegible", err },
+          "no se pudo leer la especialidad del centro; el test se abre sin nombrarla",
+        );
+      }
+
       return {
         clinica: v.tenant.name,
         nombrePila: v.cliente.firstName,
         canal: v.channel,
+        especialidad,
         cuestionario,
       };
     },

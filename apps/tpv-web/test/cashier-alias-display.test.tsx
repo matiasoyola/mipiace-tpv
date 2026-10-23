@@ -39,10 +39,19 @@ describe("cashierDisplayLabel", () => {
     expect(cashierDisplayLabel({ alias: "María", email: "m.g@x.es" })).toBe("María");
   });
 
-  it("sin alias / alias vacío → email (sesiones y entradas legacy)", () => {
-    expect(cashierDisplayLabel({ email: "m.g@x.es" })).toBe("m.g@x.es");
-    expect(cashierDisplayLabel({ alias: null, email: "m.g@x.es" })).toBe("m.g@x.es");
-    expect(cashierDisplayLabel({ alias: "   ", email: "m.g@x.es" })).toBe("m.g@x.es");
+  // clinica-8 (fase B, 11) · el respaldo pasa de ser el email ENTERO a
+  // su local-part. La auditoría del 18-10 leyó
+  // `m.oyola+clinica-demo@mipiace.es` en la barra de abajo del TPV.
+  it("sin alias / alias vacío → la local-part del email, no el email entero", () => {
+    expect(cashierDisplayLabel({ email: "m.g@x.es" })).toBe("m.g");
+    expect(cashierDisplayLabel({ alias: null, email: "m.g@x.es" })).toBe("m.g");
+    expect(cashierDisplayLabel({ alias: "   ", email: "m.g@x.es" })).toBe("m.g");
+    // Con alias «+»: lo que sobra es el dominio, no la etiqueta.
+    expect(
+      cashierDisplayLabel({ email: "m.oyola+clinica-demo@mipiace.es" }),
+    ).toBe("m.oyola+clinica-demo");
+    // Sin arroba (semilla vieja) se devuelve tal cual: mejor eso que "".
+    expect(cashierDisplayLabel({ email: "rosa" })).toBe("rosa");
   });
 });
 
@@ -63,7 +72,7 @@ describe("RecentCashier · tolerancia a shape antigua", () => {
     const list = getRecentCashiers();
     expect(list).toHaveLength(2);
     expect(cashierDisplayLabel(list[0]!)).toBe("María");
-    expect(cashierDisplayLabel(list[1]!)).toBe("vieja@bar.es");
+    expect(cashierDisplayLabel(list[1]!)).toBe("vieja");
   });
 });
 

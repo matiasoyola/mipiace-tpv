@@ -252,7 +252,7 @@ describe.skipIf(!e2eEnabled)("e2e · la empresa sin caja contra Postgres real", 
       expect(enqueuedInitialSync).not.toContain(tenantId);
     });
 
-    it("la salud dice que está lista, con seis checks que no aplican", async () => {
+    it("la salud dice que está lista, con siete checks que no aplican", async () => {
       const res = await app.inject({
         method: "GET",
         url: `/super-admin/tenants/${tenantId}`,
@@ -271,6 +271,9 @@ describe.skipIf(!e2eEnabled)("e2e · la empresa sin caja contra Postgres real", 
         .map((c: any) => c.id)
         .sort();
       expect(noAplican).toEqual([
+        // clinica-8 · el séptimo: el catálogo clínico sólo se mide donde
+        // hay historia clínica, y este colegio no la tiene.
+        "catalogo-clinico",
         "no-sync-failures",
         "products-sellable",
         "sync-done",

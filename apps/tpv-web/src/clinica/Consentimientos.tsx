@@ -315,7 +315,29 @@ export function Consentimientos(props: {
           </div>
         )}
 
-        <div className="mt-3 bg-mipiace-stone rounded-2xl px-4 py-3.5 text-[15px] leading-relaxed max-h-[260px] overflow-y-auto space-y-3">
+        {/* clinica-8 (fase B, 15) · EL TEXTO YA NO ES UNA CAJA CON SU
+            PROPIO SCROLL.
+            Auditoría del 18-10, punto 12: «el texto largo se come el
+            gesto de desplazar; la firma solo se alcanza arrastrando por
+            los márgenes». Con `max-h-[260px] overflow-y-auto`, el dedo
+            que baja por encima del texto mueve el texto DENTRO de su
+            caja; cuando llega abajo, el navegador no encadena el scroll
+            a la página hasta que se levanta el dedo y se vuelve a
+            empezar. Así que para llegar a la caja de firma había que
+            acertar en los 16 px de margen de la tarjeta.
+            Un scroll dentro de otro scroll es un problema de
+            desplazamiento, no de altura, y la solución no es un
+            `overscroll-behavior` más fino: es que no haya dos. El texto
+            entra en el flujo de la página y UN gesto en cualquier sitio
+            lleva de la primera línea a la firma.
+            Lo que se pierde es que la caja de firma se vea sin
+            desplazar. Se gana que leer el consentimiento con el
+            paciente —que es lo que la ley pide que pase aquí— no sea
+            una pelea con la pantalla. */}
+        <div
+          data-test="texto-del-consentimiento"
+          className="mt-3 bg-mipiace-stone rounded-2xl px-4 py-3.5 text-[15px] leading-relaxed space-y-3"
+        >
           {plantilla.parrafos.map((p, i) => (
             <p key={i} className="m-0">
               {p}

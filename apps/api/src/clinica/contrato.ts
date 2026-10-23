@@ -39,6 +39,7 @@ import {
 import { createHash } from "node:crypto";
 
 import { getPrisma } from "../context.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { clinicaIsEnabled } from "./gate.js";
 import type { Ejecutor } from "./claves.js";
 
@@ -358,10 +359,9 @@ export interface VistaDelContrato {
   aceptaciones: readonly AceptacionEnPantalla[];
 }
 
-function nombreDe(u: { alias: string | null; email: string } | null): string {
-  if (!u) return "—";
-  return u.alias?.trim() || u.email;
-}
+// clinica-8 (fase B, 11) · el nombre, no el email. Era una copia local
+// que caía al email entero; ahora es `lib/nombre-para-mostrar.ts`.
+const nombreDe = nombreParaMostrar;
 
 /** Lo que la sección «Contrato de tratamiento de datos» pinta, de una
  *  vez. */

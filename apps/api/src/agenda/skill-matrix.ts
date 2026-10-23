@@ -19,6 +19,7 @@
 //     implementaciones que puedan divergir. Lo mide un test.
 
 import type { PrismaClient } from "@mipiacetpv/db";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 
 export interface SkillMatrixService {
   id: string;
@@ -126,8 +127,13 @@ export async function loadSkillMatrix(
       const user = userById.get(userId);
       return {
         userId,
+        // clinica-8 (fase B, 11) · el nombre del perfil de agenda manda;
+        // si no hay perfil, el `alias` y después la local-part del email.
+        // El email ENTERO estira la columna de la matriz y no es un
+        // nombre.
         displayName:
-          profile?.displayName ?? user?.alias ?? user?.email ?? "Sin nombre",
+          profile?.displayName ??
+          (user ? nombreParaMostrar(user) : "Sin nombre"),
         active: profile?.active ?? false,
         hasProfile: profile !== undefined,
       };

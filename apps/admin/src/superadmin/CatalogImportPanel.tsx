@@ -56,6 +56,42 @@ function netoEuros(n: number): string {
   return `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
+// ── clinica-8 · las marcas de clínica, en la palabra de la dueña ─────
+//
+// Los cinco tipos y los tres niveles están DUPLICADOS aquí por la regla de
+// la casa: `apps/admin` no depende de ningún paquete del monorepo, y sacar
+// cinco códigos a uno nuevo pesa más que la duplicación (es lo mismo que
+// `TAX_RATES` y la etiqueta de la exención en `CatalogoPage`, y lo mismo
+// que ya hace `AgendaCatalogPage` con estas dos listas). Lo que no puede
+// pasar es que las copias se separen, y eso lo ata
+// `clinica-tipos-panel.test.ts`, que lee la fuente del panel.
+const NOMBRE_DE_TIPO: Record<string, string> = {
+  QUIROPODIA: "Quiropodia",
+  PIE_RIESGO: "Pie de riesgo",
+  CIRUGIA: "Cirugía · revisión",
+  BIOMECANICA: "Biomecánica",
+  GENERAL: "General",
+};
+const NOMBRE_DE_NIVEL: Record<number, string> = {
+  1: "básica",
+  2: "completa",
+  3: "extra",
+};
+
+/** Los chips de la columna «Clínica» de una fila. Vacío = esta fila no
+ *  trae ninguna marca, y entonces se pinta un guion. */
+function marcasDeClinica(p: CatalogImportResult["entran"][number]): string[] {
+  const out: string[] = [];
+  if (p.primeraValoracion) out.push("Primera valoración");
+  if (p.tratamientoSesion) out.push("Tratamiento de la sesión");
+  if (p.nivelQuiropodia != null) {
+    out.push(
+      `Quiropodia ${NOMBRE_DE_NIVEL[p.nivelQuiropodia] ?? p.nivelQuiropodia}`,
+    );
+  }
+  return out;
+}
+
 export function CatalogImportPanel({
   tenantId,
   onCargado,
@@ -73,6 +109,15 @@ export function CatalogImportPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
+  // clinica-8 · ¿este fichero trae marcas de clínica? De eso depende que la
+  // columna exista. En el CSV de un bar sería una columna de guiones.
+  const hayClinica =
+    (previa?.entran ?? []).some(
+      (p) =>
+        p.primeraValoracion === true ||
+        p.tratamientoSesion === true ||
+        p.nivelQuiropodia != null,
+    ) || (previa?.tiposDeVisita ?? []).length > 0;
 
   function limpiar(): void {
     setCsv(null);
@@ -159,6 +204,25 @@ export function CatalogImportPanel({
         exento, y entonces el IVA tiene que ser 0; y{" "}
         <code className="text-[11.5px]">duracion_min</code> son los minutos de
         agenda, <strong>obligatorios en un servicio</strong>.
+      </p>
+      <p className="text-[12.5px] text-slate-600 mb-4">
+        Y cuatro más que dejan la clínica <strong>lista para cobrar</strong>:{" "}
+        <code className="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">
+          tipo_visita,primera_valoracion,tratamiento_sesion,nivel_quiropodia
+        </code>
+        . <code className="text-[11.5px]">tipo_visita</code> es de la{" "}
+        <strong>categoría</strong> (
+        <code className="text-[11.5px]">QUIROPODIA</code>,{" "}
+        <code className="text-[11.5px]">PIE_RIESGO</code>,{" "}
+        <code className="text-[11.5px]">CIRUGIA</code>,{" "}
+        <code className="text-[11.5px]">BIOMECANICA</code>,{" "}
+        <code className="text-[11.5px]">GENERAL</code>) y todas las filas de
+        una misma categoría tienen que decir lo mismo; las dos de en medio son{" "}
+        <code className="text-[11.5px]">sí</code>/
+        <code className="text-[11.5px]">no</code>; y{" "}
+        <code className="text-[11.5px]">nivel_quiropodia</code> es 1, 2 o 3,
+        uno por nivel. Sin ellas los servicios entran, pero la sesión dice
+        «sin servicio» y cierra a 0,00 €.
       </p>
 
       {hecho && (
@@ -248,6 +312,22 @@ export function CatalogImportPanel({
             </div>
           )}
 
+          {/* clinica-8 · el mapa `categoría → tipo de visita` que deja la
+              carga, antes de la tabla: es lo que hace que la sesión ofrezca
+              la tarjeta de cada tipo, y lo que la dueña repasa de un
+              vistazo («quiropodia → Quiropodia, cirugia → Cirugía»). */}
+          {(previa.tiposDeVisita ?? []).length > 0 && (
+            <div
+              data-test="tipos-de-visita"
+              className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[12.5px] text-violet-900"
+            >
+              <strong className="font-medium">Tipos de visita:</strong>{" "}
+              {(previa.tiposDeVisita ?? [])
+                .map((t) => `${t.slug} → ${NOMBRE_DE_TIPO[t.visitType] ?? t.visitType}`)
+                .join(" · ")}
+            </div>
+          )}
+
           {previa.entran.length > 0 && (
             // A 320 px la tabla no cabe: scrollea en su propia caja y la
             // página no se va de lado.
@@ -267,6 +347,13 @@ export function CatalogImportPanel({
                     <th className="text-right py-2 px-3">IVA</th>
                     <th className="text-right py-2 px-3">Se guarda</th>
                     <th className="text-left py-2 px-3">Categoría</th>
+                    {/* clinica-8 · la columna que decide si la clínica
+                        puede cobrar. Sólo se pinta cuando el fichero trae
+                        marcas de clínica: en el CSV de un bar sería una
+                        columna de guiones. */}
+                    {hayClinica && (
+                      <th className="text-left py-2 px-3">Clínica</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -310,6 +397,24 @@ export function CatalogImportPanel({
                       <td className="py-1.5 px-3 text-slate-600">
                         {p.categorias.join(", ")}
                       </td>
+                      {hayClinica && (
+                        <td className="py-1.5 px-3 text-slate-600">
+                          {marcasDeClinica(p).length === 0 ? (
+                            <span className="text-slate-300">—</span>
+                          ) : (
+                            <span className="inline-flex flex-wrap gap-1">
+                              {marcasDeClinica(p).map((m) => (
+                                <span
+                                  key={m}
+                                  className="inline-block rounded px-1.5 py-0.5 bg-violet-50 text-violet-700 text-[11.5px]"
+                                >
+                                  {m}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

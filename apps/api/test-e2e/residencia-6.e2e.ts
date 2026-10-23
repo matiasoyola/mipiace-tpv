@@ -35,6 +35,13 @@ import { join } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+// clinica-8 (fase B) · la versión es la VIGENTE, no un `1` escrito a mano:
+// la v2 del contrato de encargado deja una aceptación de la versión vieja
+// en SOLO LECTURA (423) y este fichero entero se va a rojo. Es la
+// garantía de clinica-7 funcionando. Este banco nació en master DESPUÉS
+// de la fase A, así que no estaba entre los cuatro que ella arregló.
+import { VERSION_VIGENTE } from "@mipiacetpv/contrato-encargado";
+
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 // ── EL VOLUMEN DE ESTE FICHERO, APARTE ──────────────────────────────
@@ -311,7 +318,7 @@ describe.skipIf(!e2eEnabled)("e2e · residencia-6 · antes del piloto", () => {
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-       VALUES ('${randomUUID()}', '${tenantId}', 1, '${"a".repeat(64)}', '${pilarId}', now())`,
+       VALUES ('${randomUUID()}', '${tenantId}', ${VERSION_VIGENTE}, '${"a".repeat(64)}', '${pilarId}', now())`,
     );
 
     planta1 = randomUUID();

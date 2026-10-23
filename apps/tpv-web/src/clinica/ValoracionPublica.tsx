@@ -32,6 +32,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
+import type { Especialidad } from "@mipiacetpv/clinica-sesion";
 import type {
   CanalValoracion,
   Cuestionario,
@@ -46,6 +47,9 @@ interface TestAbierto {
   clinica: string;
   nombrePila: string;
   canal: CanalValoracion;
+  /** clinica-8 (fase B, 14) · de qué es la visita. Puede no venir (una
+   *  API anterior a este bloque) y entonces el test habla sin nombrarla. */
+  especialidad?: Especialidad | null;
   cuestionario: Cuestionario;
 }
 
@@ -130,7 +134,21 @@ export function ValoracionPublica({ token }: { token: string }) {
       clinica={estado.test.clinica}
       nombrePila={estado.test.nombrePila}
       canal={estado.test.canal}
+      especialidad={estado.test.especialidad ?? null}
       cuestionario={estado.test.cuestionario}
+      // clinica-8 (fase B, 14) · sólo en la tablet de la sala. Por el
+      // enlace del email la persona está en SU móvil: ahí no hay
+      // ninguna tablet que devolver y un botón que lleve al TPV sería
+      // mandar a una paciente a la pantalla de PIN de la clínica.
+      //
+      // `replace` y no `href`: igual que la ida (ver
+      // `ValoracionSanitario`), para que el gesto «atrás» no devuelva al
+      // test con las respuestas de la paciente anterior en pantalla.
+      onDevolverLaTablet={
+        estado.test.canal === "TABLET"
+          ? () => window.location.replace("/")
+          : undefined
+      }
       onEnviar={async (r: RespuestasDelTest) => {
         try {
           await apiPublic(`/valoracion/${token}`, {

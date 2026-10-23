@@ -173,6 +173,10 @@ const ENCENDER: Record<
   bonos: () => ({ settings: { bonosEnabled: true } }),
   holded: () => ({ tenant: { hasHoldedKey: true } }),
   holdedDejado: () => ({ tenant: { holdedDisconnectedAt: "2026-01-01T00:00:00Z" } }),
+  // clinica-8 (fase B, 18) · «hosteleria» no es una columna del tenant:
+  // es su VERTICAL. Se enciende igual que las demás porque mira UN solo
+  // dato, que es lo que este banco exige de una capability del menú.
+  hosteleria: () => ({ tenant: { businessType: "HOSPITALITY" } }),
 };
 
 /** Deja el servidor con TODO apagado menos la capability que se pide.

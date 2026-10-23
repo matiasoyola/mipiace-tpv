@@ -41,6 +41,12 @@
 // datos y la contesta la ruta (`superadmin/tenant-catalog.ts`). Aquí
 // sólo se mira el fichero contra sí mismo.
 
+import {
+  esTipoDeVisita,
+  NIVELES_DE_QUIROPODIA,
+  TIPOS_DE_VISITA,
+} from "@mipiacetpv/clinica-sesion";
+
 import { normalizeDurationMin } from "../services/scheduling-rules.js";
 
 import {
@@ -98,6 +104,46 @@ export const COLUMNA_TIPO = "tipo";
 export const COLUMNA_EXENCION = "exencion";
 export const COLUMNA_DURACION = "duracion_min";
 
+/**
+ * clinica-8 · LAS CUATRO COLUMNAS DE CLÍNICA, también OPCIONALES.
+ *
+ *     …,categoria,tipo,exencion,duracion_min,tipo_visita,primera_valoracion,tratamiento_sesion,nivel_quiropodia
+ *     POD-002,Quiropodia básica,25.00,0,quiropodia,SERVICE,E1,30,QUIROPODIA,,si,1
+ *
+ * ── Por qué entran por el fichero, si `catalogo-servicios-csv` dijo que no
+ *
+ * Porque se midió. Ese bloque las dejó fuera a propósito («nacen en su
+ * default y se ponen en el panel»), y la auditoría del 18-10 recorrió el
+ * alta completa de una clínica con el CSV de Rosario cargado: los 17
+ * servicios entraron exentos y reservables, **y la sesión dijo «sin
+ * servicio» y cerró a 0,00 €.** Sin estas cuatro marcas el catálogo está
+ * cargado y la clínica no puede cobrar — que es justo lo que el fichero
+ * existe para evitar.
+ *
+ *   · `tipo_visita` — `QUIROPODIA` | `PIE_RIESGO` | `CIRUGIA` |
+ *     `BIOMECANICA` | `GENERAL`. **Es de la CATEGORÍA, no del servicio**
+ *     (S5: el agrupador único es la categoría del catálogo, y los
+ *     servicios heredan). Se escribe en la fila porque es donde está la
+ *     categoría, y todas las filas de una misma categoría tienen que
+ *     decir lo mismo: si no, se rechaza la segunda nombrando a la primera.
+ *   · `primera_valoracion` — sí/no. El servicio con el que se cita la
+ *     primera visita.
+ *   · `tratamiento_sesion` — sí/no. Sale como botón en la sesión.
+ *   · `nivel_quiropodia` — 1, 2 o 3. «Este servicio ES el nivel N», que es
+ *     lo que convierte el nivel propuesto en una línea de ticket. Uno por
+ *     nivel: dos servicios que digan ser el mismo dejan a la sesión sin
+ *     saber cuál cobrar, y el índice único parcial de clinica-5 lo
+ *     rechazaría al escribir — mejor decirlo en la vista previa.
+ *
+ * Las cuatro son de SERVICIOS. En una fila `PRODUCT` se rechaza la fila:
+ * una crema no es el nivel de nada, y callarlo dejaría al implantador
+ * creyendo que ha configurado la quiropodia.
+ */
+export const COLUMNA_TIPO_VISITA = "tipo_visita";
+export const COLUMNA_PRIMERA_VALORACION = "primera_valoracion";
+export const COLUMNA_TRATAMIENTO_SESION = "tratamiento_sesion";
+export const COLUMNA_NIVEL_QUIROPODIA = "nivel_quiropodia";
+
 /** Los dos valores de la columna `tipo`, que son los del enum de
  *  `products.kind`. */
 const TIPOS = ["PRODUCT", "SERVICE"] as const;
@@ -118,6 +164,22 @@ export interface FilaBuena {
    * hacer con la mitad de los casos.
    */
   duracionMin: number | null;
+  /**
+   * clinica-8 · las marcas de clínica del servicio, o `null` si la fila no
+   * trae ninguna (que es el caso de todo CSV de ayer y de toda fila de
+   * producto). `null` y no un objeto con tres `false`: un dato que no está
+   * y un dato que vale «no» no son lo mismo — la ruta sólo escribe la fila
+   * de agenda con marcas cuando el fichero dijo algo.
+   */
+  clinica: MarcasDeClinica | null;
+}
+
+/** clinica-8 · lo que una fila de servicio dice de sí misma en clínica. */
+export interface MarcasDeClinica {
+  primeraValoracion: boolean;
+  tratamientoSesion: boolean;
+  /** 1..3, o `null` si este servicio no es un nivel de quiropodia. */
+  nivelQuiropodia: number | null;
 }
 
 export interface FilaMala {
@@ -132,6 +194,16 @@ export interface FilaMala {
 export interface CsvParseResult {
   buenas: FilaBuena[];
   malas: FilaMala[];
+  /**
+   * clinica-8 · el mapa `categoría → tipo de visita` que el fichero
+   * declara (S5). Vacío en todo CSV que no traiga `tipo_visita`.
+   *
+   * Va APARTE de las filas y no dentro de cada una, porque no es del
+   * servicio: es de la categoría, y dos servicios de «quiropodia» no
+   * declaran dos cosas, declaran la misma. Quien escribe (`tenant-catalog`)
+   * hace un `upsert` por (tenant, slug), que es la forma de la tabla.
+   */
+  tiposDeVisita: Array<{ slug: string; visitType: string }>;
 }
 
 export class CsvInvalidoError extends Error {}
@@ -226,11 +298,21 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
   const colTipo = cabecera.indexOf(COLUMNA_TIPO);
   const colExencion = cabecera.indexOf(COLUMNA_EXENCION);
   const colDuracion = cabecera.indexOf(COLUMNA_DURACION);
+  // clinica-8 · las cuatro de clínica.
+  const colTipoVisita = cabecera.indexOf(COLUMNA_TIPO_VISITA);
+  const colPrimeraValoracion = cabecera.indexOf(COLUMNA_PRIMERA_VALORACION);
+  const colTratamientoSesion = cabecera.indexOf(COLUMNA_TRATAMIENTO_SESION);
+  const colNivel = cabecera.indexOf(COLUMNA_NIVEL_QUIROPODIA);
 
   const buenas: FilaBuena[] = [];
   const malas: FilaMala[] = [];
   // SKU (en su forma normalizada) → línea en la que salió la primera vez.
   const vistos = new Map<string, number>();
+  // clinica-8 · categoría → { tipo de visita, línea donde se dijo }. La
+  // línea se guarda para poder nombrarla cuando otra fila la contradiga.
+  const tipoPorCategoria = new Map<string, { visitType: string; linea: number }>();
+  // clinica-8 · nivel de quiropodia → línea. Uno por nivel.
+  const nivelesVistos = new Map<number, number>();
 
   for (let i = cabeceraIdx + 1; i < lineas.length; i += 1) {
     const linea = i + 1;
@@ -393,6 +475,144 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
       continue;
     }
 
+    // ── clinica-8 · las cuatro marcas de clínica ────────────────────
+    //
+    // Se leen DESPUÉS de la duración porque las cuatro son de servicios:
+    // así `kind` ya está decidido y el motivo puede nombrar la causa
+    // probable («si es un servicio, pon SERVICE en la columna tipo»), que
+    // es la misma forma que usa la duración.
+    const crudoDe = (idx: number): string =>
+      (idx >= 0 ? (campos[idx] ?? "") : "").trim();
+    const tipoVisitaCrudo = crudoDe(colTipoVisita).toUpperCase();
+    const primeraCruda = crudoDe(colPrimeraValoracion);
+    const sesionCruda = crudoDe(colTratamientoSesion);
+    const nivelCrudo = crudoDe(colNivel);
+    const hayMarcas =
+      tipoVisitaCrudo.length > 0 ||
+      primeraCruda.length > 0 ||
+      sesionCruda.length > 0 ||
+      nivelCrudo.length > 0;
+
+    if (hayMarcas && kind !== "SERVICE") {
+      malas.push({
+        linea,
+        sku,
+        nombre,
+        motivo:
+          "Las columnas de clínica (tipo_visita, primera_valoracion, " +
+          "tratamiento_sesion, nivel_quiropodia) son de servicios. " +
+          "Si es un servicio, pon SERVICE en la columna tipo.",
+      });
+      continue;
+    }
+
+    let marcas: MarcasDeClinica | null = null;
+    if (hayMarcas) {
+      const primera = leerSiNo(primeraCruda);
+      if (primera === null) {
+        malas.push({
+          linea,
+          sku,
+          nombre,
+          motivo: `"${primeraCruda}" no es un sí ni un no en primera_valoracion. Escribe sí o no (o déjalo vacío).`,
+        });
+        continue;
+      }
+      const sesion = leerSiNo(sesionCruda);
+      if (sesion === null) {
+        malas.push({
+          linea,
+          sku,
+          nombre,
+          motivo: `"${sesionCruda}" no es un sí ni un no en tratamiento_sesion. Escribe sí o no (o déjalo vacío).`,
+        });
+        continue;
+      }
+      let nivel: number | null = null;
+      if (nivelCrudo.length > 0) {
+        const leido = parseNumero(nivelCrudo);
+        if (
+          leido === null ||
+          !Number.isInteger(leido) ||
+          !(NIVELES_DE_QUIROPODIA as readonly number[]).includes(leido)
+        ) {
+          malas.push({
+            linea,
+            sku,
+            nombre,
+            motivo: `El nivel de quiropodia "${nivelCrudo}" no vale. Escribe ${NIVELES_DE_QUIROPODIA.join(", ")} o déjalo vacío.`,
+          });
+          continue;
+        }
+        // Uno por nivel: el índice único parcial de clinica-5 lo
+        // rechazaría al escribir, y entonces no entraría NINGUNA fila (la
+        // carga es todo o nada). Mejor decirlo en la vista previa.
+        const previo = nivelesVistos.get(leido);
+        if (previo !== undefined) {
+          malas.push({
+            linea,
+            sku,
+            nombre,
+            motivo: `El nivel ${leido} de quiropodia ya es el de la línea ${previo}: sólo puede haber un servicio por nivel.`,
+          });
+          continue;
+        }
+        nivel = leido;
+      }
+      // El tipo de visita, que es de la CATEGORÍA.
+      if (tipoVisitaCrudo.length > 0) {
+        if (!esTipoDeVisita(tipoVisitaCrudo)) {
+          malas.push({
+            linea,
+            sku,
+            nombre,
+            motivo: `El tipo de visita "${tipoVisitaCrudo}" no vale. Escribe uno de: ${TIPOS_DE_VISITA.join(", ")}.`,
+          });
+          continue;
+        }
+        if (categorias.length === 0) {
+          malas.push({
+            linea,
+            sku,
+            nombre,
+            motivo:
+              "El tipo de visita es de la CATEGORÍA, así que esta fila necesita una (columna categoria).",
+          });
+          continue;
+        }
+        const choque = categorias
+          .map((c) => ({ c, previo: tipoPorCategoria.get(c) }))
+          .find((x) => x.previo && x.previo.visitType !== tipoVisitaCrudo);
+        if (choque?.previo) {
+          malas.push({
+            linea,
+            sku,
+            nombre,
+            motivo: `La categoría "${choque.c}" ya es ${choque.previo.visitType} en la línea ${choque.previo.linea}: una categoría tiene un solo tipo de visita.`,
+          });
+          continue;
+        }
+        // Y un nivel de quiropodia sólo tiene sentido en la quiropodia.
+        // Es la tercera negativa de S5 (`NIVEL_SIN_QUIROPODIA`), dicha
+        // aquí para que no llegue como un 409 con el fichero cargado a
+        // medias.
+        if (nivel !== null && tipoVisitaCrudo !== "QUIROPODIA") {
+          malas.push({
+            linea,
+            sku,
+            nombre,
+            motivo: `Un nivel de quiropodia sólo vale en un servicio de quiropodia, y esta categoría es ${tipoVisitaCrudo}.`,
+          });
+          continue;
+        }
+      }
+      marcas = {
+        primeraValoracion: primera,
+        tratamientoSesion: sesion,
+        nivelQuiropodia: nivel,
+      };
+    }
+
     const valid = validateLocalProduct({
       name: nombre,
       sku,
@@ -423,11 +643,53 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
       continue;
     }
     vistos.set(valid.fields.sku, linea);
-    buenas.push({ linea, fields: valid.fields, precioConIva: precio, duracionMin });
+    // clinica-8 · las dos memorias se apuntan AQUÍ, cuando la fila entra
+    // de verdad. Apuntarlas antes dejaría un nivel «cogido» por una fila
+    // que acabó rechazada por el precio.
+    if (marcas?.nivelQuiropodia != null) {
+      nivelesVistos.set(marcas.nivelQuiropodia, linea);
+    }
+    if (tipoVisitaCrudo.length > 0) {
+      for (const c of categorias) {
+        tipoPorCategoria.set(c, { visitType: tipoVisitaCrudo, linea });
+      }
+    }
+    buenas.push({
+      linea,
+      fields: valid.fields,
+      precioConIva: precio,
+      duracionMin,
+      clinica: marcas,
+    });
   }
 
   if (buenas.length === 0 && malas.length === 0) {
     throw new CsvInvalidoError("El fichero sólo tiene la cabecera: no hay productos que cargar.");
   }
-  return { buenas, malas };
+  return {
+    buenas,
+    malas,
+    tiposDeVisita: [...tipoPorCategoria.entries()].map(([slug, v]) => ({
+      slug,
+      visitType: v.visitType,
+    })),
+  };
+}
+
+/**
+ * clinica-8 · un sí/no del fichero.
+ *
+ * Vacío = `false`, que es el default de las dos columnas en la base. Y se
+ * aceptan las formas que escribe una persona delante de un Excel: `si`,
+ * `sí`, `x`, `1`, `true`… `null` = lo que hay escrito no es ninguna de las
+ * dos cosas, y entonces se rechaza la fila en vez de leerlo como «no»:
+ * «tratamiento_sesion = nop» leído como «no» es un botón que no sale en la
+ * sesión y nadie sabe por qué.
+ */
+function leerSiNo(raw: string): boolean | null {
+  const t = raw.trim().toLowerCase();
+  if (t.length === 0) return false;
+  if (["si", "sí", "s", "x", "1", "true", "yes", "y"].includes(t)) return true;
+  if (["no", "n", "0", "false"].includes(t)) return false;
+  return null;
 }

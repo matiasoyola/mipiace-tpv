@@ -10,6 +10,7 @@ import { Logo } from "../Logo.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
 import { offlineLogin, type OfflineShiftState } from "../lib/offlineSession.js";
 import {
+  cashierDisplayLabel,
   getRecentCashiers,
   rememberCashier,
   setCashierSession,
@@ -362,6 +363,16 @@ export function PinScreen({
                       {c.initials ?? initialsOf(c.alias ?? c.email)}
                     </span>
                     <div className="flex-1 min-w-0">
+                      {/* clinica-8 (fase B, 11) · el NOMBRE arriba y el
+                          email debajo, siempre. Antes, sin `alias`, el
+                          email entero era el nombre y la segunda línea
+                          se quedaba sin él: en la auditoría del 18-10
+                          la tarjeta de la propietaria decía
+                          `m.oyola+clinica-demo@mipiace.es` en grande y
+                          nada más. Ahora arriba va `m.oyola` (o su
+                          nombre, en una cuenta activada después de este
+                          bloque) y abajo el email completo, que es la
+                          credencial que a veces hay que comprobar. */}
                       <div
                         className={
                           selectedEmail === c.email
@@ -369,10 +380,10 @@ export function PinScreen({
                             : "text-[15px] font-medium text-mipiace-ink truncate"
                         }
                       >
-                        {c.alias ?? c.email}
+                        {cashierDisplayLabel(c)}
                       </div>
                       <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
-                        {c.alias ? `${c.email} · ` : ""}
+                        {`${c.email} · `}
                         Último acceso {formatShortDate(c.lastSeenAt)}
                       </div>
                     </div>

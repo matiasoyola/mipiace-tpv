@@ -175,3 +175,39 @@ describe("N4 · sin Holded no se menciona Holded", () => {
     expect(apiMock.ticketCalls).toBe(alCerrar);
   });
 });
+
+// ══ clinica-8 · FASE B · 18 ═════════════════════════════════════════
+//
+// «El éxito del cobro habla de Holded en una cuenta sin Holded»
+// (auditoría del 18-10, punto 19).
+//
+// N4 resolvió el caso `PAID`. Lo que se le escapó es la rama de PRUEBA,
+// y es justo la del recorrido: la «Clínica demo» está EN ENSAYO y no
+// tiene Holded, así que cada cobro de la auditoría acabó nombrándole un
+// ERP que no ha comprado.
+
+describe("clinica-8 (18) · en PRUEBA tampoco se nombra Holded sin Holded", () => {
+  it("sin Holded, el ticket de prueba no dice «No se sube a Holded»", async () => {
+    holdedMock.enabled = false;
+    apiMock.status = "TEST";
+    await render();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(texto()).toContain("Prueba");
+    expect(texto()).toContain("No se emite nada ni se envía email");
+    expect(texto()).not.toContain("Holded");
+  });
+
+  it("CON Holded sigue diciendo lo de siempre", async () => {
+    // El comercio que SÍ lo tiene necesita saber que su ticket de prueba
+    // no va a subir: es lo que distingue el ensayo del día de verdad.
+    holdedMock.enabled = true;
+    apiMock.status = "TEST";
+    await render();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(texto()).toContain("No se sube a Holded ni se envía email");
+  });
+});

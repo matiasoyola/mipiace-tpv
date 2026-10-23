@@ -54,19 +54,48 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import type { CuerpoDeSesionCualquiera } from "@mipiacetpv/clinica-sesion";
 
 /**
- * Los tratamientos de la sesión cerrada de esta cita, en el orden en que
- * se marcaron, o `null` si no hay ninguna.
+ * clinica-8 · LA RESPUESTA TIENE TRES VALORES, Y NO DOS.
  *
- * La forma de la respuesta es la de `appointment_items` a propósito
+ * Hasta este bloque eran dos —la lista, o `null`— y `null` significaba a la
+ * vez «aquí no hay nada clínico» y «la sesión cerrada no tiene nada que
+ * cobrar». El cobro no podía distinguirlos, así que los dos acababan en los
+ * servicios RESERVADOS de la cita. La auditoría del 18-10 lo cobró: una
+ * sesión cerrada que no había dejado ni una línea se cobró como «Quiropodia
+ * completa · 26 €» porque era lo que la cita reservaba. **Se cobró lo que no
+ * se hizo, y nadie lo vio: los importes cuadran.**
+ *
+ * Los tres valores, y qué hace el cobro con cada uno:
+ *
+ *   · `null` — no hay sesión clínica que mirar (tenant sin clínica, cita sin
+ *     sesión) **o la lectura falló**. El cobro sigue siendo el de siempre:
+ *     los servicios de la cita. Es la memoria de la casa, «cobrar siempre se
+ *     puede»: una lectura que revienta no puede tumbar una venta.
+ *   · `{ lineas }` — lo que la podóloga marcó. Es lo que se cobra.
+ *   · `{ sinNadaQueCobrar: true }` — hay sesión cerrada y LEGIBLE, y no deja
+ *     ni una línea cobrable. No es un fallo: es un hecho de esa consulta
+ *     (regla 11 de clinica-5 — una visita puede pasar sin servicio asignado).
+ *     El cobro **no** se cae a lo reservado: abre el borrador vacío y lo
+ *     dice, para que quien cobra añada el servicio que se hizo.
+ *
+ * La diferencia entre el tercero y el primero es si el CUERPO se pudo leer.
+ * Un cuerpo ilegible es una lectura rota y cae al camino de siempre; un
+ * cuerpo legible sin `tratamientos` es una sesión que no dejó nada que
+ * cobrar, y eso sí se sabe.
+ *
+ * La forma de las líneas es la de `appointment_items` a propósito
  * (`{ serviceId }[]`): así `checkout.ts` no tiene dos ramas de
  * construcción de líneas, sólo dos orígenes para la misma. Una rama
  * paralela habría sido el sitio donde el día que alguien toque el IVA o el
  * descuento lo toque en una sola de las dos.
  */
+export type LineasDeLaSesion =
+  | { lineas: Array<{ serviceId: string }>; sinNadaQueCobrar?: false }
+  | { sinNadaQueCobrar: true };
+
 export async function lineasDeLaSesionCerrada(
   prisma: PrismaClient,
   input: { tenantId: string; appointmentId: string },
-): Promise<Array<{ serviceId: string }> | null> {
+): Promise<LineasDeLaSesion | null> {
   try {
     // 1 · la capability, antes de nada.
     const tenant = await prisma.tenant.findUnique({
@@ -93,27 +122,26 @@ export async function lineasDeLaSesionCerrada(
       { ...sesion, body: sesion.body as unknown },
       await dekONada(input.tenantId, prisma),
     ) as CuerpoDeSesionCualquiera | null;
-    const tratamientos = cuerpo?.tratamientos;
+    // clinica-8 · el cuerpo ILEGIBLE es una lectura rota, no una sesión sin
+    // nada que cobrar. Se cae al camino de siempre, como cualquier otro
+    // fallo de lectura de este fichero.
+    if (cuerpo == null || typeof cuerpo !== "object") return null;
+
+    const tratamientos = cuerpo.tratamientos;
     if (!Array.isArray(tratamientos) || tratamientos.length === 0) {
-      // DOS casos caen aquí, y los dos acaban igual a propósito:
+      // Sesión CERRADA, legible, y sin una sola línea cobrable. Desde
+      // clinica-5 esto es legítimo (regla 11): un control de pie de riesgo
+      // al que el centro no le ha puesto servicio es una visita que pasó y
+      // que tiene que quedar escrita.
       //
-      //   · un cuerpo de una versión que no se sabe leer (en la v1 una
-      //     sesión sin tratamientos no se podía cerrar siquiera);
-      //   · y, desde clinica-5, una sesión v2 legítima en la que NINGÚN
-      //     tipo marcado tiene servicio asignado — la pantalla lo enseña
-      //     como «sin cobro» (regla 11 del prompt).
-      //
-      // En los dos, lo honesto es NO inventarse las líneas: se cae al
-      // camino de siempre, que cobra los servicios de la cita. Y hay una
-      // razón de más para el segundo caso: `checkoutAppointment` contesta
-      // `APPOINTMENT_EMPTY` con cero líneas, así que devolver `[]` aquí
-      // sería bloquear el cobro de una cita que tiene su previsión. Cobrar
-      // la previsión es un importe que la dueña puede corregir en el
-      // ticket; no poder cobrar es una venta perdida con la paciente
-      // delante. «Cobrar siempre se puede».
-      return null;
+      // Lo que NO se hace ya es caer a los servicios reservados de la cita.
+      // Eso cobraba la previsión en vez del trabajo, y en una clínica la
+      // previsión y el trabajo son dos cosas distintas: la cita se da como
+      // «Quiropodia» y lo que se hizo fue el nivel que decidiera la
+      // podóloga, o nada. El cobro abre el borrador vacío y lo dice.
+      return { sinNadaQueCobrar: true };
     }
-    return tratamientos.map((serviceId) => ({ serviceId }));
+    return { lineas: tratamientos.map((serviceId) => ({ serviceId })) };
   } catch {
     // Ver la cabecera: con un fallo de lectura se cobra la cita como antes
     // de este bloque. Lo que no se hace nunca es tumbar el cobro.

@@ -25,7 +25,11 @@ import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { startSupportChannel } from "./lib/supportChannel/index.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
-import { getCachedBusinessType, getCachedEnsayo } from "./lib/catalog.js";
+import {
+  getCachedBusinessType,
+  getCachedClinicaEnabled,
+  getCachedEnsayo,
+} from "./lib/catalog.js";
 import {
   flushOutbox,
   registerLocalShiftLookup,
@@ -620,6 +624,21 @@ export function App() {
           onCloseShift={() => {
             setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier });
           }}
+          // clinica-8 · la marca sanitaria viene con el refresco de la
+          // agenda y se guarda EN LA SESIÓN DE MEMORIA, que es de donde
+          // la leen la venta y la agenda. No abre ninguna puerta: cada
+          // ruta clínica la vuelve a comprobar contra la base.
+          onMarcaSanitaria={(esSanitario) =>
+            setCashier((prev) =>
+              prev.kind === "needsLogin" ||
+              prev.cashier.isClinician === esSanitario
+                ? prev
+                : {
+                    ...prev,
+                    cashier: { ...prev.cashier, isClinician: esSanitario },
+                  },
+            )
+          }
         />
       ) : null}
     </LoggedInWrapper>
@@ -719,6 +738,11 @@ export function TpvHome(props: {
   } | null;
   onLogoutCashier: () => void | Promise<void>;
   onCloseShift: () => void;
+  // clinica-8 · la marca sanitaria que el servidor acaba de decir, cuando
+  // no es la que traía el login. Quien manda en la sesión la guarda; aquí
+  // sólo se pasa hacia abajo. Sin esto, marcar a alguien sanitario desde
+  // el panel no le llegaba al TPV hasta cerrar sesión y volver a entrar.
+  onMarcaSanitaria?: (esSanitario: boolean) => void;
 }) {
   // B-Multi-Vertical SB3: el vertical manda sobre `hasTables`. Si el
   // tenant es RETAIL o SERVICES no entramos al mapa aunque la tienda
@@ -789,7 +813,23 @@ export function TpvHome(props: {
   // B-reservas-5 F1 · la agenda. Vivía como estado local de `SalePage`;
   // sube aquí sin tocar el componente ni su aspecto (es un overlay
   // `fixed inset-0`, se pinta igual colgado de un sitio que del otro).
-  const [showAgenda, setShowAgenda] = useState(false);
+  // clinica-8 · EN UNA CLÍNICA SE ENTRA POR LA AGENDA, NO POR LA CAJA.
+  //
+  // Decisión de producto de Matías (18-10): en una clínica todo va con
+  // cita previa, al cerrar la sesión el ticket sale hecho y quien cobra
+  // sólo lo confirma. A la vista de cajero se va **para añadir algo
+  // aparte** (unas plantillas, un producto), no para empezar.
+  //
+  // Se decide con la caché del catálogo —la misma que ya decide si hay
+  // mesas y si la cuenta está en ensayo—, así que vale sin red y está
+  // puesta antes de que esta pantalla exista. Su default es `false`: en
+  // los catorce comercios sin clínica el TPV abre donde abría ayer.
+  //
+  // Y es la vista INICIAL, no una cárcel: «Volver» cierra la agenda y deja
+  // la venta suelta debajo, que sigue existiendo entera.
+  const [showAgenda, setShowAgenda] = useState(() =>
+    getCachedClinicaEnabled(),
+  );
   // B-reservas-5 F4 · aviso que la agenda enseña al abrirse. Se usa
   // cuando el paso a COMPLETED no salió: el cobro es válido igual y la
   // cajera tiene que saber que le queda pulsar "Finalizar".
@@ -1001,6 +1041,7 @@ export function TpvHome(props: {
           // `false` si no viene: una sesión vieja o la del login offline no
           // la traen, y no ofrecer la valoración es el lado correcto.
           esSanitario={props.cashier.isClinician ?? false}
+          onMarcaSanitaria={props.onMarcaSanitaria}
           // B-reservas-5 F3 · cobrar una cita entra en contexto de
           // borrador por la MISMA puerta que abrir una mesa. No se
           // rehidratan líneas en el cliente: `enterDraft` las pide.

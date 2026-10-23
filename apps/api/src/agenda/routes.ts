@@ -60,6 +60,7 @@ import {
   type Consecuencia,
   type PoliticaNoShow,
 } from "../vouchers/cita.js";
+import { marcaSanitariaDe } from "../clinica/marca-sanitaria.js";
 import { valoracionesPendientesDe } from "../clinica/valoracion-en-agenda.js";
 import {
   cobrosPendientesDe,
@@ -273,6 +274,15 @@ export async function registerAgendaRoutes(
         CENTER_TZ,
         (d) => wallTimeToUtc(d, "00:00"),
       );
+      // clinica-8 · LA MARCA SANITARIA DE QUIEN MIRA, AL DÍA. El TPV la
+      // lee en el login del cajero y la sesión dura el turno entero, así
+      // que marcar a alguien sanitario no le llegaba hasta re-entrar. La
+      // agenda se refresca cada vez que se abre: es el sitio natural.
+      // `null` —y clave ausente— en los catorce tenants sin clínica.
+      const esSanitario = await marcaSanitariaDe(
+        auth.tenantId,
+        request.cashier?.sub ?? auth.userId,
+      );
       return {
         from: fromDate,
         to: toDate,
@@ -282,6 +292,7 @@ export async function registerAgendaRoutes(
         days,
         valoracionesPendientes,
         sesionesPorCobrar,
+        ...(esSanitario === null ? {} : { esSanitario }),
       };
     },
   );
@@ -802,9 +813,15 @@ export async function registerAgendaRoutes(
           ...(result.ticketId ? { ticketId: result.ticketId } : {}),
         });
       }
-      return reply
-        .code(result.alreadyLinked ? 200 : 201)
-        .send({ ticket: result.ticket });
+      return reply.code(result.alreadyLinked ? 200 : 201).send({
+        ticket: result.ticket,
+        // clinica-8 · el borrador salió VACÍO porque la sesión cerrada no
+        // dejó nada que cobrar. Viaja sólo cuando es verdad: una clave que
+        // aparece y desaparece obliga a la pantalla a distinguir «no» de
+        // «no me lo han dicho», y aquí el «no» es el caso de todos los
+        // días — toda cita sin sesión y los catorce tenants sin clínica.
+        ...(result.sesionSinCobro ? { sesionSinCobro: true } : {}),
+      });
     },
   );
 

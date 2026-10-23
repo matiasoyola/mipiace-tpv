@@ -109,7 +109,16 @@ function byId(h: Awaited<ReturnType<typeof health>>, id: string) {
 describe("H1 · empresa CON caja y CON Holded: como en master", () => {
   it("todos los checks aplican y está lista", async () => {
     const h = await health({});
-    expect(h.readinessChecks.every((c) => c.applies)).toBe(true);
+    // clinica-8 · todos MENOS el del catálogo clínico, que depende de la
+    // historia clínica y aquí está apagada. Es la misma forma que los de
+    // Holded en una empresa sin Holded: «No aplica» no es ni cumplir ni
+    // fallar, y por eso no bloquea.
+    expect(
+      h.readinessChecks
+        .filter((c) => c.id !== "catalogo-clinico")
+        .every((c) => c.applies),
+    ).toBe(true);
+    expect(byId(h, "catalogo-clinico").applies).toBe(false);
     expect(h.ready).toBe(true);
   });
 

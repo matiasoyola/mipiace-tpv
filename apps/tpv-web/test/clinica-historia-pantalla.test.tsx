@@ -271,13 +271,56 @@ function vista(opts: {
 let host: HTMLDivElement;
 let root: Root;
 let empezadas: string[][];
+/** clinica-8 (fase B, 15) · a qué rutas de consentimientos se ha ido. */
+let consentimientosPedidos: string[];
 
 async function montar(
   v: Vista,
-  opciones: { conCita?: boolean; detalle?: unknown } = {},
+  opciones: {
+    conCita?: boolean;
+    detalle?: unknown;
+    /** clinica-8 (fase B, 15) · ¿está firmado el de fotos? */
+    conConsentimientoDeFotos?: boolean;
+  } = {},
 ) {
   empezadas = [];
-  apiMock.apiWithCashier.mockImplementation(async (url: string) => {
+  consentimientosPedidos = [];
+  apiMock.apiWithCashier.mockImplementation(async (url: string, init?: any) => {
+    // clinica-8 (fase B, 15) · la pestaña «Fotos» y, desde ella, los
+    // consentimientos. Las dos piezas piden lo suyo por la misma
+    // función, así que sus rutas se contestan aquí.
+    if (url.includes("/fotos")) {
+      return {
+        fotos: [],
+        comparador: [],
+        consentimiento: {
+          puede: opciones.conConsentimientoDeFotos === true,
+          plantillaId: "fotos-clinicas",
+          mensaje:
+            "Antes de la primera foto, el paciente tiene que firmar el consentimiento de fotos clínicas.",
+        },
+        mapaVersion: 1,
+      };
+    }
+    if (url.includes("/consentimientos")) {
+      consentimientosPedidos.push(url);
+      return {
+        plantillas: [
+          {
+            id: "fotos-clinicas",
+            titulo: "Consentimiento de fotos clínicas",
+            version: 1,
+            parrafos: ["Autorizo que me hagan fotos de los pies."],
+            clinica: true,
+            pendienteDeValidar: false,
+            laPideLaCita: false,
+            vigente: null,
+          },
+        ],
+        firmados: [],
+        pideLaCita: [],
+      };
+    }
     if (url.includes("/historia/visitas/")) {
       return (
         opciones.detalle ?? {
@@ -662,5 +705,86 @@ describe("sin importes en ningún sitio", () => {
     expect(texto()).not.toContain("€");
     await pestania("Documentos");
     expect(texto()).not.toContain("€");
+  });
+});
+
+// ══ clinica-8 · FASE B · 15 ═════════════════════════════════════════
+//
+// «Historia → "Fotos" pide el consentimiento pero no da botón para
+// firmarlo» (auditoría del 18-10, punto 11).
+//
+// La pieza `Fotos` ya traía el botón desde clinica-4 y se lo pinta a
+// quien le pase `onFirmarConsentimiento`. Desde la SESIÓN se le pasaba;
+// desde la HISTORIA, no. Así que con la paciente delante, el
+// consentimiento se podía firmar y el camino era salir, buscar su cita y
+// entrar por otro sitio.
+//
+// Va en este fichero y no en uno propio porque necesita esta `vista()`:
+// una segunda copia sería un segundo sitio donde mantenerla al día.
+
+describe("clinica-8 (15) · desde Historia → Fotos se firma el consentimiento", () => {
+  it("sin consentimiento, la pestaña OFRECE firmarlo", async () => {
+    await montar(vista({}));
+    await pestania("Fotos");
+    expect(texto()).toContain("Antes de la primera foto");
+    expect(
+      host.querySelector('[data-test="ir-a-firmar-fotos"]'),
+    ).not.toBeNull();
+  });
+
+  it("y el botón lleva a su texto, ahí mismo", async () => {
+    await montar(vista({}));
+    await pestania("Fotos");
+    await pulsar(host.querySelector('[data-test="ir-a-firmar-fotos"]')!);
+    // La pieza de consentimientos, abierta por la plantilla de fotos.
+    expect(
+      host.querySelector('[data-test="historia-consentimientos"]'),
+    ).not.toBeNull();
+    expect(texto()).toContain("Consentimiento de fotos clínicas");
+    expect(texto()).toContain("Autorizo que me hagan fotos de los pies");
+    // Y hay caja de firma: se firma aquí, con la paciente delante.
+    expect(host.querySelector('[data-test="caja-de-firma"]')).not.toBeNull();
+  });
+
+  it("se pide SIN cita: firmar no depende de una visita abierta", async () => {
+    await montar(vista({}));
+    await pestania("Fotos");
+    await pulsar(host.querySelector('[data-test="ir-a-firmar-fotos"]')!);
+    // Ni un `appointmentId` en la URL: desde la historia no hay cita, y
+    // la ruta no la necesita.
+    expect(consentimientosPedidos).toHaveLength(1);
+    expect(consentimientosPedidos[0]).not.toContain("appointmentId");
+  });
+
+  it("«Volver a las fotos» vuelve", async () => {
+    await montar(vista({}));
+    await pestania("Fotos");
+    await pulsar(host.querySelector('[data-test="ir-a-firmar-fotos"]')!);
+    await pulsar(host.querySelector('[data-test="volver-a-fotos"]')!);
+    expect(host.querySelector('[data-test="historia-fotos"]')).not.toBeNull();
+  });
+
+  it("la pestaña NO sale en la barra: se llega desde Fotos", async () => {
+    // Ponerla arriba sería invitar a firmar un consentimiento sin haber
+    // llegado a necesitarlo.
+    await montar(vista({}));
+    const pestanias = [...host.querySelectorAll('[role="tab"]')].map((x) =>
+      (x.textContent ?? "").trim(),
+    );
+    expect(pestanias).toEqual([
+      "Pie",
+      "Visitas",
+      "Fotos",
+      "Documentos",
+      "Informe",
+    ]);
+  });
+
+  it("con el consentimiento ya firmado, la pestaña es la de siempre", async () => {
+    await montar(vista({}), { conConsentimientoDeFotos: true });
+    await pestania("Fotos");
+    expect(host.querySelector('[data-test="ir-a-firmar-fotos"]')).toBeNull();
+    // Y dice dónde se hacen las fotos, que es la decisión de clinica-6.
+    expect(texto()).toContain("Las fotos se hacen desde la sesión");
   });
 });

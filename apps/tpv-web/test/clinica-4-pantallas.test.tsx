@@ -199,6 +199,31 @@ describe("clinica-4 · el consentimiento se firma con el dedo", () => {
     expect(texto()).toContain("Carmen Rodríguez López");
   });
 
+  // clinica-8 (fase B, 15) · EL TEXTO SE DEJA DESPLAZAR HASTA LA FIRMA.
+  //
+  // Auditoría del 18-10, punto 12: «el texto largo se come el gesto de
+  // desplazar; la firma solo se alcanza arrastrando por los márgenes».
+  // El texto vivía en una caja con `max-h-[260px] overflow-y-auto`: el
+  // dedo que baja por encima mueve el texto DENTRO de su caja y, al
+  // llegar abajo, el navegador no encadena el scroll a la página hasta
+  // que se levanta el dedo. Para llegar a la caja de firma había que
+  // acertar en los 16 px de margen de la tarjeta.
+  //
+  // Un scroll dentro de otro scroll es un problema de desplazamiento,
+  // no de altura: se quita el de dentro.
+  it("el texto NO tiene scroll propio: un gesto llega de la primera línea a la firma", async () => {
+    await montarConsentimientos();
+    await pulsar(host.querySelector('[data-test="plantilla-cirugia-ungueal"]'));
+    const caja = host.querySelector('[data-test="texto-del-consentimiento"]')!;
+    expect(caja.className).not.toContain("overflow-y-auto");
+    expect(caja.className).not.toContain("max-h-");
+    // Y el texto sigue estando entero: lo que se quita es la caja, no
+    // los párrafos. La ley pide que se lea con el paciente.
+    expect(caja.textContent).toContain(
+      "Se me ha explicado en qué consiste la cirugía",
+    );
+  });
+
   it("NO SE FIRMA SIN TRAZO: el botón nace desactivado", async () => {
     await montarConsentimientos();
     await pulsar(host.querySelector('[data-test="plantilla-cirugia-ungueal"]'));
@@ -345,7 +370,14 @@ describe("clinica-4 · las fotos", () => {
     expect(host.querySelector('input[type="file"]')).toBeNull();
   });
 
-  it("con consentimiento, la cámara se abre y la ZONA va antes del disparo", async () => {
+  // clinica-8 (fase B, 10) · LA ZONA YA NO VA «ANTES DEL DISPARO».
+  //
+  // Lo que el bloque cambia («se apunta y se dispara», Matías 18-10) es
+  // de dónde sale: viene puesta con la de la sesión de hoy. Este test
+  // deja de fijar «elige antes» —que es justo lo que se quita— y fija lo
+  // que ahora tiene que ser verdad: que la cámara abre YA con la zona de
+  // hoy, que lo dice, y que el disparador no depende de tocarla.
+  it("con consentimiento, la cámara abre con la ZONA DE HOY ya puesta", async () => {
     await montarFotos({
       fotos: [],
       comparador: [],
@@ -353,18 +385,13 @@ describe("clinica-4 · las fotos", () => {
       mapaVersion: 1,
     });
     await pulsar(host.querySelector('[data-test="hacer-foto"]'));
-    expect(texto()).toContain("Elige antes de disparar");
-    const disparar = host.querySelector(
-      '[data-test="disparar"]',
+    expect(texto()).not.toContain("Elige antes de disparar");
+    // `zonasDeHoy={["L:h"]}`: la del mapa de hoy, y la pantalla la dice.
+    expect(texto()).toContain("Zona: Pie izq. · Dedo gordo");
+    const elegida = host.querySelector(
+      '[data-test="zona-L:h"]',
     ) as HTMLButtonElement;
-    expect(disparar.disabled).toBe(true);
-    expect(texto()).toContain("Elige la zona para poder disparar");
-
-    await pulsar(host.querySelector('[data-test="zona-L:h"]'));
-    const yPuede = host.querySelector(
-      '[data-test="disparar"]',
-    ) as HTMLButtonElement;
-    expect(yPuede.disabled).toBe(false);
+    expect(elegida.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("con MUCHAS zonas la fila se desliza y el visor NO se va abajo", async () => {

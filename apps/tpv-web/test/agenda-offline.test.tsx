@@ -46,6 +46,9 @@ const CORTE = {
 vi.mock("../src/lib/catalog.js", () => ({
   loadCatalogFromCache: async () => [CORTE],
   productImageUrl: () => null,
+  // clinica-8 · el TPV abre en la agenda cuando el centro tiene historia
+  // clínica. Esta peluquería no la tiene, así que abre donde abría ayer.
+  getCachedClinicaEnabled: () => false,
 }));
 vi.mock("../src/lib/clients.js", () => ({
   clientFullName: () => "Rosa Marín",

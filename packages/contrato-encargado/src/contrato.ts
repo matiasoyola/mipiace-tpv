@@ -164,6 +164,50 @@ const CONTRATO_V1: VersionDelContrato = {
   pendienteDeValidar: true,
 };
 
+// ── v2 · LA RAZÓN SOCIAL DE VERDAD (clinica-8) ───────────────────────
+//
+// La v1 nombraba como encargado a «Mi Piace Software, S.L.», que **no
+// existe**: es un nombre comercial que se coló en el texto. La sociedad que
+// firma es Mi Piace Internet Solutions SL, con su NIF y su domicilio. Lo
+// encontró la auditoría del 18-10, y en un contrato de encargado del art. 28
+// la identidad de las partes no es un detalle de estilo: es lo que hace que
+// el contrato sea de alguien.
+//
+// ── Por qué una VERSIÓN NUEVA y no un retoque de la v1 ──────────────
+//
+// Porque la v1 **ya está aceptada y firmada** por la «Clínica demo», con su
+// fecha y su huella SHA-256 guardadas. Corregir su texto cambiaría la huella
+// de una aceptación que ya ocurrió: la pantalla enseñaría un texto que la
+// dueña no vio y la huella guardada dejaría de cuadrar con él. La v1 se
+// queda intacta y para siempre en `VERSIONES`; lo que cambia es cuál se
+// acepta hoy. Quien aceptó la v1 pasa a «hay una versión nueva» y la vuelve
+// a aceptar, que es exactamente para lo que existe el versionado.
+//
+// ── Y por qué se construye DESDE la v1 ──────────────────────────────
+//
+// Sólo cambia el primer apartado. Copiar los otros diez a mano sería abrir
+// la puerta a que una coma se moviera sin que nadie lo notara — y con la
+// huella metida en medio, una coma es un contrato distinto. Así el diff dice
+// la verdad: lo único que cambia es quién firma.
+//
+// Sigue `pendienteDeValidar`: el abogado de protección de datos no lo ha
+// visto todavía (tarea humana 11 de clinica-1).
+const CONTRATO_V2: VersionDelContrato = {
+  ...CONTRATO_V1,
+  version: 2,
+  apartados: [
+    {
+      encabezado: "Quiénes somos cada uno",
+      parrafos: [
+        "La clínica es la RESPONSABLE de la historia clínica de sus pacientes: decide qué se guarda, para qué y durante cuánto tiempo. MI PIACE INTERNET SOLUTIONS, S.L., con NIF B45902186 y domicilio en Carretera CM-5100, km 30,500, Buenaventura, 45634 Toledo, es el ENCARGADO: pone el programa y los servidores donde esa historia se guarda, y la trata únicamente porque la clínica se lo encarga.",
+        "Mi Piace no es dueña de ninguna historia clínica, no la usa para nada propio y no decide nada sobre ella. Todo lo que hace con esos datos lo hace porque está escrito aquí o porque la clínica se lo pide por escrito.",
+      ],
+    },
+    ...CONTRATO_V1.apartados.slice(1),
+  ],
+  pendienteDeValidar: true,
+};
+
 /**
  * Todas las versiones que este despliegue sabe leer.
  *
@@ -172,10 +216,10 @@ const CONTRATO_V1: VersionDelContrato = {
  * puede volver a enseñar — y el PDF de cada versión aceptada tiene que
  * poder descargarse siempre (decisión 6 del prompt).
  */
-const VERSIONES: readonly VersionDelContrato[] = [CONTRATO_V1];
+const VERSIONES: readonly VersionDelContrato[] = [CONTRATO_V1, CONTRATO_V2];
 
 /** La que se acepta HOY. */
-export const CONTRATO_VIGENTE: VersionDelContrato = CONTRATO_V1;
+export const CONTRATO_VIGENTE: VersionDelContrato = CONTRATO_V2;
 
 /** El número de la vigente, que es lo que la función de estado compara. */
 export const VERSION_VIGENTE: number = CONTRATO_VIGENTE.version;

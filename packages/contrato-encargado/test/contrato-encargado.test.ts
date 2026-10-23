@@ -44,6 +44,11 @@ describe("el texto del contrato", () => {
   // hay filas que apuntan a ella.
   const HUELLA_V1 =
     "7baee64a600f5a9de15038758b7118f99185174acda455df9426b35126bd0d8a";
+  // clinica-8 · la v2 corrige la razón social del encargado. Su huella es
+  // otra A PROPÓSITO, y la de la v1 NO se ha movido: es lo que demuestra
+  // que sacar una versión no reescribe la anterior.
+  const HUELLA_V2 =
+    "4aab2e6f850492179d270fbce06ad71af4b11b77ddcde35fdec10c145f066de0";
 
   it("la huella de la v1 es la que está escrita aquí", () => {
     const v1 = contratoDe(1);
@@ -51,12 +56,48 @@ describe("el texto del contrato", () => {
     expect(huella(textoCanonico(v1!))).toBe(HUELLA_V1);
   });
 
-  it("la vigente es la v1 y está marcada como pendiente de validar", () => {
-    expect(VERSION_VIGENTE).toBe(1);
-    expect(CONTRATO_VIGENTE.version).toBe(1);
+  it("la huella de la v2 es la que está escrita aquí", () => {
+    const v2 = contratoDe(2);
+    expect(v2).toBeDefined();
+    expect(huella(textoCanonico(v2!))).toBe(HUELLA_V2);
+  });
+
+  it("la vigente es la v2 y está marcada como pendiente de validar", () => {
+    expect(VERSION_VIGENTE).toBe(2);
+    expect(CONTRATO_VIGENTE.version).toBe(2);
     // Mientras sea `true`, la pantalla enseña el aviso ámbar. Cuando
     // llegue el texto del abogado esto pasa a `false` EN LA VERSIÓN NUEVA.
     expect(CONTRATO_VIGENTE.pendienteDeValidar).toBe(true);
+  });
+
+  it("la v2 nombra la razón social, el NIF y el domicilio del encargado", () => {
+    // clinica-8 · la v1 nombraba a «Mi Piace Software, S.L.», que no
+    // existe. En un contrato del art. 28 la identidad de las partes es lo
+    // que hace que el contrato sea de alguien.
+    const texto = textoCanonico(contratoDe(2)!);
+    expect(texto).toContain("MI PIACE INTERNET SOLUTIONS, S.L.");
+    expect(texto).toContain("B45902186");
+    expect(texto).toContain("Carretera CM-5100, km 30,500");
+    expect(texto).toContain("45634 Toledo");
+    expect(texto).not.toContain("Mi Piace Software");
+  });
+
+  it("y la v1 se queda EXACTAMENTE como estaba", () => {
+    // El sabotaje que esto caza: corregir la razón social EN LA v1 en vez
+    // de sacar una versión. La «Clínica demo» ya tiene aceptada la v1 con
+    // su huella guardada; reescribirla dejaría esa huella sin cuadrar con
+    // el texto que la pantalla enseña.
+    const v1 = contratoDe(1)!;
+    expect(v1.apartados[0]!.parrafos[0]).toContain("Mi Piace Software, S.L.");
+    expect(huella(textoCanonico(v1))).toBe(HUELLA_V1);
+  });
+
+  it("la v2 sólo cambia el primer apartado", () => {
+    const v1 = contratoDe(1)!;
+    const v2 = contratoDe(2)!;
+    expect(v2.titulo).toBe(v1.titulo);
+    expect(v2.apartados.length).toBe(v1.apartados.length);
+    expect(v2.apartados.slice(1)).toEqual(v1.apartados.slice(1));
   });
 
   it("el texto canónico lleva el título y todos los apartados", () => {
@@ -98,6 +139,7 @@ describe("el texto del contrato", () => {
     // Una fila de aceptación apunta a su versión para siempre; quitarla de
     // aquí deja una aceptación cuyo PDF no se puede volver a sacar.
     expect(versionesConocidas()).toContain(1);
+    expect(versionesConocidas()).toContain(2);
   });
 
   it("una versión que este despliegue no conoce es `undefined`, no «la de ahora»", () => {

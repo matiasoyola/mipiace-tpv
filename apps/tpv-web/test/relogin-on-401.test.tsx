@@ -166,7 +166,12 @@ describe("401 a mitad de checkout → modal PIN → reintento", () => {
     // 401 → aparece el modal de PIN. El checkout sigue abierto y el
     // carrito intacto (nada navegó ni se desmontó).
     expect(container.textContent).toContain("Sesión caducada");
-    expect(container.textContent).toContain("caja1@bar.es");
+    // clinica-8 (fase B, 11) · el modal dice el NOMBRE del cajero, no su
+    // email entero: `cashierDisplayLabel` cae a la local-part cuando no
+    // hay alias. Lo que este test fija es que el modal nombra a quien
+    // tiene que volver a teclear, no el formato del email.
+    expect(container.textContent).toContain("caja1");
+    expect(container.textContent).not.toContain("caja1@bar.es");
     expect(byTestId("checkout").textContent).toBe("abierto");
     expect(byTestId("cart").textContent).toContain("CAFE");
 
