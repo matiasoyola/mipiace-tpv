@@ -304,15 +304,16 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       expect(msg).toContain("body_cifrado_formato");
     });
 
-    it("las VEINTIDÓS columnas cifradas tienen su CHECK de formato", async () => {
+    it("las TREINTA columnas cifradas tienen su CHECK de formato", async () => {
       // Que no falte ninguna. Una columna cifrada sin CHECK es una columna
       // donde el texto en claro cabe.
       //
-      // ── NUEVE, QUINCE, DIECISIETE, VEINTIDÓS Y AHORA VEINTICUATRO ──
+      // ── NUEVE, QUINCE, DIECISIETE, VEINTIDÓS, VEINTICUATRO Y AHORA TREINTA ──
       //
       // Nueve de clinica-7, seis de residencia-1b (D-63), dos del
       // registro de cuidados (residencia-3), cinco del libro de
-      // incidencias (residencia-4) y dos del relevo (residencia-5). Están
+      // incidencias (residencia-4), dos del relevo (residencia-5) y seis
+      // del expediente de una no conformidad (calidad-1). Están
       // aquí a propósito en vez de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
       // motor sostiene cifrado en toda la casa. Partirla en dos habría sido
       // dos listas que pueden dejar de cubrirse, y lo que hace falta saber
@@ -367,6 +368,20 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           // lógicas, por lo mismo que las cinco de arriba.
           "handover_late_additions_resumen_cifrado_formato",
           "handovers_content_cifrado_formato",
+          // calidad-1 · el expediente de una no conformidad. Seis
+          // columnas lógicas y no tres, por lo mismo que las cinco del
+          // libro: con el mismo nombre, la causa de una NC se podría
+          // copiar a su descripción y descifraría.
+          //
+          // Y lo que NO está aquí, declarado: la descripción de un
+          // RIESGO, que va en claro a propósito — describe algo que
+          // puede pasar en el centro, no algo que le pasó a alguien.
+          "corrective_action_evidences_note_cifrado_formato",
+          "corrective_actions_closing_note_cifrado_formato",
+          "corrective_actions_what_cifrado_formato",
+          "effectiveness_verifications_note_cifrado_formato",
+          "non_conformities_cause_cifrado_formato",
+          "non_conformities_description_cifrado_formato",
         ].sort(),
       );
     });
