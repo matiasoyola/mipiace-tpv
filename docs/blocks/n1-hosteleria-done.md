@@ -406,12 +406,18 @@ Construida y firmada. **Sin publicar**: mientras el «process is bad» del N1 si
 abierto, la publicación la decide Matías.
 
 ```
-fichero   apps/tpv-android/build-releases/mipiacetpv-1.28.0-12800.apk
-versión   1.28.0 (versionCode 12800)
-commit    d893ec4
-tamaño    8.741.097 bytes
-SHA-256   5dbff9bff2d9e778495f9844e659a930f8208335105e655a242097fe1a06b0fc
+fichero   apps/tpv-android/build-releases/mipiacetpv-1.28.1-12801.apk
+versión   1.28.1 (versionCode 12801)
+commit    0bb7d9f
+tamaño    8.741.101 bytes
+SHA-256   e659e67a7bfdd9e9bc875100ae1ff60eb4a910169a66ca8e6e1edc4c1642c33f
 ```
+
+La **1.28.1** es la que lleva el arreglo que encontró la pasada del 23-10 (la
+fila de cantidad cede con el buscador, §9.2). La **1.28.0** —`d893ec4`, SHA-256
+`5dbff9bf…`— es la que se midió ese día y sigue en `build-releases/`; la que
+estaba instalada en el N1 era byte a byte ésa, así que no hizo falta
+reinstalarla para medir.
 
 Los cuatro chequeos del guion, en verde: `VITE_API_URL` apunta a
 `https://api.mipiacetpv.com` (hallazgo A2), **sin Service Worker** en los assets
