@@ -41,7 +41,7 @@ const RAIZ = join(
 );
 
 const FICHA = readFileSync(
-  join(RAIZ, "20261023000000_historia_1_ficha", "migration.sql"),
+  join(RAIZ, "20261023010000_historia_1_ficha", "migration.sql"),
   "utf8",
 );
 
