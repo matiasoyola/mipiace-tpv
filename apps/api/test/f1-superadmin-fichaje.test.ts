@@ -75,6 +75,7 @@ const fakePrisma: any = {
         crmEnabled: data.crmEnabled ?? false,
         agendaEnabled: data.agendaEnabled ?? false,
         fichajeEnabled: data.fichajeEnabled ?? false,
+        fichajeMaxOpenHours: data.fichajeMaxOpenHours ?? 16,
         holdedEnabled: data.holdedEnabled ?? true,
         createdAt: new Date(),
       };
@@ -289,6 +290,81 @@ describe("F1 · el módulo se mueve después del alta", () => {
     });
     expect(off.statusCode).toBe(400);
     expect(tenants.get(id).cajaEnabled).toBe(true);
+    await app.close();
+  });
+});
+
+// hotfix-fichaje-medianoche · EL AJUSTE DEL MÁXIMO DE HORAS ABIERTAS.
+//
+// No hay pantalla para esto a propósito: el 16 de serie cubre el turno de
+// noche de una residencia, una jornada partida larga y el cierre de un
+// bar. Se toca desde aquí cuando un cliente lo pide, y como todo lo de
+// este handler deja traza.
+describe("hotfix · el máximo de horas abiertas del fichaje", () => {
+  it("nace en 16 sin que nadie diga nada", async () => {
+    const app = await buildApp();
+    const res = await post(app, COLEGIO);
+    expect(res.statusCode).toBe(201);
+    const t = [...tenants.values()][0]!;
+    expect(t.fichajeMaxOpenHours).toBe(16);
+    await app.close();
+  });
+
+  it("el super-admin lo sube a 24 y queda en el audit", async () => {
+    const app = await buildApp();
+    const id = (await post(app, COLEGIO)).json().tenant.id;
+    const res = await patch(app, id, { fichajeMaxOpenHours: 24 });
+    expect(res.statusCode).toBe(200);
+    expect(tenants.get(id)!.fichajeMaxOpenHours).toBe(24);
+    const a = audits.find((x) => x.action === "update_tenant")!;
+    expect(a.metadata.changes.fichajeMaxOpenHours).toEqual({
+      before: 16,
+      after: 24,
+    });
+    await app.close();
+  });
+
+  it("y lo baja a 8", async () => {
+    const app = await buildApp();
+    const id = (await post(app, COLEGIO)).json().tenant.id;
+    expect((await patch(app, id, { fichajeMaxOpenHours: 8 })).statusCode).toBe(200);
+    expect(tenants.get(id)!.fichajeMaxOpenHours).toBe(8);
+    await app.close();
+  });
+
+  // EL RANGO. Un 0 convertiría cada fichaje en "olvidado" en cuanto pasara
+  // un segundo; un 200 no cerraría nunca una salida olvidada. 400 aquí, y
+  // además un CHECK en la base por si alguien escribe por otro sitio.
+  for (const malo of [0, 7, 25, 1000, -16]) {
+    it(`${malo} no se escribe: 400`, async () => {
+      const app = await buildApp();
+      const id = (await post(app, COLEGIO)).json().tenant.id;
+      const res = await patch(app, id, { fichajeMaxOpenHours: malo });
+      expect(res.statusCode).toBe(400);
+      expect(tenants.get(id)!.fichajeMaxOpenHours).toBe(16);
+      await app.close();
+    });
+  }
+
+  it("un decimal tampoco: la columna es un entero", async () => {
+    const app = await buildApp();
+    const id = (await post(app, COLEGIO)).json().tenant.id;
+    expect(
+      (await patch(app, id, { fichajeMaxOpenHours: 16.5 })).statusCode,
+    ).toBe(400);
+    await app.close();
+  });
+
+  // Fastify borra lo no declarado en vez de quejarse (`removeAdditional`),
+  // así que una propiedad que no esté en el schema contestaría 200 sin
+  // hacer nada. Es el agujero que se encontró con `clinicalRecordsEnabled`:
+  // esto comprueba que la nuestra SÍ está declarada.
+  it("mandar el mismo valor no cuenta como cambio", async () => {
+    const app = await buildApp();
+    const id = (await post(app, COLEGIO)).json().tenant.id;
+    const res = await patch(app, id, { fichajeMaxOpenHours: 16 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().noChanges).toBe(true);
     await app.close();
   });
 });
