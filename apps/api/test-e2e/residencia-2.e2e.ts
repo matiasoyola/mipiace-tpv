@@ -137,6 +137,62 @@ describe.skipIf(!e2eEnabled)("e2e · el catálogo de controles y el plan", () =>
         `ALTER TABLE care_roles ENABLE TRIGGER care_roles_de_serie_son_fijos`,
       );
       await prisma.$executeRawUnsafe(`DELETE FROM center_shifts WHERE tenant_id = '${t}'`);
+      // ── historia-1 · LO QUE ESTE BLOQUE LE COLGÓ AL RESIDENTE ──
+      //
+      // Las FK son `RESTRICT` a propósito —la ficha clínica y el
+      // expediente se conservan cinco años (D-45)— así que la limpieza
+      // del banco tiene que borrar los hijos primero, igual que ya hace
+      // con las camas. Y los triggers de inmutabilidad se apagan para
+      // borrar y se vuelven a encender, como con
+      // `clinical_tenant_keys_guard` y `care_roles_de_serie_son_fijos`.
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_diagnoses DISABLE TRIGGER resident_diagnoses_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergies DISABLE TRIGGER allergies_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergy_reviews DISABLE TRIGGER allergy_reviews_append_only`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE diet_profiles DISABLE TRIGGER diet_profiles_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_absences DISABLE TRIGGER resident_absences_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM admission_checklist_items WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM resident_diagnoses WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM allergies WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM allergy_reviews WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM diet_profiles WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM resident_absences WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_diagnoses ENABLE TRIGGER resident_diagnoses_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergies ENABLE TRIGGER allergies_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergy_reviews ENABLE TRIGGER allergy_reviews_append_only`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE diet_profiles ENABLE TRIGGER diet_profiles_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_absences ENABLE TRIGGER resident_absences_inmutable`,
+      );
       await prisma.$executeRawUnsafe(`DELETE FROM resident_profiles WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM clients WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM users WHERE tenant_id = '${t}'`);

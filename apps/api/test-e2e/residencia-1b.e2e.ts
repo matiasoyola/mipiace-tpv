@@ -236,6 +236,62 @@ describe.skipIf(!e2eEnabled)("e2e · residencia cifrada en reposo", () => {
       await prisma.$executeRawUnsafe(`DELETE FROM beds WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM rooms WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM floors WHERE tenant_id = '${t}'`);
+      // ── historia-1 · LO QUE ESTE BLOQUE LE COLGÓ AL RESIDENTE ──
+      //
+      // Las FK son `RESTRICT` a propósito —la ficha clínica y el
+      // expediente se conservan cinco años (D-45)— así que la limpieza
+      // del banco tiene que borrar los hijos primero, igual que ya hace
+      // con las camas. Y los triggers de inmutabilidad se apagan para
+      // borrar y se vuelven a encender, como con
+      // `clinical_tenant_keys_guard` y `care_roles_de_serie_son_fijos`.
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_diagnoses DISABLE TRIGGER resident_diagnoses_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergies DISABLE TRIGGER allergies_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergy_reviews DISABLE TRIGGER allergy_reviews_append_only`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE diet_profiles DISABLE TRIGGER diet_profiles_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_absences DISABLE TRIGGER resident_absences_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM admission_checklist_items WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM resident_diagnoses WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM allergies WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM allergy_reviews WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM diet_profiles WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM resident_absences WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_diagnoses ENABLE TRIGGER resident_diagnoses_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergies ENABLE TRIGGER allergies_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergy_reviews ENABLE TRIGGER allergy_reviews_append_only`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE diet_profiles ENABLE TRIGGER diet_profiles_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_absences ENABLE TRIGGER resident_absences_inmutable`,
+      );
       await prisma.$executeRawUnsafe(`DELETE FROM resident_profiles WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM clients WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM care_role_assignments WHERE tenant_id = '${t}'`);
@@ -270,6 +326,62 @@ describe.skipIf(!e2eEnabled)("e2e · residencia cifrada en reposo", () => {
       await prisma.$executeRawUnsafe(`DELETE FROM clinical_access_log WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(
         `ALTER TABLE clinical_access_log ENABLE TRIGGER clinical_access_log_append_only`,
+      );
+      // ── historia-1 · LO QUE ESTE BLOQUE LE COLGÓ AL RESIDENTE ──
+      //
+      // Las FK son `RESTRICT` a propósito —la ficha clínica y el
+      // expediente se conservan cinco años (D-45)— así que la limpieza
+      // del banco tiene que borrar los hijos primero, igual que ya hace
+      // con las camas. Y los triggers de inmutabilidad se apagan para
+      // borrar y se vuelven a encender, como con
+      // `clinical_tenant_keys_guard` y `care_roles_de_serie_son_fijos`.
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_diagnoses DISABLE TRIGGER resident_diagnoses_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergies DISABLE TRIGGER allergies_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergy_reviews DISABLE TRIGGER allergy_reviews_append_only`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE diet_profiles DISABLE TRIGGER diet_profiles_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_absences DISABLE TRIGGER resident_absences_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM admission_checklist_items WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM resident_diagnoses WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM allergies WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM allergy_reviews WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM diet_profiles WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM resident_absences WHERE tenant_id = '${t}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_diagnoses ENABLE TRIGGER resident_diagnoses_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergies ENABLE TRIGGER allergies_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE allergy_reviews ENABLE TRIGGER allergy_reviews_append_only`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE diet_profiles ENABLE TRIGGER diet_profiles_inmutable`,
+      );
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE resident_absences ENABLE TRIGGER resident_absences_inmutable`,
       );
       await prisma.$executeRawUnsafe(`DELETE FROM resident_profiles WHERE tenant_id = '${t}'`);
       await prisma.$executeRawUnsafe(`DELETE FROM clients WHERE tenant_id = '${t}'`);
@@ -369,7 +481,13 @@ describe.skipIf(!e2eEnabled)("e2e · residencia cifrada en reposo", () => {
         method: "POST",
         url: `/residencia/residentes/${carmen}/alta`,
         headers: comoDirectora,
-        payload: { dischargeDate: "2026-11-30", dischargeReason: MOTIVO_ALTA },
+        payload: {
+          dischargeDate: "2026-11-30",
+          // historia-1 (D-96) · la clase del alta es obligatoria desde ese
+          // bloque: de ella depende la comunicación a la administración.
+          dischargeKind: "FALLECIMIENTO",
+          dischargeReason: MOTIVO_ALTA,
+        },
       });
       expect(r.statusCode, r.body).toBe(200);
 
@@ -448,7 +566,13 @@ describe.skipIf(!e2eEnabled)("e2e · residencia cifrada en reposo", () => {
         method: "POST",
         url: `/residencia/residentes/${carmen}/alta`,
         headers: comoDirectora,
-        payload: { dischargeDate: "2026-11-30", dischargeReason: MOTIVO_ALTA },
+        payload: {
+          dischargeDate: "2026-11-30",
+          // historia-1 (D-96) · la clase del alta es obligatoria desde ese
+          // bloque: de ella depende la comunicación a la administración.
+          dischargeKind: "FALLECIMIENTO",
+          dischargeReason: MOTIVO_ALTA,
+        },
       });
       const r = await app.inject({
         method: "GET",
@@ -776,7 +900,13 @@ describe.skipIf(!e2eEnabled)("e2e · residencia cifrada en reposo", () => {
         method: "POST",
         url: `/residencia/residentes/${carmen}/alta`,
         headers: comoDirectora,
-        payload: { dischargeDate: "2026-11-30", dischargeReason: MOTIVO_ALTA },
+        payload: {
+          dischargeDate: "2026-11-30",
+          // historia-1 (D-96) · la clase del alta es obligatoria desde ese
+          // bloque: de ella depende la comunicación a la administración.
+          dischargeKind: "FALLECIMIENTO",
+          dischargeReason: MOTIVO_ALTA,
+        },
       });
 
       // Y ahora lo que el prompt pide: un recorrido por TODAS las tablas
