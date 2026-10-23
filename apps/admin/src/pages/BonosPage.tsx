@@ -83,6 +83,13 @@ export function BonosPage() {
   const [plantillas, setPlantillas] = useState<Plantilla[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // hotfix-menu-capabilities · lo que contestó la PUERTA del servidor. La
+  // 404 del gate (`ensureBonosEnabled`) no es un error que contarle a
+  // nadie: es «este negocio no tiene el módulo», y se pinta como tal.
+  // Vive en su propio estado y no se deduce de `caps` porque las dos
+  // respuestas pueden discrepar —`caps` cae a `bonos: false` cuando falla
+  // la llamada de capacidades— y la que manda es la del servidor.
+  const [sinModulo, setSinModulo] = useState(false);
 
   const cargar = useCallback(async () => {
     try {
@@ -95,10 +102,18 @@ export function BonosPage() {
       setAjustes(a.ajustes);
       setNumeracion(a.numeracion);
       setPlantillas(p.plantillas);
+      setSinModulo(false);
+      setError(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearTokens();
         navigate("/login", { replace: true });
+        return;
+      }
+      // La 404 del gate del módulo. No es un fallo: es la respuesta.
+      if (err instanceof ApiError && err.status === 404) {
+        setSinModulo(true);
+        setError(null);
         return;
       }
       setError(
@@ -116,7 +131,15 @@ export function BonosPage() {
   // El gate del módulo. La puerta de verdad es la del servidor —404— y
   // ésta es para que una cuenta a la que todavía no se le ha encendido lea
   // algo en vez de un error.
-  if (caps?.bonos === false && ajustes === null && error === null) {
+  //
+  // hotfix-menu-capabilities · antes esta condición llevaba además
+  // `error === null`, y ahí estaba el cuelgue: en una cuenta sin bonos la
+  // carga contesta 404, el `catch` guardaba el error, el aviso se saltaba
+  // por el `error === null` y el `return` de abajo dejaba «Cargando
+  // bonos…» girando para siempre. Ahora la 404 se reconoce en el `catch`
+  // (`sinModulo`) y el aviso se pinta por los DOS caminos: el que dice
+  // `caps` y el que contestó el servidor.
+  if (sinModulo || (caps?.bonos === false && ajustes === null)) {
     return (
       <AdminShell title="Bonos">
         <div className="bg-white rounded-2xl border border-slate-200 p-7 max-w-lg mx-auto text-center">
@@ -131,7 +154,9 @@ export function BonosPage() {
     );
   }
   if (!ajustes || !numeracion || !plantillas) {
-    return <CenteredLoader label="Cargando bonos…" />;
+    // Y cualquier otro fallo —500, red caída— se cuenta aquí en vez de
+    // esconderse detrás del cargador.
+    return <CenteredLoader label="Cargando bonos…" error={error} />;
   }
 
   const etiqueta = ajustes.etiqueta;
