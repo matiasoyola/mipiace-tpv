@@ -439,6 +439,12 @@ días. Este bloque es la parte mínima que hacía falta **ya**, y está preparad
   guarda el último valor que pintó y descarta el evento si el `value` del nodo coincide: la
   asignación directa se pierde en silencio y el test falla diciendo que el botón sigue
   deshabilitado.
+- **En CI no hay Redis, y el e2e lo descubrió en rojo.** El bloque 9 entra por la puerta con un PIN,
+  y el rate-limit del PIN habla con Redis; el job `e2e` sólo levanta Postgres. El cliente va con
+  `maxRetriesPerRequest: null` (lo exige BullMQ), así que sin Redis **no falla: espera**. En el
+  portátil no se ve porque hay un Redis de dev escuchando. Se sustituye el **transporte** con el
+  mismo `redisFalso` que `residencia-3.e2e.ts` —el limitador y la ruta siguen siendo los de
+  verdad— y se comprobó apuntando `REDIS_URL` a un puerto muerto: 41/41.
 
 ---
 

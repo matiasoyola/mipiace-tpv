@@ -22,7 +22,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import Fastify, { type FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
@@ -33,6 +33,29 @@ process.env.REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 process.env.JWT_ACCESS_SECRET = "g".repeat(40);
 process.env.JWT_REFRESH_SECRET = "h".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+
+// ── Redis, en memoria · POR QUÉ ──────────────────────────────────────
+//
+// El bloque 9 entra por la puerta con un PIN, y el rate-limit del PIN
+// habla con Redis. **El job `e2e` de CI sólo levanta Postgres**, y el
+// cliente de `context.ts` va con `maxRetriesPerRequest: null` —lo exige
+// BullMQ para reconectar limpio—, así que sin Redis el primer `inspect`
+// del PIN no falla: **espera para siempre**. En el portátil no se ve,
+// porque hay un Redis de dev escuchando.
+//
+// Se sustituye el TRANSPORTE, no el limitador: la ruta y `rate-limit.ts`
+// siguen siendo los de verdad. Es la misma decisión, el mismo doble y
+// por la misma razón que `residencia-3.e2e.ts` — ver su cabecera, que
+// lleva además lo que costó medirlo (48 minutos de job).
+vi.mock("../src/context.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/context.js")>();
+  const { redisFalso } = await import("./redis-falso.js");
+  const falso = redisFalso();
+  return {
+    ...original,
+    getRedis: () => falso as unknown as ReturnType<typeof original.getRedis>,
+  };
+});
 
 const { getPrisma, shutdown } = await import("../src/context.js");
 const { cargarCatalogoDeSerie } = await import(
