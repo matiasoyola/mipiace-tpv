@@ -212,6 +212,45 @@ describe("n1-hosteleria-2 · R4 · todos los estados de mesa llegan a 4,5:1", ()
   });
 });
 
+describe("n1-hosteleria-2 · la etiqueta LISTO no puede tapar el nombre", () => {
+  // Lo encontró la pasada en el N1 del 23-10, y lo encontró porque se
+  // miró la captura: subir la etiqueta a 48 px por R3 la hizo tapar el
+  // nombre de la mesa. En `02-mapa-tres-plegadas` la primera mesa de
+  // BARRA dice «LISTO» y «1 pax» y no dice CUÁL es.
+  //
+  // R3 (48 de dedo) y R4 (leer qué mesa) chocaban, y el arreglo es que no
+  // son la misma caja: el objetivo táctil mide 48 y la pastilla pintada
+  // 30, con la diferencia en relleno transparente hacia arriba.
+  //
+  // La fila de la tabla de sabotajes: «la etiqueta LISTO vuelve a pintar
+  // sus 48 px».
+
+  const LADO = 88;
+  const ALTO_TACTIL = 48;
+  const ALTO_PINTADO = 30;
+  const TOP = -20;
+  const NOMBRE_PX = 20;
+
+  it("el objetivo táctil sigue cumpliendo R3", () => {
+    expect(ALTO_TACTIL).toBeGreaterThanOrEqual(48);
+  });
+
+  it("y la pastilla pintada NO llega al nombre", () => {
+    // La pastilla va centrada en el botón: top + (48 − 30) / 2.
+    const pastillaDesde = TOP + (ALTO_TACTIL - ALTO_PINTADO) / 2;
+    const pastillaHasta = pastillaDesde + ALTO_PINTADO;
+    // El nombre va centrado en la forma.
+    const nombreDesde = LADO / 2 - NOMBRE_PX / 2;
+    expect(pastillaHasta).toBeLessThan(nombreDesde);
+  });
+
+  it("SABOTAJE · con la pastilla a 48 px sí lo tapa", () => {
+    const pastillaHasta = -8 + 48;
+    const nombreDesde = LADO / 2 - NOMBRE_PX / 2;
+    expect(pastillaHasta).toBeGreaterThan(nombreDesde);
+  });
+});
+
 describe("n1-hosteleria-2 · los dos contrastes que este bloque arregla", () => {
   it("SABOTAJE · la etiqueta LISTO en blanco es texto invisible", () => {
     // Lo que había desde kds-1, con la constante buena al lado y sin

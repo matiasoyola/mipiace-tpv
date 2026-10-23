@@ -1,0 +1,47 @@
+{
+ "AP11_banda": {
+  "modo": null,
+  "clip": {
+   "x": 0,
+   "y": 180,
+   "width": 435,
+   "height": 140
+  },
+  "filas": [
+   {
+    "texto": "T4 · listo para servirServido",
+    "comandas": null,
+    "h": 56
+   },
+   {
+    "texto": "M5 · listo para servirServido",
+    "comandas": null,
+    "h": 56
+   }
+  ]
+ },
+ "AP11_tras_tocar": {
+  "hoja": false,
+  "sigueLaBanda": 1
+ },
+ "D8_banda": {
+  "modo": null,
+  "clip": {
+   "x": 0,
+   "y": 180,
+   "width": 435,
+   "height": 80
+  },
+  "filas": [
+   {
+    "texto": "M5 · listo para servirServido",
+    "comandas": null,
+    "h": 56
+   }
+  ]
+ },
+ "D8_tras_tocar": {
+  "hoja": false,
+  "sigueLaBanda": 0
+ }
+}

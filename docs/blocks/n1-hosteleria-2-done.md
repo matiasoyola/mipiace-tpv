@@ -61,6 +61,40 @@ distintos, todos dentro de una caja de 81×23** —los glifos de la palabra
 «LISTO»— y el recorte mide lo mismo antes y después, así que **la maquetación no
 se mueve: sólo cambia el color de la tinta.** Lo rehace `diff-listo.mjs`.
 
+### Excepción 2 · el aviso de «listo» abre una hoja (hallazgo 9)
+
+Decisión de Matías, 23-10, ya probando la 1.29.0: el hallazgo 9 **no va sólo en
+la mano**. Es un cambio de FLUJO, no de reparto, así que se aplica en los cinco
+aparatos. Un camarero que aprende el gesto en el móvil y encuentra otro en el
+terminal de la barra ha aprendido dos cosas para la misma tarea — y la que le
+sale mal es la del terminal, porque ahí el toque es más barato y el «hecho»
+directo más fácil de disparar sin querer.
+
+Medido en los dos tamaños, con dos avisos reales en el pase:
+
+| | antes | después |
+|---|---|---|
+| lo que dice la banda | «T4 · listo para servir · **Servido**» | «T4 · listo para servir · **Ver**» |
+| al tocarla | **sirve en el acto**: el aviso desaparece | **abre la hoja**; el aviso sigue |
+| avisos tras el toque | 2 → **1** | 2 → **2** |
+| la hoja | no existe | diálogo centrado **520×229** |
+| lo que enseña | — | «1 · Tostada con tomate» |
+| «Hecho» | — | **68 px** |
+
+```
+listo9-antes-AP11.png   ·  listo9-despues-AP11.png  ·  listo9-despues-AP11-hoja.png
+listo9-antes-D8.png     ·  listo9-despues-D8.png    ·  listo9-despues-D8-hoja.png
+```
+
+El «antes» del D8 arranca con un aviso menos que el del AP11, y no es un fallo
+de la medida: **el toque de la pasada anterior ya se lo había comido**. Es
+exactamente lo que el hallazgo denuncia, capturado por accidente.
+
+En la mano la hoja ocupa la pantalla (R1, una sola capa); en el terminal sale
+centrada, porque tapar 1280×800 para enseñar tres líneas sería esconderle la
+sala a un cajero que está de pie delante de ella. **Lo que no cambia con el
+tamaño son los pasos.**
+
 Y los números del terminal, antes y después, idénticos uno a uno:
 
 | | AP11 1280×800 | D8 1442×811 |
@@ -399,13 +433,64 @@ que 720 px no dan.
 
 ---
 
+## 2.10 · 🟢 (9) · un aviso de «listo» abre una hoja, no sirve en el acto
+
+Lo dictó Matías el 23-10 ya con la 1.29.0 en la mano, y entra en este bloque:
+
+> «En el N1, al pulsar un aviso de "listo" de cocina, hoy funciona como un
+> "hecho" directo. Debe abrir primero una hoja con la mesa y las líneas listas
+> para recoger (cantidad + nombre entero, alergias marcadas) y abajo un "Hecho"
+> grande; si hay varias mesas listas, una hoja por mesa.»
+
+Y la ampliación, media hora después:
+
+> «No va sólo en la mano. Es un cambio de flujo y se aplica en todos los
+> aparatos (N1, AP11, AP12, AP13, D8). En la mano cumple R1–R4; en los grandes,
+> con su propio tamaño.»
+
+**El problema que arregla**, con sus palabras de otro modo: el camarero toca, el
+aviso desaparece, y entonces tiene que acordarse de qué era — porque la única
+pista que había es el nombre de la mesa.
+
+**Los tres puntos de entrada van al mismo sitio**: la pila del terminal, el
+contador de la mano y la etiqueta LISTO de la mesa en el mapa. Los tres abrían
+un «servido» directo; los tres abren ahora la hoja.
+
+**Se agrupa POR MESA, no por comanda.** Una mesa puede tener las bravas en la
+pantalla de cocina y las cañas en la de barra, y el camarero hace **un** viaje:
+una hoja, y el «Hecho» sirve las dos. De ahí que `orderIds` sea una lista.
+
+**La API tenía que dar un dato que no daba.** `/kitchen/listas` devolvía la mesa
+y nada más, porque sus dos destinos —la banda y la etiqueta— sólo enseñan el
+nombre. Ahora manda también las líneas, sin las anuladas y con las unidades que
+QUEDAN. Van por ahí y **no** por `/tickets/:id` a propósito: lo que está listo es
+la comanda de cocina, no el ticket — un ticket de seis líneas con tres listas
+enseñaría las seis, y el camarero se llevaría del pase lo que sigue en la
+plancha.
+
+**R1–R4 en la hoja:** a pantalla completa en la mano (R1), «Hecho» de **84 px**
+en la mano y 68 en el terminal (R3; en la mano es el objetivo más grande de la
+pantalla, que es lo que debe ser cuando sólo hay una cosa que hacer), cierre con
+la X de 56 y con el atrás de Android —y **cerrar no es servir**, el atrás nunca
+decide nada—, y la letra al suelo de R4 con el nombre **entero**, sin truncar.
+
+**Las alergias van arriba y en rojo**, separadas de las líneas: es lo único de
+esta hoja que, si se pasa por alto, hace daño.
+
+**Lo que llega por la wifi no trae detalle** (kds-2: una tarjeta que sólo llegó
+por la LAN no tiene todavía id de servidor ni líneas). La hoja lo dice en voz
+alta en vez de enseñar una lista vacía que parezca «no hay nada».
+
+---
+
 ## 2.9 · Las tres que decidió Matías (23-10, tras leer las medidas)
 
 | | decisión | dónde |
 |---|---|---|
 | hallazgo 1 | **3 de 6 líneas y desplazar.** Queda por juzgar en la mano, no por decidir | §2.8 |
 | `BILLING` | **fuera de este bloque**, con bloque propio `mesa-pide-cuenta`. Sin tocar la API | §4.1 |
-| color de LISTO | **se queda arreglado en AP11 y D8**: única excepción a la restricción, con su captura | §0 |
+| color de LISTO | **se queda arreglado en AP11 y D8**: primera excepción, con su captura | §0 |
+| hallazgo 9 | **cambio de flujo en los cinco aparatos**: segunda excepción | §0 y §2.10 |
 
 ---
 
@@ -544,6 +629,10 @@ en `master`.
 | El offset del terminal para el importe de mano | `n1-sala-de-mano` | `expected true to be false` (cuerda 78,4 contra 81,7 que pide) |
 | El importe del botón a 16 px | `n1-sala-de-mano` | `expected 76.6… to be greater than 81.7` |
 | El reparto de mano aplicado al AP11 | `n1-sala-de-mano` + `sala-sirope` | `expected 144 to be greater than 144` |
+| El aviso vuelve a servir en el acto | `kds-tpv-cocina` | el toque sirve sin hoja: `expected [ 'ord…' ] to deeply equal []` |
+| **En el TERMINAL sigue siendo «hecho» directo** | `kds-tpv-cocina` | el mismo, y además la banda vuelve a decir «Servido» |
+| La hoja no agrupa las dos secciones | `n1-listo-hoja` | `expected 2 to be 1`: dos viajes para la misma mesa |
+| La etiqueta LISTO vuelve a pintar sus 48 px | `n1-contraste-de-mano` | `expected 40 to be less than 34`: tapa el nombre |
 
 ---
 
@@ -703,6 +792,51 @@ binario».
 3. **Una segunda sesión de Code, no.** El 23-10 dos sesiones condujeron el mismo
    N1 y hubo que retirar 19 capturas. Comprobado al empezar ésta: ninguna otra en
    este worktree.
+
+### 9.2-bis · Lo que SÍ se midió en el N1 (23-10, 19:18–19:45)
+
+Con el servidor de adb arrancado desde Terminal.app y el permiso de red local
+concedido, el N1 y el AP11 volvieron. Lo hecho antes de que la pasada se
+interrumpiera:
+
+| | resultado |
+|---|---|
+| **KDS del AP11** | **«En línea»** a las 19:21, sección `Cocina · Barra`. La comprobación va **antes** de enviar, y se hace desde la pantalla del propio KDS |
+| **1.29.0 instalada** | `versionName=1.29.0`, `versionCode=12900`, huella verificada contra el sidecar |
+| **el aparato** | N1, Android 14, 720×1440 a densidad 320 → **360×720 de CSS**, `devicePixelRatio` 2 |
+| **el mapa** | `innerWidth` **360**, `scrollWidth` 360, **sin desborde**, alto de página 720, banda de ensayo **40 px**, cabecera **120** (dos filas), lado de mesa **88**, marcos **fuera** |
+| **zonas plegables** | las tres plegadas al abrir, con sus resúmenes contra datos reales: «BARRA 8 libres», «SALÓN 2 listos», «TERRAZA 1 ocupada» |
+| **un toque de verdad** | `input tap` en **180×440** sobre la cabecera de Terraza, con `elementFromPoint` comprobado antes: `plegada` **false → true** |
+| **objetivos táctiles** | **ninguno por debajo de 48**; el más pequeño es la cabecera de zona, a 48 justos |
+| **la etiqueta LISTO** | tinta oscura sobre el verde, legible en el aparato |
+
+Capturas en `docs/qa/2026-10-23-n1-hosteleria-2/`, con su `LEEME.md`.
+
+### 9.2-ter · Y un hallazgo que sólo sale mirando la captura
+
+**La etiqueta LISTO tapaba el nombre de la mesa.** En
+`02-mapa-tres-plegadas.png` la primera mesa de BARRA dice «LISTO» y «1 pax» y
+**no dice cuál es**. Lo había causado este mismo bloque: subirla de 30 a 48 px
+por R3 la hizo ocupar de −8 a 40 sobre una forma de 88 donde el nombre va
+centrado, en 34–54.
+
+R3 (48 de dedo) y R4 (leer qué mesa) chocaban, y el arreglo es que **no son la
+misma caja**: el objetivo táctil se queda en 48 y la pastilla pintada vuelve a
+30, con la diferencia en relleno **transparente hacia arriba**, fuera de la
+circunferencia, donde no hay nada que tapar. Con su sabotaje.
+
+Es el mejor argumento para la parte de Matías: esto no lo caza ningún banco —lo
+caza un ojo sobre una captura del aparato.
+
+### 9.2-quater · Dos cosas de método que costaron caro
+
+- **Recargar el renderer devuelve el TPV al PIN.** Cinco de mis medidas del mapa
+  miraban la pantalla de acceso sin que nada lo dijera; se retiraron. Para
+  cambiar de estado hay que tocar, no recargar.
+- **Un toque a ciegas abre una mesa.** Al desplegar una zona, la cabecera de la
+  siguiente se mueve, y un `input tap` sobre las coordenadas de hace un instante
+  aterriza en una MESA. El driver ahora comprueba con `elementFromPoint` que
+  debajo del dedo está el objetivo **antes** de tocar, y si no, no toca.
 
 ### 9.3 El guion, con el servicio encima
 

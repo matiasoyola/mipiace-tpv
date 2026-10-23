@@ -1660,17 +1660,48 @@ function TableCard({
           // color se arregla en los dos: 1,66:1 no es una decisión de
           // reparto que un tamaño de pantalla pueda justificar. Queda
           // dicho en el `-done` que esto SÍ se ve en el diff del AP11.
-          className="absolute z-10 rounded-[10px] px-2.5 font-bold flex items-center"
+          // n1-hosteleria-2 · LO QUE ENCONTRÓ LA PASADA EN EL N1.
+          //
+          // Subir la etiqueta a 48 px por R3 la hizo TAPAR EL NOMBRE DE LA
+          // MESA. En la captura `02-mapa-tres-plegadas` del 23-10 la
+          // primera mesa de BARRA dice «LISTO» y «1 pax» y no dice cuál
+          // es: la pastilla ocupaba de −8 a 40 y el nombre va centrado,
+          // sobre los 34–54 de una forma de 88.
+          //
+          // Y tapar el nombre es perder el único dato que se consulta en
+          // esa tarjeta: QUÉ mesa está lista. El aviso ya dice que hay
+          // algo; la tarjeta dice dónde.
+          //
+          // El arreglo no es bajar de 48 —eso devolvería el problema de
+          // R3—: el objetivo TÁCTIL se queda en 48 y lo que encoge es la
+          // PASTILLA PINTADA, que vuelve a sus 30. Los 18 px de más son
+          // relleno transparente que crece hacia ARRIBA, fuera de la
+          // circunferencia, donde no hay nada que tapar.
+          //
+          //   botón   top −20, alto 48  →  ocupa −20 … 28
+          //   pastilla centrada, 30     →  pinta −11 … 19
+          //   nombre centrado           →  34 … 54, libre
+          className="absolute z-10 flex items-start justify-center"
           style={{
-            top: -8,
+            top: deMano ? -20 : -8,
             left: 6,
             height: deMano ? 48 : 30,
-            background: VERDE_LISTA,
-            color: VERDE_LISTA_TEXT,
-            fontSize: SUELO_LETRA_MANO_PX,
+            // Sin relleno propio: lo pone la pastilla de dentro.
+            background: "transparent",
           }}
         >
-          LISTO
+          <span
+            className="rounded-[10px] px-2.5 font-bold flex items-center"
+            style={{
+              height: 30,
+              marginTop: deMano ? 9 : 0,
+              background: VERDE_LISTA,
+              color: VERDE_LISTA_TEXT,
+              fontSize: SUELO_LETRA_MANO_PX,
+            }}
+          >
+            LISTO
+          </span>
         </button>
       )}
       <button

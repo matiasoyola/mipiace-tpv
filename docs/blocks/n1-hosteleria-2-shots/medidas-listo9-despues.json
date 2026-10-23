@@ -1,0 +1,78 @@
+{
+ "AP11_banda": {
+  "modo": "pila",
+  "clip": {
+   "x": 0,
+   "y": 180,
+   "width": 435,
+   "height": 140
+  },
+  "filas": [
+   {
+    "texto": "T4 · listo para servirVer",
+    "comandas": "1",
+    "h": 56
+   },
+   {
+    "texto": "M5 · listo para servirVer",
+    "comandas": "1",
+    "h": 56
+   }
+  ]
+ },
+ "AP11_tras_tocar": {
+  "hoja": true,
+  "pantallaCompleta": "false",
+  "dialogo": {
+   "w": 520,
+   "h": 229
+  },
+  "lineas": [
+   "1 · Tostada con tomate"
+  ],
+  "hecho": {
+   "h": 68,
+   "texto": "Hecho"
+  },
+  "alergias": "",
+  "sigueLaBanda": 2
+ },
+ "D8_banda": {
+  "modo": "pila",
+  "clip": {
+   "x": 0,
+   "y": 180,
+   "width": 435,
+   "height": 140
+  },
+  "filas": [
+   {
+    "texto": "T4 · listo para servirVer",
+    "comandas": "1",
+    "h": 56
+   },
+   {
+    "texto": "M5 · listo para servirVer",
+    "comandas": "1",
+    "h": 56
+   }
+  ]
+ },
+ "D8_tras_tocar": {
+  "hoja": true,
+  "pantallaCompleta": "false",
+  "dialogo": {
+   "w": 520,
+   "h": 229
+  },
+  "lineas": [
+   "1 · Tostada con tomate"
+  ],
+  "hecho": {
+   "h": 68,
+   "texto": "Hecho"
+  },
+  "alergias": "",
+  "sigueLaBanda": 2
+ }
+}
