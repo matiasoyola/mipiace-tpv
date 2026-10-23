@@ -14,7 +14,7 @@
 // con lo que había delante.
 
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { AdminShell } from "../../AdminShell.js";
 import { api, apiBlob, ApiError } from "../../api.js";
@@ -51,11 +51,22 @@ const ORIGENES: OrigenDeNc[] = [
 ];
 
 export function NoConformidadesPage() {
+  // calidad-1 (D-74) · **LA PROPUESTA LLEGA POR LA URL.** El panel
+  // enlaza con `?proponer=<indicador>&mes=<YYYY-MM>` y aquí se abre el
+  // formulario con el origen, el proceso y la referencia ya puestos. Si
+  // hubiera que volver a teclearlos, la propuesta no ahorraría nada y
+  // nadie la usaría — y una propuesta que nadie usa es peor que no
+  // tenerla.
+  const [busqueda] = useSearchParams();
+  const proponer = busqueda.get("proponer");
+  const mesPropuesto = busqueda.get("mes");
+  const procesoPropuesto = busqueda.get("proceso");
+
   const [filas, setFilas] = useState<NcDeLaLista[] | null>(null);
   const [mapa, setMapa] = useState<RespuestaDelMapa | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [abriendo, setAbriendo] = useState(false);
+  const [abriendo, setAbriendo] = useState(proponer != null);
 
   const [estado, setEstado] = useState("");
   const [clase, setClase] = useState("");
@@ -231,6 +242,15 @@ export function NoConformidadesPage() {
           {abriendo && (
             <AbrirNc
               procesos={mapa.procesos.filter((p) => p.activo)}
+              propuesta={
+                proponer != null && mesPropuesto != null
+                  ? {
+                      code: proponer,
+                      mes: mesPropuesto,
+                      procesoId: procesoPropuesto,
+                    }
+                  : null
+              }
               onHecho={async (ref) => {
                 setAbriendo(false);
                 setAviso(`Abierta ${ref}.`);
@@ -328,21 +348,32 @@ function Filtro({
  *  eso la pantalla lo dice aquí y no cuando ya es tarde. */
 function AbrirNc({
   procesos,
+  propuesta,
   onHecho,
   onError,
 }: {
   procesos: Array<{ id: string; nombre: string }>;
+  /** calidad-1 (D-74) · el indicador, el mes y el proceso del que cuelga,
+   *  que vienen del panel. */
+  propuesta: { code: string; mes: string; procesoId: string | null } | null;
   onHecho: (ref: string) => Promise<void>;
   onError: (m: string) => void;
 }) {
-  const [processId, setProcessId] = useState(procesos[0]?.id ?? "");
+  const [processId, setProcessId] = useState(
+    // El proceso del que cuelga el indicador, si el panel lo mandó: es
+    // el que el centro eligió para ese indicador, así que proponer otro
+    // sería proponer mal.
+    propuesta?.procesoId ?? procesos[0]?.id ?? "",
+  );
   const [kind, setKind] = useState<ClaseDeNc>("MINOR");
-  const [origin, setOrigin] = useState<OrigenDeNc>("INTERNAL_AUDIT");
+  const [origin, setOrigin] = useState<OrigenDeNc>(
+    propuesta != null ? "INDICATOR" : "INTERNAL_AUDIT",
+  );
   const [detectedOn, setDetectedOn] = useState(() =>
     new Date().toISOString().slice(0, 10),
   );
   const [descripcion, setDescripcion] = useState("");
-  const [isoClause, setIsoClause] = useState("");
+  const [isoClause, setIsoClause] = useState(propuesta != null ? "9.1.3" : "");
   const [sourceNote, setSourceNote] = useState("");
 
   const pideIncidencia = origin === "INCIDENT" || origin === "COMPLAINT";
@@ -371,6 +402,14 @@ function AbrirNc({
             descripcion: descripcion.trim(),
             isoClause: isoClause.trim() === "" ? null : isoClause.trim(),
             sourceNote: sourceNote.trim() === "" ? null : sourceNote.trim(),
+            // El indicador y el mes de la propuesta: es lo que después
+            // deja volver a mirar de qué hablaba la no conformidad.
+            ...(origin === "INDICATOR" && propuesta != null
+              ? {
+                  sourceIndicatorCode: propuesta.code,
+                  sourceIndicatorMonth: propuesta.mes,
+                }
+              : {}),
           },
         },
       );
@@ -383,6 +422,14 @@ function AbrirNc({
   return (
     <section className="mb-5 rounded-2xl border border-slate-300 bg-slate-50 px-5 py-4">
       <h2 className="text-[14.5px] font-semibold">Abrir una no conformidad</h2>
+      {propuesta != null && (
+        <p className="mt-1 rounded-lg bg-amber-100 px-3 py-2 text-[12.5px] text-amber-900">
+          Viene del panel: el indicador <strong>{propuesta.code}</strong>{" "}
+          lleva dos meses seguidos fuera de umbral, el último{" "}
+          {propuesta.mes}. El origen y la referencia ya van puestos; lo que
+          falta es decidir la clase y escribir qué pasa.
+        </p>
+      )}
       <p className="mt-1 text-[12.5px] text-slate-500">
         La clase, el origen y quién la abre <strong>no se cambian después</strong>:
         subir una NC menor a mayor cuando ya está cerrada sería reescribir

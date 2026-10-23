@@ -178,6 +178,20 @@ export function ProcesosPage() {
   );
 }
 
+/**
+ * «1 indicador» y no «1 indicadores».
+ *
+ * Lo encontró el bucle visual, y no es cosmética: el mapa es la pantalla
+ * que la directora enseña en la auditoría, y once tarjetas que dicen «1
+ * objetivos» son once veces que el auditor lee que el sistema lo ha
+ * escrito una máquina sin que nadie lo mire. La forma `(s)` que el panel
+ * usa en otros sitios aquí no vale: estas cifras están en una tarjeta,
+ * no en una línea de aviso.
+ */
+function cuantos(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
 /** Una de las tres bandas del mapa. */
 function FilaDelMapa({
   tipo,
@@ -233,21 +247,27 @@ function TarjetaDeProceso({ proceso: p }: { proceso: ProcesoDelMapa }) {
           pregunta de la NC 01 de un vistazo: de este proceso cuelgan
           estos indicadores y estos riesgos, y no hay otro sitio. */}
       <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-slate-600">
-        <li>{c.indicadores} indicadores</li>
-        <li>{c.riesgos} riesgos</li>
-        {c.oportunidades > 0 && <li>{c.oportunidades} oportunidades</li>}
-        <li>{c.objetivos} objetivos</li>
+        <li>{cuantos(c.indicadores, "indicador", "indicadores")}</li>
+        <li>{cuantos(c.riesgos, "riesgo", "riesgos")}</li>
+        {c.oportunidades > 0 && (
+          <li>{cuantos(c.oportunidades, "oportunidad", "oportunidades")}</li>
+        )}
+        <li>{cuantos(c.objetivos, "objetivo", "objetivos")}</li>
         <li
           className={
             c.noConformidades > 0 ? "font-semibold text-amber-700" : undefined
           }
         >
-          {c.noConformidades} NC abiertas
+          {cuantos(c.noConformidades, "NC abierta", "NC abiertas")}
         </li>
       </ul>
       {c.revisionesVencidas > 0 && (
         <p className="mt-1 text-[12px] font-medium text-red-700">
-          {c.revisionesVencidas} revisión(es) de riesgo vencida(s)
+          {cuantos(
+            c.revisionesVencidas,
+            "revisión de riesgo vencida",
+            "revisiones de riesgo vencidas",
+          )}
         </p>
       )}
     </Link>

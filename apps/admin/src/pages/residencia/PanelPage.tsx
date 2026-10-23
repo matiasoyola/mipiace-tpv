@@ -637,8 +637,14 @@ export function PanelPage() {
                       {" "}
                       · {p.meses[0]} y {p.meses[1]} ·{" "}
                     </span>
+                    {/* **Con el origen ya rellenado** (D-74). El enlace
+                        lleva el indicador y el mes, y la pantalla de no
+                        conformidades abre el formulario con el origen,
+                        el proceso y la referencia puestos: si hubiera
+                        que volver a teclearlos, la propuesta no ahorra
+                        nada y nadie la usa. */}
                     <Link
-                      to="/admin/residencia/no-conformidades"
+                      to={`/admin/residencia/no-conformidades?proponer=${p.code}&mes=${p.mesDeReferencia}${p.procesoId ? `&proceso=${p.procesoId}` : ""}`}
                       className="underline"
                     >
                       abrir NC

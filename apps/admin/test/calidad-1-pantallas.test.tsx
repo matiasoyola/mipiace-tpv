@@ -352,7 +352,16 @@ describe("el mapa de procesos", () => {
     const texto = container.textContent ?? "";
     expect(texto).toContain("3 indicadores");
     expect(texto).toContain("2 NC abiertas");
-    expect(texto).toContain("1 revisión(es) de riesgo vencida(s)");
+    // Y en SINGULAR cuando es una. Lo encontró el bucle visual: once
+    // tarjetas diciendo «1 objetivos» en la pantalla que se enseña en la
+    // auditoría.
+    expect(texto).toContain("1 indicador");
+    expect(texto).toContain("1 riesgo");
+    expect(texto).toContain("1 objetivo");
+    expect(texto).toContain("1 NC abierta");
+    expect(texto).toContain("1 revisión de riesgo vencida");
+    expect(texto).not.toContain("1 indicadores");
+    expect(texto).not.toContain("1 objetivos");
   });
 
   it("y cada proceso se abre", async () => {
@@ -478,6 +487,36 @@ describe("el registro de no conformidades", () => {
     expect(api.blob).toHaveBeenCalledWith(
       "/residencia/calidad/pac.pdf?origen=EXTERNAL_AUDIT",
     );
+  });
+
+  it("**la propuesta del panel llega con el origen ya relleno** (D-74)", async () => {
+    // El panel enlaza con `?proponer=…&mes=…&proceso=…`, y la pantalla
+    // abre el formulario con el origen puesto. Si hubiera que volver a
+    // teclearlo, la propuesta no ahorraría nada y nadie la usaría.
+    respuestas();
+    await pintar(<NoConformidadesPage />, {
+      camino: "/admin/residencia/no-conformidades",
+      url: "/admin/residencia/no-conformidades?proponer=GIMNASIA&mes=2026-09&proceso=p-abvd",
+    });
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Viene del panel");
+    expect(texto).toContain("GIMNASIA");
+    expect(texto).toContain("2026-09");
+    // El desplegable de origen DEL FORMULARIO, ya en «indicador fuera de
+    // umbral». Se coge el ÚLTIMO que casa y no el primero: el filtro de
+    // arriba tiene las mismas opciones, y buscar el primero encuentra el
+    // filtro —que está vacío a propósito— y el test pasaría en verde
+    // diciendo lo contrario de lo que quiere decir.
+    const origenes = [...container.querySelectorAll("select")].filter((sel) =>
+      [...sel.options].some((o) => o.textContent === "Indicador fuera de umbral"),
+    );
+    expect(origenes.length).toBe(2);
+    expect(origenes[origenes.length - 1]!.value).toBe("INDICATOR");
+    // Y el proceso, el que el centro eligió para ese indicador.
+    const procesos = [...container.querySelectorAll("select")].filter((sel) =>
+      [...sel.options].some((o) => o.textContent === "Cuidados y ABVD"),
+    );
+    expect(procesos[procesos.length - 1]!.value).toBe("p-abvd");
   });
 
   it("sin mapa, no deja abrir una NC: manda a cargarlo", async () => {
