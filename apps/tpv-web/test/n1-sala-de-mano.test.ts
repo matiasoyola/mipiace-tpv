@@ -32,6 +32,8 @@ import {
 } from "../src/pages/TableMapScreen.js";
 import {
   LONGEST_TABLE_AMOUNT,
+  LONGEST_TABLE_AMOUNT_MANO,
+  SUELO_LETRA_MANO_PX,
   TABLE_AMOUNT_CHAR_WIDTH,
   TABLE_AMOUNT_FONT_PX,
   REPARTO_MANO,
@@ -180,25 +182,63 @@ describe("n1-hosteleria · tres mesas por fila a 360", () => {
 });
 
 describe("n1-hosteleria · el importe de la mesa pequeña no se corta", () => {
-  it("el peor importe entra en la mesa de 88 a 14 px", () => {
+  it("el importe de la mesa llega al suelo de letra de R4", () => {
+    // n1-hosteleria-2 · estaba en 14, un píxel por debajo del suelo. El
+    // importe de una mesa abierta es un número que se consulta para
+    // decidir, así que va al suelo.
+    expect(TABLE_AMOUNT_FONT_PX_MANO).toBe(SUELO_LETRA_MANO_PX);
+  });
+
+  it("el peor importe entra en la mesa de 88 al suelo de letra", () => {
     // `principio-cobro-en-mesa`: la mesa pequeña CONSERVA el importe. Si
     // no entrara, el arreglo sería otro, no quitarlo.
+    //
+    // Y se mide con el offset DE MANO, que es lo que cambió este bloque:
+    // la mesa pequeña tiene dos líneas (nombre e importe) y no tres, así
+    // que el importe queda a 10 px del centro y no a los 20 del
+    // terminal. Medirlo con los 20 daba «no entra» por 3,3 px y era un
+    // falso rojo: estaría midiendo una maquetación que la mano no tiene.
+    expect(
+      roundTableAmountFits(
+        LONGEST_TABLE_AMOUNT,
+        TABLE_SHAPE_MIN_MANO,
+        TABLE_AMOUNT_FONT_PX_MANO,
+        REPARTO_MANO.amountOffsetPx,
+      ),
+    ).toBe(true);
+  });
+
+  it("y a 16 px ya no entra: de ahí el 15, y no es gusto", () => {
+    expect(
+      roundTableAmountFits(
+        LONGEST_TABLE_AMOUNT,
+        TABLE_SHAPE_MIN_MANO,
+        16,
+        REPARTO_MANO.amountOffsetPx,
+      ),
+    ).toBe(false);
+    // Los 22 del terminal piden más que el diámetro entero.
+    expect(
+      roundTableAmountFits(
+        LONGEST_TABLE_AMOUNT,
+        TABLE_SHAPE_MIN_MANO,
+        22,
+        REPARTO_MANO.amountOffsetPx,
+      ),
+    ).toBe(false);
+  });
+
+  it("SABOTAJE · con el offset del TERMINAL el importe de mano no entra", () => {
+    // La cuerda a 20 px del centro de un círculo de 88 da 78,4 y el peor
+    // importe a 15 px pide 81,7. Es la fila «el importe de la mano medido
+    // con la maquetación del terminal» de la tabla de sabotajes: si
+    // alguien quitara el offset de `REPARTO_MANO`, esto lo diría.
     expect(
       roundTableAmountFits(
         LONGEST_TABLE_AMOUNT,
         TABLE_SHAPE_MIN_MANO,
         TABLE_AMOUNT_FONT_PX_MANO,
       ),
-    ).toBe(true);
-  });
-
-  it("y a 16 px ya no entra: de ahí el 14, y no es gusto", () => {
-    expect(
-      roundTableAmountFits(LONGEST_TABLE_AMOUNT, TABLE_SHAPE_MIN_MANO, 16),
-    ).toBe(false);
-    // Los 22 del terminal piden más que el diámetro entero.
-    expect(
-      roundTableAmountFits(LONGEST_TABLE_AMOUNT, TABLE_SHAPE_MIN_MANO, 22),
     ).toBe(false);
   });
 });
@@ -242,8 +282,10 @@ describe("n1-hosteleria · el cobro desde la forma pequeña", () => {
   // cosas se miden aquí, porque en jsdom no hay layout que medir.
   const anchoPorCaracter = (fontPx: number) =>
     (TABLE_AMOUNT_CHAR_WIDTH * fontPx) / TABLE_AMOUNT_FONT_PX;
-  const anchoDelImporte = (fontPx: number) =>
-    LONGEST_TABLE_AMOUNT.length * anchoPorCaracter(fontPx);
+  const anchoDelImporte = (
+    fontPx: number,
+    importe: string = LONGEST_TABLE_AMOUNT_MANO,
+  ) => importe.length * anchoPorCaracter(fontPx);
 
   it("el botón llega al suelo táctil de la casa, no sólo a los 44 del bloque", () => {
     // El bloque pide 44. `hospitalityTheme.ts` fija 56 para la venta y la
@@ -262,7 +304,15 @@ describe("n1-hosteleria · el cobro desde la forma pequeña", () => {
     );
   });
 
-  it("el peor importe entra en el botón de una mesa REDONDA", () => {
+  it("el importe y la palabra llegan al suelo de letra de R4", () => {
+    // n1-hosteleria-2 · estaban a 12 y a 10. El importe del botón es el
+    // número que el camarero compara con el efectivo que le dan: si algo
+    // de esta pantalla no puede quedar por debajo del suelo, es éste.
+    expect(COBRAR_AMOUNT_FONT_PX_MANO).toBe(SUELO_LETRA_MANO_PX);
+    expect(COBRAR_AMOUNT_FONT_PX_MANO).toBeGreaterThanOrEqual(15);
+  });
+
+  it("el peor importe DE MANO entra en el botón de una mesa REDONDA", () => {
     // Barra y Terraza son círculos: lo que limita es la cuerda a la
     // altura del centro del botón, no el lado.
     const ancho = cobrarMaxWidth(
@@ -290,10 +340,18 @@ describe("n1-hosteleria · el cobro desde la forma pequeña", () => {
     ).toBeLessThanOrEqual(ancho);
   });
 
-  it("SABOTAJE · a 14 px el importe se sale del botón", () => {
-    // A 13 entra por 2,2 px, que es menos de lo que vale fiarse de una
-    // estimación de ancho por carácter; a 14 ya no entra de calle. De ahí
-    // el 12, con 7,6 px de margen.
+  it("el peor importe de 9 caracteres NO entra: es lo que fija el de 8", () => {
+    // n1-hosteleria-2 · esto NO es un sabotaje, es la razón de que
+    // `LONGEST_TABLE_AMOUNT_MANO` exista. Con el suelo de letra en 15, el
+    // peor importe de la casa (9 caracteres) pide 81,71 + 4 de relleno y
+    // la cuerda a la altura del botón da 81,70 de ancho útil. Falla por
+    // 0,01 px, y no hay sitio donde ponerlo que gane los 9 que faltan: la
+    // cuerda es máxima en el centro de la mesa, y ahí el botón se come el
+    // nombre.
+    //
+    // Así que decide R4 —«se enseña menos, no más pequeño»— y lo que se
+    // enseña menos es el dígito de los millares de una cuenta de mesa. El
+    // terminal sigue con los 9: ahí la mesa mide 136–152.
     const ancho = cobrarMaxWidth(
       "BARRA",
       TABLE_SHAPE_MIN_MANO,
@@ -301,7 +359,29 @@ describe("n1-hosteleria · el cobro desde la forma pequeña", () => {
       COBRAR_BOTTOM_MANO,
       COBRAR_MARGEN_MANO,
     );
-    expect(anchoDelImporte(14) + 2 * COBRAR_PADDING_X_MANO).toBeGreaterThan(
+    expect(
+      anchoDelImporte(SUELO_LETRA_MANO_PX, LONGEST_TABLE_AMOUNT) +
+        2 * COBRAR_PADDING_X_MANO,
+    ).toBeGreaterThan(ancho);
+    // Y el de 8 entra con margen de verdad, no de redondeo.
+    expect(
+      ancho -
+        (anchoDelImporte(SUELO_LETRA_MANO_PX, LONGEST_TABLE_AMOUNT_MANO) +
+          2 * COBRAR_PADDING_X_MANO),
+    ).toBeGreaterThan(4);
+  });
+
+  it("SABOTAJE · a 16 px el importe de mano se sale del botón", () => {
+    // Un píxel por encima del suelo y ya no entra: el margen que hay es
+    // el que hay, y es lo que impide subir «por si acaso».
+    const ancho = cobrarMaxWidth(
+      "BARRA",
+      TABLE_SHAPE_MIN_MANO,
+      COBRAR_HEIGHT_MANO,
+      COBRAR_BOTTOM_MANO,
+      COBRAR_MARGEN_MANO,
+    );
+    expect(anchoDelImporte(16) + 2 * COBRAR_PADDING_X_MANO).toBeGreaterThan(
       ancho,
     );
   });

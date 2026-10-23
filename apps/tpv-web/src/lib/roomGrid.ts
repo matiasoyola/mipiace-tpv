@@ -280,12 +280,37 @@ export function roundTableAmountFits(
   amount: string = LONGEST_TABLE_AMOUNT,
   size: number = TABLE_SHAPE_SIZE,
   fontPx: number = TABLE_AMOUNT_FONT_PX_DARK,
+  // n1-hosteleria-2 · el offset entra por parámetro porque en la mano el
+  // importe no vive donde en el terminal: la mesa pequeña tiene DOS
+  // líneas (nombre e importe) y no tres, así que el importe queda a 10 px
+  // del centro y no a 20. El valor por defecto es el del terminal, así
+  // que nada de v1.22 se mueve.
+  offsetFromCenter: number = TABLE_AMOUNT_OFFSET_DARK,
 ): boolean {
-  const charWidth = (TABLE_AMOUNT_CHAR_WIDTH * fontPx) / TABLE_AMOUNT_FONT_PX;
   return (
-    amount.length * charWidth <=
-    roundTableChordWidth(TABLE_AMOUNT_OFFSET_DARK, size)
+    anchoDelImporte(amount, fontPx) <=
+    roundTableChordWidth(offsetFromCenter, size)
   );
+}
+
+/**
+ * Lo que pide de ancho un importe pintado a `fontPx`, en px.
+ *
+ * Se saca de la función que ya medía `roundTableAmountFits` para que los
+ * comentarios de geometría de este módulo y los bancos que los
+ * comprueban usen LA MISMA cuenta. Un comentario que calcula a mano lo
+ * que el código calcula de otra forma es la manera de que los dos digan
+ * cosas distintas durante un año sin que nadie lo note.
+ *
+ * `TABLE_AMOUNT_CHAR_WIDTH` está calibrado a 19 px (v1.22) y se escala
+ * linealmente: es la misma fuente con `tabular-nums`.
+ */
+export function anchoDelImporte(
+  amount: string,
+  fontPx: number = TABLE_AMOUNT_FONT_PX_DARK,
+): number {
+  const charWidth = (TABLE_AMOUNT_CHAR_WIDTH * fontPx) / TABLE_AMOUNT_FONT_PX;
+  return amount.length * charWidth;
 }
 
 /**
@@ -646,26 +671,104 @@ export const TABLE_SHAPE_MIN_MANO = 88;
 export const TABLE_SHAPE_MAX_MANO = 144;
 
 /**
- * El importe de la mesa en la mano: **14 px a 10 px del centro**.
+ * n1-hosteleria-2 · R4 · **EL SUELO DE LETRA EN LA MANO: 15 px.**
+ *
+ * Un número para todo el bloque, y no uno por pantalla, porque el
+ * hallazgo 7 de Matías («no se lee lo que hay en el círculo») no era un
+ * problema de una mesa: era el de todo lo que se escribió a 13 px y a
+ * 10 px para que cupiera.
+ *
+ * **De dónde sale el 15.** El N1 declara densidad 320 dpi con
+ * `devicePixelRatio` 2, así que 1 px de CSS mide 25,4/160 = **0,1588 mm**
+ * de cristal. Un glifo de 15 px tiene una altura de mayúscula de
+ * ≈ 0,72 · 15 = 10,8 px = **1,72 mm**, que sostenido a 35 cm —la
+ * distancia a la que se lleva el aparato— subtiende
+ *
+ *   2 · atan(1,72 / (2 · 350)) = 0,00491 rad = **16,9 minutos de arco**
+ *
+ * y 16′ es el umbral habitual para leer de un vistazo en malas
+ * condiciones (de pie, en marcha, con la pantalla moviéndose), muy por
+ * encima de los 5′ del límite de agudeza, que es un umbral de
+ * laboratorio y no sirve para una barra.
+ *
+ * **Y lo confirma el hierro, que es el argumento que vale.** Todo lo que
+ * Matías leyó sin queja ya estaba en 15 o más: los minutos de la mesa
+ * (15), el contador de sala (15), el nombre del cajero (15). Lo único
+ * que dijo que no se leía, «POR RECOGER», estaba en **13**.
+ *
+ * **Qué queda exento, y por qué no es una trampa.** El rótulo del marco
+ * de zona y los eyebrows de la comanda se quedan en `EYEBROW_PX` = 11:
+ * no se leen, se reconocen por su posición, y se aprenden una vez el
+ * primer día. La prueba es que ninguno de los ocho hallazgos los
+ * menciona. Todo lo que lleva un ESTADO o un NÚMERO —lo que el camarero
+ * consulta para decidir algo— va al suelo.
+ *
+ * **Consecuencia, que el bloque anticipa.** R4 dice «si no cabe, se
+ * enseña menos, no más pequeño». Por eso de la mesa POR RECOGER se van
+ * los minutos y de la mesa LIBRE no se añade nada: ver
+ * `LONGEST_TABLE_AMOUNT_MANO`.
+ */
+export const SUELO_LETRA_MANO_PX = 15;
+
+/**
+ * El importe de la mesa en la mano: **15 px a 10 px del centro**.
  *
  * El importe no se corta NUNCA (la lección de v1.22), y en un círculo lo
  * que limita es la cuerda, no el lado. Para el peor importe
  * (`LONGEST_TABLE_AMOUNT`, 9 caracteres) y una mesa de 88:
  *
- *   cuerda a 10 px del centro = 2·√(44² − 10²) = 85,7 px
- *   lo que pide a 14 px        = 9 · 11,5 · 14/19 = 76,3 px
- *   margen                     = 9,4 px
+ *   cuerda a 10 px del centro = 2·√(44² − 10²) = 85,70 px
+ *   lo que pide a 15 px        = 9 · 11,5 · 15/19 = 81,71 px
+ *   margen                     = 3,99 px
  *
- * A 15 px el margen baja a 3,9 y a 16 ya no entra. Los 22 px del
- * terminal piden 119,8: más que el diámetro entero de la mesa pequeña,
- * así que aquí no era cuestión de gusto.
+ * `n1-hosteleria` lo dejó en **14** y escribió que a 15 el margen baja a
+ * 3,9 «y a 16 ya no entra». Lo cierto sigue siendo cierto: lo que cambia
+ * es que 14 queda por debajo del suelo de R4
+ * (`SUELO_LETRA_MANO_PX`), así que los 5 px de margen que se ganaban
+ * valían menos que leer el dinero. Cuatro píxeles sobre una cota
+ * SUPERIOR de ancho por carácter (`TABLE_AMOUNT_CHAR_WIDTH` no
+ * subestima ningún importe) son margen de verdad, no de redondeo.
  *
- * Catorce píxeles leídos a 30–40 cm, que es donde se tiene el aparato,
- * es lo que en el terminal serían ~26 a un metro. El espíritu de
- * `principio-venta-bajo-estres` se mantiene; su cifra no se copia.
+ * Los 22 px del terminal piden 119,8: más que el diámetro entero de la
+ * mesa pequeña, así que aquí nunca fue cuestión de gusto.
  */
-export const TABLE_AMOUNT_FONT_PX_MANO = 14;
+export const TABLE_AMOUNT_FONT_PX_MANO = SUELO_LETRA_MANO_PX;
 export const TABLE_AMOUNT_OFFSET_MANO = 10;
+
+/**
+ * El peor importe que tiene que aguantar el **botón «Cobrar»** de la
+ * mesa pequeña: **8 caracteres**, no los 9 de `LONGEST_TABLE_AMOUNT`.
+ *
+ * No es una rebaja del criterio: es la geometría de un círculo de 88 px
+ * con un objetivo táctil dentro, y conviene verla entera. El botón mide
+ * `MIN_TOUCH_PX` = 56 de alto y se apoya a 6 px del borde, así que su
+ * centro queda a 34 px del borde, o sea a 10 px del centro de la mesa:
+ *
+ *   cuerda a 10 px   = 85,70 px
+ *   menos el margen  = 85,70 − 4 = 81,70 px de ancho útil
+ *   9 caracteres a 15 px = 81,71 px  →  NO entra, por 0,01 px
+ *   8 caracteres a 15 px = 72,63 px  →  entra, con 5,07 px de margen
+ *
+ * Y no hay forma de ganar esos 9 px moviendo el botón: la cuerda es
+ * máxima en el centro de la mesa (88 px, 84 útiles) y 9 caracteres piden
+ * 85,7 con su relleno. Subir el botón al centro lo pone además encima
+ * del nombre. Probado también con el botón a 48 px (el suelo de R3 en
+ * vez de los 56 de la casa): la cuerda empeora, porque un botón más bajo
+ * se aleja del centro.
+ *
+ * Así que decide R4: **se enseña menos, no más pequeño.** Lo que se
+ * enseña menos es el dígito de los millares de una cuenta de mesa, y la
+ * casa tiene sus propias cifras para saber qué se está perdiendo: La
+ * Maestranza cerró la M4 del ensayo en **55,00 €** y Sirope la T2 en
+ * **9,90 €**. `LONGEST_TABLE_AMOUNT` se queda en 9 caracteres y sigue
+ * mandando en el terminal, donde la mesa mide 136–152 px y cabe de
+ * sobra.
+ *
+ * Si algún día una mesa pasa de 999,90 €: `formatEur` lo pinta igual y lo
+ * que se estrecha es el margen contra la cuerda. Lo que cambia entonces
+ * es esta constante, y el banco dice si sigue cabiendo.
+ */
+export const LONGEST_TABLE_AMOUNT_MANO = "999,90 €";
 
 /** El relleno del marco de zona en la mano. Ver `TABLE_SHAPE_MIN_MANO`. */
 export const ZONE_PADDING_MANO = 12;

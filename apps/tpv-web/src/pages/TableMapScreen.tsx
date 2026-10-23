@@ -74,6 +74,7 @@ import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 import {
   ROOM_GRID_GAP,
   repartoDeSala,
+  SUELO_LETRA_MANO_PX,
   ZONE_GAP,
   TABLE_SHAPE_RADIUS,
   TABLE_SHAPE_SIZE,
@@ -86,6 +87,7 @@ import {
   BAR_COUNTER_FILL,
   CORAL,
   DARK_CANVAS,
+  DARK_INK,
   DARK_ON_CORAL,
   DARK_SURFACE,
   DARK_SURFACE_RAISED,
@@ -110,7 +112,7 @@ import {
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { summarizeOpenTables } from "../lib/openTables.js";
-import { VERDE_LISTA } from "../lib/kitchenTheme.js";
+import { VERDE_LISTA, VERDE_LISTA_TEXT } from "../lib/kitchenTheme.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { formatEur } from "../lib/money.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
@@ -1393,7 +1395,17 @@ function TableCard({
         <span className="font-semibold" style={{ fontSize: TABLE_NAME_PX }}>
           {table.name}
         </span>
-        <span className="font-medium" style={{ fontSize: 14, opacity: 0.9 }}>
+        {/* n1-hosteleria-2 · R4 · al suelo en la mano. La tarjeta entera
+            va a `opacity-55`, así que lo medido es la tinta ya mezclada
+            con el lienzo: **7,18:1** el nombre y **6,16:1** esta línea.
+            El contraste nunca fue el problema aquí; el tamaño sí. */}
+        <span
+          className="font-medium"
+          style={{
+            fontSize: deMano ? SUELO_LETRA_MANO_PX : 14,
+            opacity: 0.9,
+          }}
+        >
           unida a {principal?.name ?? "grupo"}
         </span>
       </button>
@@ -1425,6 +1437,24 @@ function TableCard({
         : isBilling
           ? TABLE_BILLING_FILL
           : TABLE_BUSY_FILL;
+  // n1-hosteleria-2 · R4 · EL BLANCO SOBRE EL CORAL NO LLEGA A 4,5:1.
+  //
+  // `TABLE_BUSY_TEXT` es blanco y `TABLE_BUSY_FILL` es el coral de la
+  // casa (#E97058): medido, **3,03:1**. Pasa de milagro el umbral de
+  // «texto grande» (3,0:1) con el nombre a 20 px en negrita, y NO pasa
+  // con el importe, que es texto normal y es justo el dato que el
+  // camarero va a comprobar contra el efectivo.
+  //
+  // Lo que se cambia es la TINTA y no el relleno: el coral es la marca y
+  // es lo que dice «ocupada» de un vistazo en el lienzo. Con `DARK_INK`
+  // encima sube a **5,92:1**, y de paso es la misma pareja tinta/relleno
+  // que ya usan «pide la cuenta» (ámbar con #1B1500) y «por recoger»
+  // (azul con #16202A), así que las tres mesas con cuenta abierta se
+  // leen igual.
+  //
+  // Sólo en la mano: en el terminal el blanco sobre coral se queda como
+  // está, que es la restricción del bloque. Queda anotado en el `-done`
+  // que el AP11 y el D8 siguen a 3,03:1.
   const text = pendingCheckout
     ? DARK_TEXT_MUTED
     : porRecoger
@@ -1433,7 +1463,9 @@ function TableCard({
         ? TABLE_FREE_TEXT
         : isBilling
           ? TABLE_BILLING_TEXT
-          : TABLE_BUSY_TEXT;
+          : deMano
+            ? DARK_INK
+            : TABLE_BUSY_TEXT;
 
   const alias =
     table.activeTicket?.openedByAlias ??
@@ -1462,14 +1494,31 @@ function TableCard({
             e.stopPropagation();
             onServido();
           }}
-          className="absolute z-10 rounded-[10px] px-2.5 font-bold"
+          // n1-hosteleria-2 · R3 y R4 · dos arreglos en la misma
+          // etiqueta, y los dos salen de medirla:
+          //
+          //  · el color era `#FFFFFF` sobre `VERDE_LISTA` (#8FD9A8):
+          //    **1,66:1**. No es «poco contraste», es texto invisible, y
+          //    estaba pintado así desde kds-1 con la constante buena
+          //    —`VERDE_LISTA_TEXT`— exportada al lado y sin usar. Con
+          //    ella sube a **10,82:1**.
+          //  · medía 30 px de alto, y R3 pide 48 para todo lo que se
+          //    toca. Un toque aquí marca «Servido» en todos los TPV del
+          //    local, así que de los objetivos de esta pantalla es
+          //    justamente el que no se puede fallar.
+          //
+          // En el terminal se queda en 30 px (la restricción), pero el
+          // color se arregla en los dos: 1,66:1 no es una decisión de
+          // reparto que un tamaño de pantalla pueda justificar. Queda
+          // dicho en el `-done` que esto SÍ se ve en el diff del AP11.
+          className="absolute z-10 rounded-[10px] px-2.5 font-bold flex items-center"
           style={{
             top: -8,
             left: 6,
-            height: 30,
+            height: deMano ? 48 : 30,
             background: VERDE_LISTA,
-            color: "#FFFFFF",
-            fontSize: 15,
+            color: VERDE_LISTA_TEXT,
+            fontSize: SUELO_LETRA_MANO_PX,
           }}
         >
           LISTO
@@ -1564,24 +1613,71 @@ function TableCard({
           // auditoria-sirope (#14) · lo que hay que saber de un vistazo:
           // que está pagada y cuánto lleva esperando. El importe no —ya
           // se cobró— y los pax tampoco: nadie se sienta aquí todavía.
+          // n1-hosteleria-2 · hallazgo 7 · ESTE es el estado que Matías
+          // no pudo leer, y medido no era el contraste: la tinta sobre
+          // el azul da **7,69:1**, de sobra. Era el tamaño. «Por
+          // recoger» estaba a **13 px**, el único texto de estado del
+          // mapa por debajo del suelo de R4.
+          //
+          // Y al subirlo a 15 las dos líneas ya no caben en un círculo
+          // de 88 con el nombre encima, así que manda R4: **se enseña
+          // menos, no más pequeño**. Se van los MINUTOS, por la misma
+          // razón por la que `n1-hosteleria` quitó la meta de la mesa
+          // ocupada (§2.2): el minuto exacto no se actúa desde el mapa
+          // —se actúa decidiendo si se recoge— y la hoja de opciones,
+          // que es el toque siguiente, lo dice entero y con letra
+          // grande («Se cobró hace 12 min»).
+          //
+          // En el terminal siguen las dos líneas: la mesa mide 136–152 y
+          // caben.
           <>
             <span
               data-testid="table-por-recoger"
               className="font-semibold uppercase"
-              style={{ fontSize: 13, letterSpacing: "0.06em" }}
+              style={{
+                fontSize: deMano ? SUELO_LETRA_MANO_PX : 13,
+                letterSpacing: "0.06em",
+              }}
             >
               Por recoger
             </span>
-            <span className="font-medium" style={{ fontSize: 15, opacity: 0.8 }}>
-              {minutosDesde(table.porRecogerDesde)}
-            </span>
+            {!deMano && (
+              <span
+                className="font-medium"
+                style={{ fontSize: 15, opacity: 0.8 }}
+              >
+                {minutosDesde(table.porRecogerDesde)}
+              </span>
+            )}
           </>
         ) : isFree ? (
+          // n1-hosteleria-2 · R4 · 13 px en la mano era lo mismo que
+          // «Por recoger»: por debajo del suelo. A 15 px con la opacidad
+          // de siempre el contraste medido sobre el relleno claro es
+          // **5,18:1**, así que sube sin tocar el color. El terminal se
+          // queda en 14.
           <span
             className="font-medium"
-            style={{ fontSize: deMano ? 13 : 14, opacity: 0.65 }}
+            style={{
+              fontSize: deMano ? SUELO_LETRA_MANO_PX : 14,
+              opacity: 0.65,
+            }}
           >
             {pax} pax
+          </span>
+        ) : pendingCheckout && deMano ? (
+          // Ver la nota de `pendingCheckout` más abajo: en la mano el
+          // estado se queda con la línea del importe, que es la única
+          // que tiene cuerda para leerse.
+          <span
+            data-testid="table-pendiente"
+            className="font-semibold uppercase"
+            style={{
+              fontSize: SUELO_LETRA_MANO_PX,
+              letterSpacing: "0.04em",
+            }}
+          >
+            Pendiente
           </span>
         ) : (
           table.activeTicket && (
@@ -1620,15 +1716,35 @@ function TableCard({
             </>
           )
         )}
+        {/* n1-hosteleria-2 · R4 · los 10 px suben al suelo en la mano.
+            Sigue truncando, que es lo que debe hacer: «+M5, M6» a 15 px
+            pide ~63 px y la cuerda a esa altura del círculo de 88 da 66,
+            así que con tres mesas unidas se corta — y cortar el nombre de
+            la tercera es mejor que no poder leer ninguno. */}
         {groupBadge && (
           <span
             className="absolute top-1.5 inset-x-0 font-bold truncate px-2"
-            style={{ fontSize: 10, letterSpacing: "0.06em", opacity: 0.8 }}
+            style={{
+              fontSize: deMano ? SUELO_LETRA_MANO_PX : 10,
+              letterSpacing: "0.06em",
+              opacity: 0.8,
+            }}
           >
             {groupBadge}
           </span>
         )}
-        {pendingCheckout && (
+        {/* n1-hosteleria-2 · R4 · «cobro pendiente» a 10 px era el texto
+            más pequeño del mapa, y es el que avisa de que ESTA mesa tiene
+            un cobro sin subir y está bloqueada en este aparato.
+            Al suelo no cabe donde estaba: pegado a `bottom-2` de un
+            círculo de 88 el ancho real no es el lado sino la cuerda a esa
+            altura, ~53 px, y «PENDIENTE» a 15 px pide 76. Así que, como
+            manda R4, se enseña menos y en otro sitio: la palabra pasa a
+            la LÍNEA del importe —centrada, donde la cuerda da 85,7— y el
+            importe no se pinta. Lo que hay que saber de esta mesa no es
+            cuánto llevaba: es que no se puede tocar hasta que suba.
+            En el terminal se queda exactamente como estaba. */}
+        {pendingCheckout && !deMano && (
           <span
             className="absolute bottom-2 inset-x-0 font-semibold uppercase"
             style={{ fontSize: 10, letterSpacing: "0.08em" }}
@@ -1681,12 +1797,16 @@ function TableCard({
           {cobroBusy ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : deMano ? (
-            // Dos renglones, que es lo que cabe en 75 px de cuerda. Ver
-            // la nota de `COBRAR_HEIGHT_MANO`.
+            // Dos renglones, los dos al suelo de R4. Ver la nota de
+            // `COBRAR_HEIGHT_MANO`: 15 + 2 + 15 = 32 px de tinta en un
+            // botón de 56, y el ancho lo manda la cuerda.
             <span className="flex flex-col items-center leading-none gap-0.5">
               <span
                 className="font-semibold uppercase"
-                style={{ fontSize: 10, letterSpacing: "0.06em" }}
+                style={{
+                  fontSize: SUELO_LETRA_MANO_PX,
+                  letterSpacing: "0.02em",
+                }}
               >
                 Cobrar
               </span>
@@ -1732,28 +1852,49 @@ export const COBRAR_BOTTOM = 18;
  * la mano se ancla arriba cuando hay botón de cobro.
  *
  * En ese ancho no entra «Cobrar 12,50 €» en UNA línea (14 caracteres a
- * 15 px piden ~113 px), así que va en DOS renglones: «Cobrar» a 10 px
- * encima del importe. La palabra se queda —un botón que sólo enseñara el
- * importe se lee como una etiqueta, no como una acción— y el importe
- * también, que es lo que el camarero compara con el efectivo.
+ * 15 px piden ~113 px), así que va en DOS renglones: «Cobrar» encima del
+ * importe. La palabra se queda —un botón que sólo enseñara el importe se
+ * lee como una etiqueta, no como una acción— y el importe también, que
+ * es lo que el camarero compara con el efectivo.
  *
- * Y el importe va a **12 px**, que es lo que cabe con el peor caso de la
- * casa (`LONGEST_TABLE_AMOUNT`, 9 caracteres). Con la cuerda a 4 px de
- * margen en vez de 8 y `bottom` 6:
+ * n1-hosteleria-2 · los dos renglones estaban a **10 y 12 px**, por
+ * debajo del suelo de R4, y suben a **15**. Verticalmente sobra:
+ * 15 + 2 de hueco + 15 = 32 px de tinta en un botón de 56.
  *
- *   el importe a 12 px pide 9 · 11,5 · 12/19 = 65,4, más 2 · 4 de
- *   relleno = 73,4  →  7,6 px de margen sobre los 81
+ * Horizontalmente no sobra, y es lo que fija
+ * `LONGEST_TABLE_AMOUNT_MANO`: con `bottom` 6, el margen de cuerda de 4
+ * y el relleno lateral bajado a 2,
  *
- * A 13 px pediría 78,8: entra por 2,2 px, que es menos de lo que vale
- * fiarse de una estimación de ancho por carácter. Lo mide
- * `n1-sala-de-mano.test.ts`, no este comentario.
+ *   ancho útil           = cuerda(10, 88) − 4 = 85,70 − 4 = 81,70
+ *   8 caracteres a 15 px = 72,63 + 2 · 2 = 76,63  →  5,07 de margen
+ *   9 caracteres a 15 px = 81,71 + 2 · 2 = 85,71  →  NO entra
+ *
+ * Lo mide `n1-sala-de-mano.test.ts`, no este comentario.
  */
 export const COBRAR_HEIGHT_MANO = MIN_TOUCH_PX;
 export const COBRAR_BOTTOM_MANO = 6;
-/** El importe DENTRO del botón de cobro de la forma pequeña. */
-export const COBRAR_AMOUNT_FONT_PX_MANO = 12;
-/** Relleno lateral del botón en la mano. */
-export const COBRAR_PADDING_X_MANO = 4;
+/**
+ * El importe DENTRO del botón de cobro de la forma pequeña.
+ *
+ * n1-hosteleria-2 · sube de 12 al suelo de R4 (`SUELO_LETRA_MANO_PX`), y
+ * con él la palabra «Cobrar», que estaba a 10. Es el dato que el camarero
+ * compara con el efectivo que le dan: si hay un número en esta pantalla
+ * que no puede estar por debajo del suelo, es éste.
+ *
+ * Lo que cuesta está contado en `LONGEST_TABLE_AMOUNT_MANO`: el peor
+ * importe del botón pasa a ser de 8 caracteres y no de 9, porque la
+ * cuerda del círculo a la altura del botón da 81,70 px de ancho útil y
+ * nueve caracteres a 15 px piden 81,71. No hay sitio donde ponerlo que
+ * gane esos 9 px — la cuerda es máxima en el centro, y ahí el botón se
+ * come el nombre.
+ *
+ * El relleno lateral baja de 4 a 2 por lo mismo: son 4 px de los 81,70,
+ * y el botón ya está separado del borde por los 4 px de
+ * `COBRAR_MARGEN_MANO.circulo`.
+ */
+export const COBRAR_AMOUNT_FONT_PX_MANO = SUELO_LETRA_MANO_PX;
+/** Relleno lateral del botón en la mano. Ver `COBRAR_AMOUNT_FONT_PX_MANO`. */
+export const COBRAR_PADDING_X_MANO = 2;
 
 /**
  * Ancho máximo del botón «Cobrar» dentro de la forma.
