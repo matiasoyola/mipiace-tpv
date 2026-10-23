@@ -628,4 +628,22 @@ lo que dejó la pasada del 23-10 (§9.5 de `n1-hosteleria-done`): la mesa T1 con
 
 ## 10 · El push y el PR
 
-Los hace Matías. Está al final del prompt de cierre de esta sesión.
+**Los hace Matías.** `master` ha avanzado durante la sesión (hasta `178e102`:
+`primer-acceso`, un hotfix de menú y dos prompts nuevos), pero **ninguno de los
+16 ficheros de código que toca esta rama lo ha tocado master**, así que el merge
+del PR no debería dar conflicto. Comprobado fichero a fichero.
+
+```bash
+cd /Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv-n1-hosteleria-2
+git push -u origin n1-hosteleria-2
+gh pr create --base master --head n1-hosteleria-2 \
+  --title "n1-hosteleria-2 · que un camarero pueda usar el N1 en pleno servicio" \
+  --body "Siete de los ocho hallazgos del 23-10 cerrados y medidos contra un servicio en marcha. El hallazgo 1 (las seis lineas del resumen a la vista) NO cierra: la cuenta esta en el §2.8 del -done y las tres salidas las decide Matias con el aparato en la mano. Los terminales: 0 pixeles distintos en las cuatro capturas, con una excepcion declarada (el color de la etiqueta LISTO, que iba a 1,66:1). Y un hallazgo fuera de los ocho que es el mas gordo: BILLING no existe, asi que el boton «Cobrar X €» de la tarjeta de mesa es inalcanzable (§4.1)."
+```
+
+### 10.1 Para parar el banco cuando no haga falta
+
+```bash
+docker rm -f mipiacetpv-redis-n1host2
+# y los dos servidores de dev, que esta sesion dejó levantados en 3118 y 5290
+```
