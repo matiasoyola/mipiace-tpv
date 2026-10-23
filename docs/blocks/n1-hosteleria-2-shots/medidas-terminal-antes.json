@@ -1,0 +1,148 @@
+{
+ "AP11_mapa": {
+  "innerWidth": 1280,
+  "innerHeight": 800,
+  "clientWidth": 1280,
+  "scrollWidth": 1280,
+  "desbordeHorizontal": false,
+  "altoDePagina": 803,
+  "cabecera": {
+   "y": 40,
+   "h": 80,
+   "w": 1280
+  },
+  "filasDeMano": 0,
+  "ladoDeMesa": 136,
+  "mesasALaVista": 23,
+  "mesasTotal": 23,
+  "cabecerasDeZona": 0,
+  "marcoDeZona": [
+   null,
+   null,
+   null
+  ],
+  "tintaDeOcupada": {
+   "tinta": "rgb(255, 255, 255)",
+   "relleno": "rgb(233, 112, 88)"
+  },
+  "etiquetaListo": {
+   "y": 385,
+   "h": 30,
+   "w": 62,
+   "color": "rgb(255, 255, 255)",
+   "fondo": "rgb(143, 217, 168)",
+   "px": "15px"
+  }
+ },
+ "AP11_venta": {
+  "rejillaDeFamilias": {
+   "y": 56,
+   "bottom": 300,
+   "h": 244
+  },
+  "tira": null,
+  "filaDeCantidad": {
+   "y": 329,
+   "bottom": 385,
+   "h": 56
+  },
+  "primerProducto": {
+   "y": 399,
+   "bottom": 469,
+   "h": 70
+  },
+  "productosEnteros": 20,
+  "productosTotal": 20,
+  "pie": {
+   "y": 620,
+   "bottom": 800,
+   "h": 180
+  },
+  "total": {
+   "y": 635,
+   "bottom": 704,
+   "h": 69,
+   "px": "46px"
+  },
+  "enviar": {
+   "y": 716,
+   "bottom": 784,
+   "h": 68
+  },
+  "hoja": "no",
+  "barraDeMano": "no"
+ },
+ "D8_mapa": {
+  "innerWidth": 1442,
+  "innerHeight": 811,
+  "clientWidth": 1442,
+  "scrollWidth": 1442,
+  "desbordeHorizontal": false,
+  "altoDePagina": 851,
+  "cabecera": {
+   "y": 40,
+   "h": 80,
+   "w": 1442
+  },
+  "filasDeMano": 0,
+  "ladoDeMesa": 152,
+  "mesasALaVista": 23,
+  "mesasTotal": 23,
+  "cabecerasDeZona": 0,
+  "marcoDeZona": [
+   null,
+   null,
+   null
+  ],
+  "tintaDeOcupada": {
+   "tinta": "rgb(255, 255, 255)",
+   "relleno": "rgb(233, 112, 88)"
+  },
+  "etiquetaListo": {
+   "y": 401,
+   "h": 30,
+   "w": 62,
+   "color": "rgb(255, 255, 255)",
+   "fondo": "rgb(143, 217, 168)",
+   "px": "15px"
+  }
+ },
+ "D8_venta": {
+  "rejillaDeFamilias": {
+   "y": 56,
+   "bottom": 300,
+   "h": 244
+  },
+  "tira": null,
+  "filaDeCantidad": {
+   "y": 329,
+   "bottom": 385,
+   "h": 56
+  },
+  "primerProducto": {
+   "y": 399,
+   "bottom": 471,
+   "h": 72
+  },
+  "productosEnteros": 20,
+  "productosTotal": 20,
+  "pie": {
+   "y": 631,
+   "bottom": 811,
+   "h": 180
+  },
+  "total": {
+   "y": 646,
+   "bottom": 715,
+   "h": 69,
+   "px": "46px"
+  },
+  "enviar": {
+   "y": 727,
+   "bottom": 795,
+   "h": 68
+  },
+  "hoja": "no",
+  "barraDeMano": "no"
+ }
+}

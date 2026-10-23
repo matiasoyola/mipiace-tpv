@@ -1,0 +1,102 @@
+{
+ "n1_720_entrada": {
+  "ventana": {
+   "w": 360,
+   "h": 720
+  },
+  "buscador": {
+   "y": 112,
+   "bottom": 180,
+   "h": 68
+  },
+  "rejillaDeFamilias": {
+   "y": 194,
+   "bottom": 606,
+   "h": 412
+  },
+  "tira": null,
+  "filaDeCantidad": null,
+  "primerProducto": {
+   "y": 635,
+   "bottom": 713,
+   "h": 78,
+   "enElPunto": "BUTTON",
+   "texto": "Bebidas 1"
+  },
+  "productosEnteros": 2,
+  "productosTotal": 20
+ },
+ "n1_720_buscando_tost": {
+  "ventana": {
+   "w": 360,
+   "h": 720
+  },
+  "buscador": {
+   "y": 112,
+   "bottom": 180,
+   "h": 68
+  },
+  "rejillaDeFamilias": null,
+  "tira": null,
+  "filaDeCantidad": null,
+  "primerProducto": {
+   "y": 194,
+   "bottom": 314,
+   "h": 120,
+   "enElPunto": "EL",
+   "texto": "Tostada con mantequilla y me"
+  },
+  "productosEnteros": 8,
+  "productosTotal": 20
+ },
+ "n1_449_entrada": {
+  "ventana": {
+   "w": 360,
+   "h": 449
+  },
+  "buscador": {
+   "y": 112,
+   "bottom": 180,
+   "h": 68
+  },
+  "rejillaDeFamilias": {
+   "y": 194,
+   "bottom": 606,
+   "h": 412
+  },
+  "tira": null,
+  "filaDeCantidad": null,
+  "primerProducto": {
+   "y": 635,
+   "bottom": 755,
+   "h": 120,
+   "enElPunto": "FUERA DE PANTALLA",
+   "texto": "Bebidas 1"
+  },
+  "productosEnteros": 0,
+  "productosTotal": 20
+ },
+ "n1_449_buscando_tost": {
+  "ventana": {
+   "w": 360,
+   "h": 449
+  },
+  "buscador": {
+   "y": 112,
+   "bottom": 180,
+   "h": 68
+  },
+  "rejillaDeFamilias": null,
+  "tira": null,
+  "filaDeCantidad": null,
+  "primerProducto": {
+   "y": 194,
+   "bottom": 314,
+   "h": 120,
+   "enElPunto": "EL",
+   "texto": "Tostada con mantequilla y me"
+  },
+  "productosEnteros": 4,
+  "productosTotal": 20
+ }
+}

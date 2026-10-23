@@ -1,0 +1,660 @@
+{
+ "n1_todo_abierto": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "clientWidth": 360,
+  "scrollWidth": 360,
+  "altoDePagina": 720,
+  "desbordeHorizontal": false,
+  "bandaEnsayo": {
+   "x": 0,
+   "y": 0,
+   "w": 360,
+   "h": 40
+  },
+  "cabecera": {
+   "x": 0,
+   "y": 40,
+   "w": 360,
+   "h": 120
+  },
+  "zonas": [
+   {
+    "zona": "BARRA",
+    "plegada": "false",
+    "x": 16,
+    "y": 184,
+    "w": 328,
+    "h": 48,
+    "resumen": "",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "SALON",
+    "plegada": "false",
+    "x": 16,
+    "y": 574,
+    "w": 328,
+    "h": 48,
+    "resumen": "",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "TERRAZA",
+    "plegada": "false",
+    "x": 16,
+    "y": 940,
+    "w": 328,
+    "h": 48,
+    "resumen": "",
+    "enElPunto": "FUERA DE PANTALLA"
+   }
+  ],
+  "marcosConMarco": [
+   "false",
+   "false",
+   "false"
+  ],
+  "mesas": [
+   {
+    "nombre": "B1",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 264,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B2",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 264,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B3",
+    "estado": "busy",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 264,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B4",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 366,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B5",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 366,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B6",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 366,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B7",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 468,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B8",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 468,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "M1",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 630,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "M2",
+    "estado": "busy",
+    "tarde": "true",
+    "lista": "false",
+    "x": 118,
+    "y": 630,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "M3",
+    "estado": "por-recoger",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 630,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "M4",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 732,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "M5",
+    "estado": "busy",
+    "tarde": "false",
+    "lista": "true",
+    "x": 118,
+    "y": 732,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "M6",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 732,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "M7",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 834,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T1",
+    "estado": "por-recoger",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 996,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T2",
+    "estado": "busy",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 996,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T3",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 996,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T4",
+    "estado": "busy",
+    "tarde": "false",
+    "lista": "true",
+    "x": 16,
+    "y": 1098,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T5",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 1098,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T6",
+    "estado": "busy",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 1098,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T7",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 1200,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   },
+   {
+    "nombre": "T8",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 1200,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": false
+   }
+  ],
+  "mesasALaVista": 11,
+  "mesasTotal": 23,
+  "ladoDeMesa": 88,
+  "objetivosPorDebajoDe48": [],
+  "objetivoMasPequeno": {
+   "que": "zone-header",
+   "w": 328,
+   "h": 48,
+   "min": 48,
+   "dentro": true
+  },
+  "etiquetaListo": {
+   "x": 124,
+   "y": 724,
+   "w": 62,
+   "h": 48,
+   "color": "rgb(21, 23, 27)",
+   "fondo": "rgb(143, 217, 168)",
+   "px": "15px",
+   "enElPunto": "FUERA DE PANTALLA"
+  },
+  "coloresPorEstado": {
+   "free": {
+    "tinta": "rgb(21, 23, 27)",
+    "relleno": "rgb(233, 236, 239)"
+   },
+   "busy": {
+    "tinta": "rgb(21, 23, 27)",
+    "relleno": "rgb(233, 112, 88)"
+   },
+   "por-recoger": {
+    "tinta": "rgb(22, 32, 42)",
+    "relleno": "rgb(157, 180, 200)"
+   }
+  }
+ },
+ "n1_salon_y_terraza_plegadas": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "clientWidth": 360,
+  "scrollWidth": 360,
+  "altoDePagina": 720,
+  "desbordeHorizontal": false,
+  "bandaEnsayo": {
+   "x": 0,
+   "y": 0,
+   "w": 360,
+   "h": 40
+  },
+  "cabecera": {
+   "x": 0,
+   "y": 40,
+   "w": 360,
+   "h": 120
+  },
+  "zonas": [
+   {
+    "zona": "BARRA",
+    "plegada": "false",
+    "x": 16,
+    "y": 184,
+    "w": 328,
+    "h": 48,
+    "resumen": "",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "SALON",
+    "plegada": "true",
+    "x": 16,
+    "y": 574,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 listo · 2 ocupadas · 1 por recoger",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "TERRAZA",
+    "plegada": "true",
+    "x": 16,
+    "y": 640,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 listo · 3 ocupadas · 1 por recoger",
+    "enElPunto": "EL"
+   }
+  ],
+  "marcosConMarco": [
+   "false",
+   "false",
+   "false"
+  ],
+  "mesas": [
+   {
+    "nombre": "B1",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 264,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B2",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 264,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B3",
+    "estado": "busy",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 264,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B4",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 366,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B5",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 366,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B6",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 220,
+    "y": 366,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B7",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 16,
+    "y": 468,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   },
+   {
+    "nombre": "B8",
+    "estado": "free",
+    "tarde": "false",
+    "lista": "false",
+    "x": 118,
+    "y": 468,
+    "w": 88,
+    "h": 88,
+    "enteraEnPantalla": true
+   }
+  ],
+  "mesasALaVista": 8,
+  "mesasTotal": 8,
+  "ladoDeMesa": 88,
+  "objetivosPorDebajoDe48": [],
+  "objetivoMasPequeno": {
+   "que": "zone-header",
+   "w": 328,
+   "h": 48,
+   "min": 48,
+   "dentro": true
+  },
+  "etiquetaListo": null,
+  "coloresPorEstado": {
+   "free": {
+    "tinta": "rgb(21, 23, 27)",
+    "relleno": "rgb(233, 236, 239)"
+   },
+   "busy": {
+    "tinta": "rgb(21, 23, 27)",
+    "relleno": "rgb(233, 112, 88)"
+   }
+  }
+ },
+ "n1_tres_plegadas": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "clientWidth": 360,
+  "scrollWidth": 360,
+  "altoDePagina": 720,
+  "desbordeHorizontal": false,
+  "bandaEnsayo": {
+   "x": 0,
+   "y": 0,
+   "w": 360,
+   "h": 40
+  },
+  "cabecera": {
+   "x": 0,
+   "y": 40,
+   "w": 360,
+   "h": 120
+  },
+  "zonas": [
+   {
+    "zona": "BARRA",
+    "plegada": "true",
+    "x": 16,
+    "y": 184,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 ocupada",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "SALON",
+    "plegada": "true",
+    "x": 16,
+    "y": 250,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 listo · 2 ocupadas · 1 por recoger",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "TERRAZA",
+    "plegada": "true",
+    "x": 16,
+    "y": 316,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 listo · 3 ocupadas · 1 por recoger",
+    "enElPunto": "EL"
+   }
+  ],
+  "marcosConMarco": [
+   "false",
+   "false",
+   "false"
+  ],
+  "mesas": [],
+  "mesasALaVista": 0,
+  "mesasTotal": 0,
+  "ladoDeMesa": null,
+  "objetivosPorDebajoDe48": [],
+  "objetivoMasPequeno": {
+   "que": "zone-header",
+   "w": 328,
+   "h": 48,
+   "min": 48,
+   "dentro": true
+  },
+  "etiquetaListo": null,
+  "coloresPorEstado": {}
+ },
+ "n1_tras_recargar": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "clientWidth": 360,
+  "scrollWidth": 360,
+  "altoDePagina": 720,
+  "desbordeHorizontal": false,
+  "bandaEnsayo": {
+   "x": 0,
+   "y": 0,
+   "w": 360,
+   "h": 40
+  },
+  "cabecera": {
+   "x": 0,
+   "y": 40,
+   "w": 360,
+   "h": 120
+  },
+  "zonas": [
+   {
+    "zona": "BARRA",
+    "plegada": "true",
+    "x": 16,
+    "y": 184,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 ocupada",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "SALON",
+    "plegada": "true",
+    "x": 16,
+    "y": 250,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 listo · 2 ocupadas · 1 por recoger",
+    "enElPunto": "EL"
+   },
+   {
+    "zona": "TERRAZA",
+    "plegada": "true",
+    "x": 16,
+    "y": 316,
+    "w": 328,
+    "h": 48,
+    "resumen": "1 listo · 3 ocupadas · 1 por recoger",
+    "enElPunto": "EL"
+   }
+  ],
+  "marcosConMarco": [
+   "false",
+   "false",
+   "false"
+  ],
+  "mesas": [],
+  "mesasALaVista": 0,
+  "mesasTotal": 0,
+  "ladoDeMesa": null,
+  "objetivosPorDebajoDe48": [],
+  "objetivoMasPequeno": {
+   "que": "zone-header",
+   "w": 328,
+   "h": 48,
+   "min": 48,
+   "dentro": true
+  },
+  "etiquetaListo": null,
+  "coloresPorEstado": {}
+ }
+}

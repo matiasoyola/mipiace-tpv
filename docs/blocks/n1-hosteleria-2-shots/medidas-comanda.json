@@ -1,0 +1,1035 @@
+{
+ "venta_sin_hoja": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "hoja": null,
+  "hojaPantallaCompleta": null,
+  "capaDeDebajoAsoma": null,
+  "cerrar": null,
+  "avisos": {
+   "modo": null,
+   "bloque": null,
+   "contador": null,
+   "bandas": 0
+  },
+  "listaDeLineas": null,
+  "lineas": [],
+  "lineasVisiblesEnteras": 0,
+  "lineasTotal": 0,
+  "listaDesplaza": null,
+  "desbordeDeLaLista": null,
+  "objetivosPorDebajoDe48": [
+   {
+    "que": "Cerrar menú",
+    "w": 36,
+    "h": 36,
+    "min": 36,
+    "dentro": true,
+    "enElPunto": "FUERA DE PANTALLA"
+   }
+  ],
+  "objetivos": [
+   {
+    "que": "comanda-back",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Abrir menú",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Buscar producto o escanear códig",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Escanear con cámara",
+    "w": 63,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Tickets pasados",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Más acciones del ticket",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   }
+  ],
+  "filaDeCantidad": null
+ },
+ "comanda_abierta": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "hoja": {
+   "y": 0,
+   "bottom": 720,
+   "h": 720,
+   "w": 360
+  },
+  "hojaPantallaCompleta": "true",
+  "capaDeDebajoAsoma": {
+   "arriba": 0,
+   "abajo": 0
+  },
+  "cerrar": {
+   "y": 12,
+   "bottom": 68,
+   "h": 56,
+   "w": 56,
+   "min": 56,
+   "enElPunto": "EL"
+  },
+  "avisos": {
+   "modo": "contador",
+   "bloque": {
+    "y": 80,
+    "bottom": 144,
+    "h": 64,
+    "w": 360
+   },
+   "contador": {
+    "y": 88,
+    "bottom": 144,
+    "h": 56,
+    "w": 336,
+    "cuantos": "2",
+    "texto": "2T4 y 1 másVer",
+    "enElPunto": "EL"
+   },
+   "bandas": 0
+  },
+  "listaDeLineas": {
+   "y": 144,
+   "bottom": 522,
+   "h": 378,
+   "w": 360
+  },
+  "lineas": [
+   {
+    "y": 144,
+    "bottom": 179,
+    "h": 35,
+    "w": 336,
+    "texto": "SIN ENVIAR",
+    "entera": true
+   },
+   {
+    "y": 183,
+    "bottom": 284,
+    "h": 101,
+    "w": 336,
+    "texto": "Café Solo−1+1,30 €Espera",
+    "entera": true
+   },
+   {
+    "y": 288,
+    "bottom": 389,
+    "h": 101,
+    "w": 336,
+    "texto": "Café con leche−1+1,50 €Espera",
+    "entera": true
+   },
+   {
+    "y": 393,
+    "bottom": 495,
+    "h": 101,
+    "w": 336,
+    "texto": "Café Americano−1+1,60 €Espera",
+    "entera": true
+   },
+   {
+    "y": 499,
+    "bottom": 600,
+    "h": 101,
+    "w": 336,
+    "texto": "Tostada con tomate−1+2,40 €Espera",
+    "entera": false
+   },
+   {
+    "y": 604,
+    "bottom": 706,
+    "h": 101,
+    "w": 336,
+    "texto": "Croissant a la plancha−1+2,10 €Esp",
+    "entera": false
+   },
+   {
+    "y": 710,
+    "bottom": 811,
+    "h": 101,
+    "w": 336,
+    "texto": "Zumo de naranja natural−1+2,60 €Es",
+    "entera": false
+   }
+  ],
+  "lineasVisiblesEnteras": 4,
+  "lineasTotal": 7,
+  "listaDesplaza": true,
+  "desbordeDeLaLista": 293,
+  "objetivosPorDebajoDe48": [
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "acciones-cocina"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "comanda-cobrar"
+   }
+  ],
+  "objetivos": [
+   {
+    "que": "hoja-comanda-cerrar",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "listo-contador",
+    "w": 336,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "boton-urgente"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "acciones-cocina"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "acciones-cocina"
+   }
+  ],
+  "filaDeCantidad": null
+ },
+ "avisos_desplegados": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "hoja": {
+   "y": 0,
+   "bottom": 720,
+   "h": 720,
+   "w": 360
+  },
+  "hojaPantallaCompleta": "true",
+  "capaDeDebajoAsoma": {
+   "arriba": 0,
+   "abajo": 0
+  },
+  "cerrar": {
+   "y": 12,
+   "bottom": 68,
+   "h": 56,
+   "w": 56,
+   "min": 56,
+   "enElPunto": "listo-lista-cerrar"
+  },
+  "avisos": {
+   "modo": "contador",
+   "bloque": {
+    "y": 80,
+    "bottom": 144,
+    "h": 64,
+    "w": 360
+   },
+   "contador": {
+    "y": 88,
+    "bottom": 144,
+    "h": 56,
+    "w": 336,
+    "cuantos": "2",
+    "texto": "2T4 y 1 másVer",
+    "enElPunto": "SPAN"
+   },
+   "bandas": 2
+  },
+  "listaDeLineas": {
+   "y": 144,
+   "bottom": 522,
+   "h": 378,
+   "w": 360
+  },
+  "lineas": [
+   {
+    "y": 144,
+    "bottom": 179,
+    "h": 35,
+    "w": 336,
+    "texto": "SIN ENVIAR",
+    "entera": true
+   },
+   {
+    "y": 183,
+    "bottom": 284,
+    "h": 101,
+    "w": 336,
+    "texto": "Café Solo−1+1,30 €Espera",
+    "entera": true
+   },
+   {
+    "y": 288,
+    "bottom": 389,
+    "h": 101,
+    "w": 336,
+    "texto": "Café con leche−1+1,50 €Espera",
+    "entera": true
+   },
+   {
+    "y": 393,
+    "bottom": 495,
+    "h": 101,
+    "w": 336,
+    "texto": "Café Americano−1+1,60 €Espera",
+    "entera": true
+   },
+   {
+    "y": 499,
+    "bottom": 600,
+    "h": 101,
+    "w": 336,
+    "texto": "Tostada con tomate−1+2,40 €Espera",
+    "entera": false
+   },
+   {
+    "y": 604,
+    "bottom": 706,
+    "h": 101,
+    "w": 336,
+    "texto": "Croissant a la plancha−1+2,10 €Esp",
+    "entera": false
+   },
+   {
+    "y": 710,
+    "bottom": 811,
+    "h": 101,
+    "w": 336,
+    "texto": "Zumo de naranja natural−1+2,60 €Es",
+    "entera": false
+   }
+  ],
+  "lineasVisiblesEnteras": 4,
+  "lineasTotal": 7,
+  "listaDesplaza": true,
+  "desbordeDeLaLista": 293,
+  "objetivosPorDebajoDe48": [
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   }
+  ],
+  "objetivos": [
+   {
+    "que": "hoja-comanda-cerrar",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "listo-lista-cerrar"
+   },
+   {
+    "que": "listo-contador",
+    "w": 336,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "SPAN"
+   },
+   {
+    "que": "listo-lista-cerrar",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "listo-banda",
+    "w": 336,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "listo-banda",
+    "w": 336,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "stepper-menos",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "stepper-mas",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "chip-espera",
+    "w": 84,
+    "h": 40,
+    "min": 40,
+    "dentro": true,
+    "enElPunto": "DIV"
+   },
+   {
+    "que": "cart-line-name",
+    "w": 336,
+    "h": 34,
+    "min": 34,
+    "dentro": true,
+    "enElPunto": "DIV"
+   }
+  ],
+  "filaDeCantidad": null
+ },
+ "tras_atras": {
+  "innerWidth": 360,
+  "innerHeight": 720,
+  "hoja": null,
+  "hojaPantallaCompleta": null,
+  "capaDeDebajoAsoma": null,
+  "cerrar": null,
+  "avisos": {
+   "modo": null,
+   "bloque": null,
+   "contador": null,
+   "bandas": 0
+  },
+  "listaDeLineas": null,
+  "lineas": [],
+  "lineasVisiblesEnteras": 0,
+  "lineasTotal": 0,
+  "listaDesplaza": null,
+  "desbordeDeLaLista": null,
+  "objetivosPorDebajoDe48": [
+   {
+    "que": "Cerrar menú",
+    "w": 36,
+    "h": 36,
+    "min": 36,
+    "dentro": true,
+    "enElPunto": "FUERA DE PANTALLA"
+   }
+  ],
+  "objetivos": [
+   {
+    "que": "comanda-back",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Abrir menú",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Buscar producto o escanear códig",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Escanear con cámara",
+    "w": 63,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Tickets pasados",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "Más acciones del ticket",
+    "w": 56,
+    "h": 56,
+    "min": 56,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   },
+   {
+    "que": "family-button",
+    "w": 104,
+    "h": 76,
+    "min": 76,
+    "dentro": true,
+    "enElPunto": "EL"
+   }
+  ],
+  "filaDeCantidad": null,
+  "sigueEnLaVenta": true
+ }
+}
