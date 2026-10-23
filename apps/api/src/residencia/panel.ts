@@ -156,6 +156,18 @@ export interface Panel {
   indicadores: ValorDeIndicador[];
   /** El mes de los indicadores, «YYYY-MM». */
   mes: string;
+  /**
+   * primer-acceso (punto 4) · **el centro no tiene todavía ni un
+   * residente**, ni dentro ni dado de alta.
+   *
+   * Es lo que hace que el panel del primer día no sea cinco secciones
+   * vacías sino una tarjeta con «Nuevo ingreso». Cuenta TODOS los
+   * perfiles, también los de quien ya se fue: un centro del que se han
+   * ido los 48 residentes no está empezando, está vacío por otra razón, y
+   * enseñarle «empieza dando de alta a tus residentes» sería tratar un
+   * cierre como un alta.
+   */
+  centroVacio: boolean;
   generadoEn: string;
 }
 
@@ -168,15 +180,26 @@ export async function construirPanel(
   const hoy = utcToWallDate(ahora);
   const mes = hoy.slice(0, 7);
 
-  const [abierto, relevos, obligaciones, turno, porArreglar, indicadores] =
-    await Promise.all([
-      queHayAbierto(prisma, tenantId),
-      relevosDelPanel(prisma, tenantId, ahora),
-      obligacionesDelPanel(prisma, { tenantId, ahora }),
-      turnoEnCurso(prisma, tenantId, ahora),
-      loQueHayQueArreglar(prisma, tenantId, ahora),
-      indicadoresDelMes(prisma, tenantId, mes, ahora),
-    ]);
+  const [
+    abierto,
+    relevos,
+    obligaciones,
+    turno,
+    porArreglar,
+    indicadores,
+    cuantosResidentes,
+  ] = await Promise.all([
+    queHayAbierto(prisma, tenantId),
+    relevosDelPanel(prisma, tenantId, ahora),
+    obligacionesDelPanel(prisma, { tenantId, ahora }),
+    turnoEnCurso(prisma, tenantId, ahora),
+    loQueHayQueArreglar(prisma, tenantId, ahora),
+    indicadoresDelMes(prisma, tenantId, mes, ahora),
+    // Dentro del mismo `Promise.all`: un `count` sobre un índice de
+    // tenant no mueve el presupuesto de los 10 segundos, y fuera habría
+    // sido una ida más a la base en serie.
+    prisma.residentProfile.count({ where: { tenantId } }),
+  ]);
 
   return {
     abierto,
@@ -186,6 +209,7 @@ export async function construirPanel(
     porArreglar,
     indicadores,
     mes,
+    centroVacio: cuantosResidentes === 0,
     generadoEn: ahora.toISOString(),
   };
 }
