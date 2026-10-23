@@ -1400,6 +1400,21 @@ model Tenant {
   // de `cajaEnabled`: sólo el valor explícito CONTRARIO al default cambia
   // el comportamiento de nadie.
   fichajeEnabled                 Boolean           @default(false) @map("fichaje_enabled")
+  // hotfix-fichaje-medianoche · CUÁNTAS HORAS puede llevar abierto un tramo
+  // antes de ser una «salida olvidada». NO es el calendario: un turno que
+  // empieza a las 22:00 y termina a las 08:00 se cierra con un toque normal
+  // como cualquier otro, aunque pase de medianoche.
+  //
+  // 16 de serie — cubre el turno de noche de una residencia, una jornada
+  // partida larga y el cierre de un bar, y deja fuera «entré ayer a las 9 y
+  // no salí». Hermana de `agendaSlotMinutes` en forma (entero por tenant
+  // con default que no cambia a nadie) y de `fichajeEnabled` en gobierno:
+  // la mueve SÓLO el super-admin, porque no hay pantalla para esto y
+  // tocarla es afinar un caso raro, no un ajuste del negocio.
+  //
+  // El rango 8–24 vive además en un CHECK de la base
+  // (`tenants_fichaje_max_open_hours_check`).
+  fichajeMaxOpenHours            Int               @default(16) @map("fichaje_max_open_hours")
   // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
   // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
   // que responde a otra pregunta: ¿lo tiene conectado YA?
