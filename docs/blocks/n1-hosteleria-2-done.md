@@ -515,6 +515,46 @@ alta en vez de enseñar una lista vacía que parezca «no hay nada».
 
 ## 4 · Hallazgos FUERA de los ocho
 
+### 4.0 🔴🔴 **PRIORIDAD ALTA · bloque `kds-se-congela`**
+
+**Antes de que Sirope use el KDS en servicio.** Lo que se vio en el AP11 la noche
+del 23 al 24-10, todo junto:
+
+| síntoma | medida |
+|---|---|
+| no late | `lastSeenAt` clavado en **22:24:56Z** con una ventana de **90 s**; el servidor lo daba `alive: false` |
+| el reloj se para | marcaba **00:18 con las 00:34** en la pared, y tras descongelarse **00:31 con las 00:38** |
+| pinta al tocar | al soltar el depurador pintó **un fotograma** —y ahí apareció la comanda que «no había llegado»— y se volvió a parar |
+| miente en verde | su propia insignia decía **«En línea»** todo el rato, porque está congelada con el resto de la pantalla |
+| arrastra días | tarjetas de hace **cinco días**, una de **7179 min** (`00-ap11-kds.png`) |
+| versión | **1.27.0**, instalada el 18-10 |
+
+**Lo que lo arregla hoy:** reiniciar el aparato entero. Hecho el 24-10 a las
+00:55 y volvió del todo — reloj en hora, latido cada pocos segundos, y la
+siguiente comanda llegó y se sirvió de punta a punta (§9.2-septies).
+
+**Por qué es prioridad alta y no una curiosidad:** una pantalla de cocina
+congelada **no se distingue de una pantalla al día**. Dice «En línea», enseña
+tarjetas, y el camarero manda la comanda y se va tranquilo. Lo que falla no es
+ruidoso: es silencioso. En un servicio eso es una mesa sin servir, y nadie se
+entera hasta que el cliente pregunta.
+
+**Lo que el bloque tendría que mirar:**
+
+- por qué el renderer se queda suspendido (familia del «process is bad» del N1:
+  el WebView es un proceso aparte y Android lo congela sin avisar);
+- que el KDS **se note muerto**: si no ha latido en dos ventanas, la insignia
+  tiene que dejar de decir «En línea» **en su propia pantalla**, no sólo en el
+  servidor — hoy el único que sabe que está muerta es quien consulta la API;
+- y que el TPV avise al camarero **antes** de enviar, no después.
+
+Y una cosa que esta pasada deja medida y conviene no perder: la comanda tardó
+**menos de 51 s** en aparecer con la pantalla sana (enviada 22:58:02Z, en la
+tarjeta «0 min»), contra los 7 s que Matías midió a las 12:36. Las dos son
+normales; lo que no es normal es que no aparezca nunca.
+
+---
+
 ### 4.1 🔴 `BILLING` no existe · la mesa «pide la cuenta» es inalcanzable
 
 Y arrastra el botón «Cobrar X €» de la tarjeta, que es la **derivada principal**
@@ -882,7 +922,7 @@ Hecha ya con el N1 en **puerto fijo 5555** y «Pantalla siempre encendida».
 | mesa POR RECOGER | lado 88, tinta `rgb(22,32,42)` sobre `rgb(157,180,200)`, nombre 20 px y **«Por recoger» a 15 px**, SIN los minutos | 🟢 (7) |
 | hoja de opciones | **x=0, ancho 360 = todo el ancho**, título 19, cuerpo 15, **tres botones de 56 px**, orden **«Dejar libre» → «Abrir cuenta nueva» → «Volver»**; el atrás la cierra **sin decidir** | 🟢 (8) |
 | envío a cocina | **la comanda SÍ llega**: «T2 · 2ª COMANDA» con los cinco cafés en el AP11 | 🟢 ver §9.2-sexies |
-| hallazgo 9 en el hierro | **no se pudo probar**: hace falta un aviso «listo», y para eso la comanda tiene que llegar | ⬜ |
+| hallazgo 9 en el hierro | **probado de punta a punta** tras reiniciar el AP11 | 🟢 el flujo · 🔴 el detalle, ver §9.2-septies |
 
 Capturas en `docs/qa/2026-10-23-n1-hosteleria-2/`.
 
@@ -984,6 +1024,55 @@ dentro y el literal lo duplicaba. Sólo se ve con la cadena larga —el minuto
 siguiente a cobrar—, que es justamente el caso más frecuente de esa hoja y el
 que ningún banco miraba. Arreglado, con su sabotaje.
 
+### 9.2-septies · El hallazgo 9 en el aparato, de punta a punta (24-10, 00:55–01:05)
+
+Con el AP11 **reiniciado entero** y su reloj en hora (00:55 en la pantalla,
+00:55:01 en el Mac), el recorrido completo, sin CDP en el AP11 —sólo `screencap`
+y `input tap`, que es la lección de §9.2-sexies—:
+
+| paso | medido |
+|---|---|
+| mesa B3, dos tostadas, enviar | 22:58:02Z, **sin aviso de «Cocina no recibe»** |
+| llega al AP11 | tarjeta **«COCINA · B3 · 0 min»** con las dos líneas, en **menos de 51 s** |
+| cocina marca «Lista» | `input tap` en (218, 541) → pasa a **«LISTAS · 1»**, «B3 · esperando · 0 min» |
+| el aviso llega al N1 | contador en modo **`contador`**, bloque de **64 px**, objetivo de **56**, «**1** · B3 · listo para servir · **Ver**» |
+| el contador abre la lista | una fila por mesa, 56 px, y dice **«Ver»** — ya no «Servido» |
+| la fila abre **la hoja** | **`pantalla-completa=true`**, 0…720, 360 de ancho |
+| «Hecho» | **84 px de alto y 24 px de letra** — el objetivo más grande de la pantalla |
+| cerrar | 56 px · **ningún objetivo de la hoja por debajo de 48** |
+| **el atrás la cierra SIN servir** | la hoja se va y **el aviso sigue**: `avisos: "1"` |
+| «Hecho» sirve | la hoja se cierra, el contador desaparece… |
+| …y llega a cocina | la columna «LISTAS» del AP11 **se vacía** (52.716 bytes contra 58.990) |
+
+Capturas `38-ap11-b3-recibida` … `47-ap11-servida`.
+
+#### 🔴 Pero el detalle no se ve, y es una dependencia dura
+
+**`lineas: []`.** La hoja sale, se cierra con el atrás y sirve con el «Hecho»
+—el FLUJO está— pero **no enseña qué hay que recoger**, que es el corazón del
+hallazgo. Y no es un fallo del front: es que la API de producción no manda las
+líneas. Medido pidiéndoselas:
+
+```
+GET https://api.mipiacetpv.com/kitchen/listas
+claves que manda: orderId, ticketId, tableId, tableName, section, number, readyAt
+"lines" in respuesta → false
+```
+
+El front degrada como se diseñó —«Cocina no ha mandado el detalle de esta
+comanda. Lo que está listo es lo de B3.»— en vez de enseñar una lista vacía que
+parezca «no hay nada». Pero hay que decirlo claro:
+
+> **La APK sola no basta para el hallazgo 9.** Sin desplegar el cambio de
+> `/kitchen/listas` (§2.10), la hoja es un toque de más a cambio de ninguna
+> información nueva — peor que el «hecho» directo de antes. **Las dos cosas van
+> juntas: la 1.29.1 y la API.**
+
+Es, con diferencia, lo primero que hay que mirar al cerrar el bloque: el PR trae
+el cambio de API dentro, así que basta con desplegarlo al mergear. Pero si
+alguien instalara la APK sin desplegar, el hallazgo 9 sale peor de lo que
+estaba.
+
 ### 9.3 El guion, con el servicio encima
 
 Mecánico en cuanto haya adb. El orden importa: **el KDS se comprueba ANTES de
@@ -1071,7 +1160,12 @@ Lo que **esta sesión** ha dejado en Sirope-ensayo:
 | **Mesa T2 abierta · 11,40 € · 1 línea** | TERRAZA | 23-10 **19:26** | un toque que aterrizó en la mesa al moverse la cabecera de zona bajo el dedo. Matías estaba usando el N1 a la vez, así que **no se puede afirmar de quién fue el toque** |
 | **Ticket cobrado · 19,40 € · 6 líneas** | T2 | 24-10 **~00:20** | el cobro del guion, con esa misma T2 y cinco cafés añadidos encima |
 | **Mesa T2 · POR RECOGER** | TERRAZA | 24-10 **~00:20** | el estado en el que el cobro deja la mesa. Se usó para probar el hallazgo 8 y **no** se tocó «Dejar libre», para dejarlo visible |
-| **Una comanda de cocina enviada** | T2 | 24-10 **~00:10** | salió del N1 y no llegó al AP11; queda en la base sin recibir |
+| **Una comanda de cocina enviada** | T2 | 24-10 **~00:10** | la de la 2ª revisión; llegó al AP11 (lo tapó la pantalla congelada) |
+| **Mesa B3 abierta · 7,00 € · 2 líneas** | BARRA | 24-10 **~00:57** | la mesa de la prueba del hallazgo 9. **Se deja abierta a propósito**: es la que tiene la comanda ya servida detrás |
+| **Una comanda de B3, enviada y SERVIDA** | B3 | 24-10 00:58 → 01:0x | el recorrido completo: enviada, marcada «Lista» en el AP11 y servida desde el N1 con el «Hecho» |
+
+Y la **T2 ya figura LIBRE**: alguien le dio a «Dejar libre» entre medias, así que
+de ella no queda nada que recoger.
 
 **Un ticket cobrado**, el de 19,40 €. Nada subió a Holded ni generó registro
 fiscal: el tenant está en ensayo y el propio TPV lo rotula («ENSAYO · estos
