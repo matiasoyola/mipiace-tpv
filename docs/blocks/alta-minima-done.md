@@ -560,6 +560,9 @@ px de alto) que vienen de residencia-5 y no son de este bloque, más los `input[
 
 ## 16 · Estado de la rama
 
-- Rama `alta-minima`, desde `origin/master`.
-- **Pusheada** y con **PR contra `master`**. Ni merges ni despliegues.
-- CI: `ci`, `smoke` y `e2e`.
+- Rama `alta-minima`, desde `origin/master`. **Pusheada.**
+- **PR contra `master`: [#43](https://github.com/matiasoyola/mipiace-tpv/pull/43).** Ni merges ni
+  despliegues.
+- Seis commits: el paquete puro, la migración, la API y el admin, y los dos arreglos que salió del
+  bucle visual más el done.
+- CI: `ci` y `smoke`.
