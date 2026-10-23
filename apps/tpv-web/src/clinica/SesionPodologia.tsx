@@ -47,7 +47,7 @@
 // «la que tiene compilada» podría ofrecer un acto que el servidor va a
 // tirar.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
 import {
@@ -354,6 +354,37 @@ function SesionPodologiaDentro(props: {
     useState<ExploracionEnPantalla | null>(null);
   const [avisoExploracion, setAvisoExploracion] = useState<string | null>(null);
 
+  /**
+   * clinica-9 (1) · LA SEMILLA SE SIEMBRA UNA VEZ, Y LA RECARGA NO LA
+   * VUELVE A SEMBRAR.
+   *
+   * Lo encontró la pasada en hierro del 24-10: una sesión con «General» y
+   * «Pie de riesgo» marcados, las cuatro comprobaciones del pie rellenas
+   * («riesgo muy bajo»), y la hoja de firmar diciendo «Tipo de visita:
+   * General». La exploración del pie de una paciente diabética no llegó a
+   * la historia.
+   *
+   * El camino era éste: para hacer una foto hay que firmar el
+   * consentimiento de fotos, firmarlo llama a `onFirmado`, `onFirmado`
+   * llama a `cargar()` — y `cargar()` volvía a SEMBRAR los tipos con los
+   * de los servicios de la cita. Lo que la sanitaria había marcado se
+   * perdía sin decir nada, y con el tipo se iba su bloque entero (los
+   * bloques se derivan de `tipos`).
+   *
+   * No es «un tipo sin servicio en su categoría se descarta al cerrar»,
+   * que era la sospecha: el servidor guarda un tipo marcado cobre o no
+   * (regla 11 de clinica-5, fijada en `normalizarSesionV2`). Lo que se
+   * perdía era anterior, y en la pantalla.
+   *
+   * Así que la semilla se siembra la PRIMERA vez y sólo esa. Una recarga
+   * refresca lo que es del servidor —la puerta, los consentimientos, la
+   * última exploración— y no toca nada de lo que hay a medio escribir. Es
+   * la misma regla que el resto del estado de esta pantalla ya cumplía
+   * (las marcas, el dolor y los consejos sobrevivían a la recarga; los
+   * tipos no).
+   */
+  const sembrado = useRef(false);
+
   const cargar = useCallback(async () => {
     setError(null);
     try {
@@ -367,13 +398,19 @@ function SesionPodologiaDentro(props: {
       // clinica-6 · salvo que se venga de la historia viva, que manda los
       // suyos: ahí la podóloga acaba de decir a qué viene hoy, y eso pesa
       // más que lo que diga el catálogo de los servicios de la cita.
-      setTipos(
-        (props.tiposIniciales && props.tiposIniciales.length > 0
-          ? props.tiposIniciales
-          : v.tiposSugeridos
-        ).filter((t) => TIPOS_DE_VISITA.includes(t)),
-      );
-      setExploracion(v.exploracion.departeDe);
+      if (!sembrado.current) {
+        sembrado.current = true;
+        setTipos(
+          (props.tiposIniciales && props.tiposIniciales.length > 0
+            ? props.tiposIniciales
+            : v.tiposSugeridos
+          ).filter((t) => TIPOS_DE_VISITA.includes(t)),
+        );
+        // Y la exploración por lo mismo: parte de la última, pero si la
+        // sanitaria lleva media exploración tecleada, una recarga no se
+        // la puede llevar.
+        setExploracion(v.exploracion.departeDe);
+      }
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "No se pudo abrir la sesión.",
@@ -1375,9 +1412,17 @@ function HojaDeConfirmarCierre(props: {
                     const lesion = props.lesiones.find(
                       (l) => l.id === m.lesion,
                     );
+                    // clinica-9 (11) · CON SU GRAVEDAD. La hoja es lo
+                    // último que se lee antes de firmar, y «callo» y
+                    // «callo severo» no son la misma anotación: la lista
+                    // de la tarjeta ya la decía y aquí se perdía, justo
+                    // en el sitio donde se repasa.
+                    const g = m.gravedad
+                      ? ` (${NOMBRE_DE_GRAVEDAD[m.gravedad].toLowerCase()})`
+                      : "";
                     return `${nombreDeZonaConMapa(clave, props.mapa)}: ${
                       lesion?.label ?? m.lesion
-                    }`;
+                    }${g}`;
                   })
                   .join(" · ")}
           </FilaDelResumen>

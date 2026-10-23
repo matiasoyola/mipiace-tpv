@@ -1,5 +1,5 @@
 sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min,tipo_visita,primera_valoracion,tratamiento_sesion,nivel_quiropodia
-POD-001,Consulta diagnóstico,20.00,0,consulta,SERVICE,E1,20,GENERAL,si,no,
+POD-001,Consulta diagnóstico,20.00,0,consulta,SERVICE,E1,20,GENERAL,si,si,
 POD-002,Quiropodia básica,25.00,0,quiropodia,SERVICE,E1,30,QUIROPODIA,no,si,1
 POD-003,Quiropodia completa,26.00,0,quiropodia,SERVICE,E1,30,QUIROPODIA,no,si,2
 POD-004,Quiropodia extra,27.00,0,quiropodia,SERVICE,E1,30,QUIROPODIA,no,si,3

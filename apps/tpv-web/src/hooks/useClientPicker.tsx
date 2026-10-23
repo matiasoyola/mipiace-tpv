@@ -26,6 +26,7 @@ import {
   loadClientsFromCache,
   refreshClients,
   searchClientsLocal,
+  clientesParecidosA,
   clientFullName,
   type ClientRow,
 } from "../lib/clients.js";
@@ -274,6 +275,19 @@ function ClientPickerSheet({
             // clinica-8 (fase B, 17) · lo tecleado en el buscador entra
             // en el formulario. Ver `semillaDesdeLaBusqueda`.
             inicial={semillaDesdeLaBusqueda(query)}
+            // clinica-9 (3) · y ANTES de crear, a quién se parece. El
+            // caché local ya está en memoria: no cuesta una llamada.
+            buscarParecidos={(d) =>
+              clientesParecidosA(all, d).map((c) => ({
+                id: c.id,
+                nombre: clientFullName(c),
+                telefono: c.phone,
+              }))
+            }
+            onElegirParecido={(id) => {
+              const c = all.find((x) => x.id === id);
+              if (c) onSelect(c);
+            }}
             onSaved={(c) => onSelect(c)}
             onCancel={() => setShowCreate(false)}
           />
