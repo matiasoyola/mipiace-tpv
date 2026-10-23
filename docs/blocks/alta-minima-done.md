@@ -82,7 +82,7 @@ plan, con DNI cifrado presente, el familiar sin teléfono y el centro entero sin
 
 ## 2 · La migración · sólo nulabilidad, y un CHECK que se habría apagado solo
 
-`packages/db/prisma/migrations/20261023000000_alta_minima/`. Tres `DROP NOT NULL` y nada más: ni una
+`packages/db/prisma/migrations/20261023010000_alta_minima/`. Tres `DROP NOT NULL` y nada más: ni una
 tabla, ni un `DELETE`, ni un `UPDATE`. Las filas que ya estaban se quedan exactamente como estaban.
 
 **Y lo que se encontró de paso.** `resident_profiles_alta_coherente` llevaba desde residencia-1:

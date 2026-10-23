@@ -11,3 +11,10 @@ export {
   normalizeEmail,
   validEmailOrNull,
 } from "./email.js";
+export {
+  contrasenaValida,
+  CONTRASENA_MIN,
+  MENSAJE_CONTRASENA_CORTA,
+  requisitosDeContrasena,
+} from "./contrasena.js";
+export type { RequisitoDeContrasena } from "./contrasena.js";

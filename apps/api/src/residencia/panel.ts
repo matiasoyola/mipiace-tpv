@@ -194,6 +194,18 @@ export interface Panel {
   indicadores: ValorDeIndicador[];
   /** El mes de los indicadores, «YYYY-MM». */
   mes: string;
+  /**
+   * primer-acceso (punto 4) · **el centro no tiene todavía ni un
+   * residente**, ni dentro ni dado de alta.
+   *
+   * Es lo que hace que el panel del primer día no sea cinco secciones
+   * vacías sino una tarjeta con «Nuevo ingreso». Cuenta TODOS los
+   * perfiles, también los de quien ya se fue: un centro del que se han
+   * ido los 48 residentes no está empezando, está vacío por otra razón, y
+   * enseñarle «empieza dando de alta a tus residentes» sería tratar un
+   * cierre como un alta.
+   */
+  centroVacio: boolean;
   generadoEn: string;
 }
 
@@ -214,6 +226,7 @@ export async function construirPanel(
     porArreglar,
     fichasIncompletas,
     indicadores,
+    cuantosResidentes,
   ] = await Promise.all([
     queHayAbierto(prisma, tenantId),
     relevosDelPanel(prisma, tenantId, ahora),
@@ -226,6 +239,17 @@ export async function construirPanel(
     // navegador, que es una ida más en serie.
     lasFichasIncompletas(prisma, tenantId),
     indicadoresDelMes(prisma, tenantId, mes, ahora),
+    // primer-acceso · dentro del mismo `Promise.all`: un `count` sobre un
+    // índice de tenant no mueve el presupuesto de los 10 segundos, y
+    // fuera habría sido una ida más a la base en serie.
+    //
+    // Cuenta TODOS los perfiles, también los de quien se fue, y eso lo
+    // separa de `lasFichasIncompletas` —que mira sólo a los que viven
+    // aquí—: las dos preguntas son distintas. «¿Está el centro vacío?»
+    // se contesta con el histórico (un centro del que se han ido los 48
+    // no está empezando); «¿cuántas fichas hay a medias?» sólo con los
+    // vivos, porque la de quien se fue no se va a completar nunca.
+    prisma.residentProfile.count({ where: { tenantId } }),
   ]);
 
   return {
@@ -237,6 +261,7 @@ export async function construirPanel(
     fichasIncompletas,
     indicadores,
     mes,
+    centroVacio: cuantosResidentes === 0,
     generadoEn: ahora.toISOString(),
   };
 }

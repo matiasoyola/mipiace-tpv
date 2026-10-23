@@ -58,6 +58,15 @@
 --       AND ("discharge_date" IS NULL OR "discharge_date" >= "admission_date")
 --     );
 --
+-- ── EL ORDEN RESPECTO A primer-acceso ────────────────────────────────
+--
+-- `20261023010000` y no `…000000`, que es con el que nació: el mismo día
+-- entró `20261023000000_primer_acceso_invitacion` por master, y dos
+-- carpetas con el mismo sello dejan el orden a merced del alfabeto. Las
+-- dos migraciones son independientes —ésta toca `resident_profiles`, la
+-- otra las invitaciones— así que el orden da igual para el motor; lo que
+-- no da igual es que el nombre diga una cosa y la historia otra.
+--
 -- ── ADITIVA ──────────────────────────────────────────────────────────
 --
 -- Sólo nulabilidad. Ni un `DROP TABLE`, ni un `DELETE`, ni un `TRUNCATE`,

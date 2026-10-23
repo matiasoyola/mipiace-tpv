@@ -66,7 +66,7 @@ export function TurnosPage() {
     }
   }
 
-  if (!turnos) return <CenteredLoader label="Cargando turnos…" />;
+  if (!turnos) return <CenteredLoader label="Cargando turnos…" error={error} />;
 
   const deAhora = turnos.find((t) => t.code === ahora) ?? null;
 

@@ -75,7 +75,7 @@ export function EdificioPage() {
     });
   }
 
-  if (!plantas) return <CenteredLoader label="Cargando el edificio…" />;
+  if (!plantas) return <CenteredLoader label="Cargando el edificio…" error={error} />;
 
   const camas = plantas.flatMap((p) => p.habitaciones.flatMap((h) => h.camas));
   const ocupadas = camas.filter((c) => c.ocupa != null).length;

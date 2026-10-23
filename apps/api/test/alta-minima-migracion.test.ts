@@ -36,7 +36,7 @@ const REPO_ROOT = path.resolve(
 );
 const DIR = path.join(REPO_ROOT, "packages/db/prisma/migrations");
 const SQL = readFileSync(
-  path.join(DIR, "20261023000000_alta_minima/migration.sql"),
+  path.join(DIR, "20261023010000_alta_minima/migration.sql"),
   "utf8",
 );
 const CIFRADO = readFileSync(

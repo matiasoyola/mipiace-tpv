@@ -33,6 +33,7 @@
 // pantalla dice que el módulo no está, que es la verdad.
 
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   Check,
@@ -80,7 +81,24 @@ const fecha = (iso: string) =>
     minute: "2-digit",
   });
 
+// primer-acceso (punto 3) · LAS TRES LÍNEAS EN LENGUAJE LLANO.
+//
+// Encima del texto legal, y sólo cuando falta aceptarlo. La directora de
+// una residencia no tiene por qué saber qué es un contrato de encargado:
+// lo que necesita leer, en el orden en que se lo preguntaría, es qué es,
+// qué se compromete Mi Piace a hacer y que esto no desaparece — se puede
+// descargar cuando quiera.
+//
+// Están aquí arriba y no dentro del JSX porque son el contenido de la
+// pantalla, no su maquetación: cambiarlas es una decisión de producto.
+const LAS_TRES_LINEAS = [
+  "Es el permiso para que Mi Piace guarde en su programa la información de salud de las personas que atiendes. Lo exige la ley (art. 28 del RGPD) y lo acepta la propietaria del centro.",
+  "Mi Piace se compromete a guardarla cifrada, a no mirarla, a no usarla para nada más y a devolvértela y destruirla cuando dejes de usar el programa.",
+  "Puedes descargar el contrato en PDF cuando quieras, también más adelante: queda guardado con la fecha y el nombre de quien lo aceptó.",
+];
+
 export function ContratoTratamientoPage() {
+  const navigate = useNavigate();
   const [vista, setVista] = useState<Vista | null>(null);
   const [sinModulo, setSinModulo] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +136,16 @@ export function ContratoTratamientoPage() {
     try {
       await api("/clinica/contrato/aceptar", { method: "POST", body: {} });
       setLeido(false);
-      cargar();
+      // primer-acceso · **sigue sola a la pantalla de inicio.**
+      //
+      // Aceptar es lo que hace que la clínica funcione, así que lo
+      // siguiente es trabajar — no quedarse mirando la pantalla del
+      // contrato con un «vigente» en verde. `/` decide el destino según
+      // los módulos, que es donde esa decisión vive.
+      //
+      // La aceptación queda escrita y la pantalla sigue en el menú: quien
+      // quiera el PDF o revocar vuelve cuando quiera.
+      navigate("/", { replace: true });
     } catch (err) {
       setAccion(
         err instanceof ApiError && err.message
@@ -267,6 +294,19 @@ export function ContratoTratamientoPage() {
         {(sinAceptar || vista.estado.estado === "SOLO_LECTURA") &&
           vista.puedeAceptar && (
             <section className="rounded-xl border border-slate-200 bg-white p-4">
+              {/* primer-acceso · las tres líneas, PRIMERO. El texto legal
+                  completo está debajo y plegado: quien quiera leerlo lo
+                  abre, y quien no, ya ha leído lo que importa. */}
+              <ul className="mb-4 space-y-2.5" data-test="contrato-en-llano">
+                {LAS_TRES_LINEAS.map((linea) => (
+                  <li
+                    key={linea}
+                    className="text-[13.5px] leading-relaxed text-mipiace-ink"
+                  >
+                    {linea}
+                  </li>
+                ))}
+              </ul>
               <h2 className="text-[14px] font-semibold text-mipiace-ink">
                 {vista.titulo}
               </h2>
@@ -289,25 +329,35 @@ export function ContratoTratamientoPage() {
                 </div>
               )}
 
-              <div className="mt-4 max-h-[420px] space-y-4 overflow-y-auto pr-1">
-                {vista.apartados.map((a) => (
-                  <div key={a.encabezado}>
-                    <h3 className="text-[13px] font-semibold leading-snug text-mipiace-ink">
-                      {a.encabezado}
-                    </h3>
-                    <div className="mt-1.5 space-y-2">
-                      {a.parrafos.map((p, i) => (
-                        <p
-                          key={i}
-                          className="text-[13px] leading-relaxed text-slate-700"
-                        >
-                          {p}
-                        </p>
-                      ))}
+              {/* Plegado con `<details>` y no con un `useState`: el
+                  navegador ya sabe hacerlo, el teclado y el lector de
+                  pantalla lo entienden sin atributos añadidos, y el texto
+                  está EN el documento (así que Ctrl+F lo encuentra y la
+                  impresión lo saca). */}
+              <details className="mt-4 rounded-lg border border-slate-200">
+                <summary className="cursor-pointer px-3.5 py-2.5 text-[13.5px] font-medium text-mipiace-ink">
+                  Leer el contrato completo
+                </summary>
+                <div className="max-h-[420px] space-y-4 overflow-y-auto px-3.5 pb-3.5 pr-1">
+                  {vista.apartados.map((a) => (
+                    <div key={a.encabezado}>
+                      <h3 className="text-[13px] font-semibold leading-snug text-mipiace-ink">
+                        {a.encabezado}
+                      </h3>
+                      <div className="mt-1.5 space-y-2">
+                        {a.parrafos.map((p, i) => (
+                          <p
+                            key={i}
+                            className="text-[13px] leading-relaxed text-slate-700"
+                          >
+                            {p}
+                          </p>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </details>
 
               <p className="mt-3 break-all text-[11.5px] text-slate-400">
                 Huella del texto (SHA-256): {vista.huellaVigente}
@@ -331,7 +381,7 @@ export function ContratoTratamientoPage() {
                 className="mt-4 inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-mipiace-ink px-4 text-[13.5px] font-semibold text-white disabled:opacity-40"
               >
                 <Check className="h-4 w-4" aria-hidden />
-                Aceptar y activar la historia clínica
+                Acepto
               </button>
 
               <p className="mt-2.5 text-[12.5px] leading-relaxed text-slate-500">
@@ -341,13 +391,26 @@ export function ContratoTratamientoPage() {
             </section>
           )}
 
-        {!vista.puedeAceptar && sinAceptar && (
-          <div className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[13.5px] leading-relaxed text-slate-700">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-            La dueña tiene que aceptar el contrato de tratamiento de datos
-            antes de usar la historia clínica.
-          </div>
-        )}
+        {/* primer-acceso · quien entra y NO es la propietaria aterriza
+            aquí por la redirección de `/`, así que la frase tiene que
+            servir de pantalla de llegada y no sólo de aviso al pie: dice
+            qué falta, quién lo hace y qué puede hacer él mientras. Sin
+            botones que no puede usar. */}
+        {!vista.puedeAceptar &&
+          (sinAceptar || vista.estado.estado === "SOLO_LECTURA") && (
+            <div
+              data-test="contrato-no-es-tuyo"
+              className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[13.5px] leading-relaxed text-slate-700"
+            >
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <span>
+                Antes de empezar, la propietaria del centro tiene que aceptar
+                el contrato de datos. Hasta entonces la historia clínica no se
+                puede usar; lo que sí puedes abrir está en la barra de la
+                izquierda.
+              </span>
+            </div>
+          )}
 
         {/* ── El historial ───────────────────────────────────────── */}
         <section>

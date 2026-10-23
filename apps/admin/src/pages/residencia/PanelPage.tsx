@@ -30,6 +30,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Plus } from "lucide-react";
 
 import { AdminShell } from "../../AdminShell.js";
 import { api, ApiError } from "../../api.js";
@@ -92,6 +93,51 @@ export function PanelPage() {
       </AdminShell>
     ) : (
       <CenteredLoader label="Cargando el panel…" />
+    );
+  }
+
+  // primer-acceso (punto 4) · **EL PANEL DEL PRIMER DÍA.**
+  //
+  // Un centro sin un solo residente no tiene nada abierto, ni relevo, ni
+  // turno, ni indicadores: el panel de siempre son cinco secciones vacías
+  // encabezadas por «Todavía no hay ningún parte de relevo», que es
+  // verdad y no dice qué hacer.
+  //
+  // Lo que sustituye a eso es UNA tarjeta con el primer trabajo de
+  // verdad. Y una sola: ni una lista de diez tareas de configuración —el
+  // edificio, los turnos, los controles, las plantillas— porque ninguna
+  // de esas diez es lo que la directora vino a hacer, y la lista las
+  // pondría todas al mismo nivel que la que importa.
+  //
+  // Va DESPUÉS del `if (!panel)` para que el mensaje de «esto es de
+  // dirección» siga llegando antes: un encargado sin rol directivo no
+  // tiene que ver una invitación a dar de alta residentes.
+  if (panel.centroVacio === true) {
+    return (
+      <AdminShell title="Panel de dirección">
+        <div
+          data-test="panel-centro-vacio"
+          className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-7"
+        >
+          <h2 className="text-[17px] font-semibold text-mipiace-ink">
+            Empieza dando de alta a tus residentes
+          </h2>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-slate-600">
+            En cuanto haya alguien en el centro, este panel te enseña qué hay
+            abierto hoy, el último relevo, lo que toca y los indicadores del
+            mes.
+          </p>
+          {/* Lleva al formulario ABIERTO (`?alta=1`), no a la lista: un
+              toque menos, y la lista que vería sería la vacía. */}
+          <Link
+            to="/admin/residencia/residentes?alta=1"
+            className="mt-5 inline-flex min-h-[48px] items-center gap-2 rounded-2xl bg-mipiace-coral px-5 text-[14.5px] font-medium text-white hover:bg-mipiace-coral-dark"
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+            Nuevo ingreso
+          </Link>
+        </div>
+      </AdminShell>
     );
   }
 

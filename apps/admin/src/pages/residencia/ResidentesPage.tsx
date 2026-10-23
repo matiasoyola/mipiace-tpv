@@ -57,8 +57,13 @@ import {
   X,
 } from "lucide-react";
 // residencia-2 · el enlace al plan de cuidados, desde la ficha.
-// alta-minima · `useSearchParams` para `?completar=…`, que es por donde
-// entra el botón «Completar» del panel.
+// primer-acceso · `?alta=1`, que es por donde entra «Nuevo ingreso» de la
+// tarjeta del centro vacío.
+// alta-minima · y `?completar=…`, por donde entra «Completar» de la
+// tarjeta de fichas incompletas. **Un solo par de `searchParams` para los
+// dos**: con dos llamadas a `useSearchParams` cada `setSearchParams`
+// escribe sobre la instantánea que leyó, y el segundo borra el parámetro
+// del primero.
 import { Link, useSearchParams } from "react-router-dom";
 
 import { AdminShell } from "../../AdminShell.js";
@@ -99,12 +104,19 @@ const NIVELES: NivelDependencia[] = ["VALIDO", "SEMIASISTIDO", "DEPENDIENTE"];
 const PLAZAS: TipoDePlaza[] = ["PRIVADA", "CONCERTADA", "TEMPORAL"];
 
 export function ResidentesPage() {
+  // primer-acceso (punto 4) · `?alta=1` abre el formulario directo.
+  //
+  // Es lo que hace que la tarjeta del panel vacío sea UN toque: «Nuevo
+  // ingreso» en el panel y el formulario encima, sin pasar por una lista
+  // que está vacía. El parámetro se consume al montar y se quita de la
+  // URL, para que recargar o volver atrás no reabra el modal.
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filas, setFilas] = useState<ResidenteFila[] | null>(null);
   const [alcance, setAlcance] = useState<"CENTRO" | "ZONA">("CENTRO");
   const [resumen, setResumen] = useState<ResumenDeFichas | null>(null);
   const [conAltas, setConAltas] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [alta, setAlta] = useState(false);
+  const [alta, setAlta] = useState(searchParams.get("alta") === "1");
   const [varios, setVarios] = useState(false);
   const [ficha, setFicha] = useState<ResidenteFicha | null>(null);
   const [moviendo, setMoviendo] = useState<ResidenteFila | null>(null);
@@ -115,9 +127,6 @@ export function ResidentesPage() {
   // quitado» de «todavía no ha tocado nada»: con `true` a secas, cada
   // recarga se lo volvería a poner encima.
   const [soloIncompletas, setSoloIncompletas] = useState<boolean | null>(null);
-  // alta-minima · `?completar=<clientId>` · por aquí entra «Completar» de
-  // la tarjeta del panel, que abre la ficha directamente.
-  const [params, setParams] = useSearchParams();
 
   async function recargar() {
     try {
@@ -153,13 +162,34 @@ export function ResidentesPage() {
     }
   }
 
-  // alta-minima · el `?completar=` de la URL, una sola vez. Se CONSUME
-  // (se quita de la URL) al abrir la ficha: si se quedara, cerrar el
-  // modal lo volvería a abrir y la dirección no podría salir.
-  const aCompletar = params.get("completar");
+  // ── LOS DOS PARÁMETROS DE LA URL, JUNTOS ────────────────────────
+  //
+  // `?alta=1` (primer-acceso) abre «Nuevo ingreso»; `?completar=<id>`
+  // (alta-minima) abre la ficha de ese residente. Los dos los manda una
+  // tarjeta del panel y los dos **se consumen**: si se quedaran en la
+  // URL, cerrar el modal lo volvería a abrir y no se podría salir.
+  //
+  // Van con el actualizador FUNCIONAL (`(p) => …`) y no construyendo un
+  // `URLSearchParams` desde `searchParams`. Es la decisión del merge: con
+  // la segunda forma, los dos efectos leen la misma instantánea y el que
+  // escribe después borra el parámetro que el otro acababa de quitar —y
+  // sólo cuando llegan los dos juntos, que es el caso que nadie prueba a
+  // mano. Con el funcional, cada uno parte de lo que hay.
+  useEffect(() => {
+    if (searchParams.get("alta") !== "1") return;
+    setSearchParams(
+      (p) => {
+        p.delete("alta");
+        return p;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
+
+  const aCompletar = searchParams.get("completar");
   useEffect(() => {
     if (!aCompletar) return;
-    setParams(
+    setSearchParams(
       (p) => {
         p.delete("completar");
         return p;
@@ -169,7 +199,7 @@ export function ResidentesPage() {
     void abrirFicha({ clientId: aCompletar });
   }, [aCompletar]);
 
-  if (!filas) return <CenteredLoader label="Cargando residentes…" />;
+  if (!filas) return <CenteredLoader label="Cargando residentes…" error={error} />;
 
   const viven = filas.filter((f) => f.dischargeDate == null);
   const idos = filas.filter((f) => f.dischargeDate != null);
@@ -331,6 +361,11 @@ export function ResidentesPage() {
             setAlta(false);
             void recargar();
           }}
+          // primer-acceso (punto 5) · «Guardar y dar de alta otro». La
+          // lista se recarga por detrás y el modal se queda abierto y en
+          // blanco: cuarenta y ocho residentes no se cargan volviendo
+          // cada vez a la lista.
+          onHechoYOtro={() => void recargar()}
         />
       )}
       {varios && (
@@ -524,9 +559,13 @@ function Modal({
 function ModalAlta({
   onClose,
   onHecho,
+  onHechoYOtro,
 }: {
   onClose: () => void;
   onHecho: () => void;
+  /** primer-acceso · recarga la lista por detrás y deja el modal abierto
+   *  para el siguiente. */
+  onHechoYOtro: () => void;
 }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -549,12 +588,33 @@ function ModalAlta({
   >(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** primer-acceso · el nombre del último que se guardó sin cerrar, para
+   *  que la pantalla confirme que se ha hecho. Sin esta línea, «Guardar y
+   *  dar de alta otro» deja el formulario en blanco y no se distingue de
+   *  un botón que no ha funcionado. */
+  const [ultimo, setUltimo] = useState<string | null>(null);
 
   useEffect(() => {
     api<{ plantas: PlantaVista[] }>("/residencia/edificio")
       .then((r) => setLibres(camasLibres(r.plantas)))
       .catch(() => setLibres([]));
   }, []);
+
+  // primer-acceso · DESPUÉS DE GUARDAR, EL CURSOR VUELVE ARRIBA.
+  //
+  // Lo vio el bucle visual del 23-10 y no un test: el modal se queda
+  // donde estaba —abajo, junto a los dos botones— así que el campo del
+  // nombre queda fuera de pantalla y cada residente costaba un scroll de
+  // vuelta. Con cuarenta y ocho, son cuarenta y ocho scrolls.
+  //
+  // `focus()` arrastra el scroll del contenedor solo, así que no hace
+  // falta tocarlo: basta con poner el cursor donde se escribe. Por id y
+  // no por ref porque `TextField` no reenvía la suya, y cambiar un
+  // componente compartido de toda la casa por esto sería pagar de más.
+  useEffect(() => {
+    if (ultimo == null) return;
+    document.getElementById("nombre")?.focus();
+  }, [ultimo]);
 
   // ── alta-minima · SÓLO EL NOMBRE BLOQUEA ────────────────────────
   //
@@ -575,7 +635,31 @@ function ModalAlta({
     responsable.trim() ? null : "el familiar responsable",
   ].filter((x): x is string => x != null);
 
-  async function guardar() {
+  /** Vacía lo que es de la persona y DEJA lo que es del ingreso: la fecha
+   *  y, si la hubiera, la cama elegida ya no vale (la acaba de ocupar el
+   *  anterior), así que la cama se limpia y la fecha se queda — cuarenta y
+   *  ocho ingresos del mismo día llevan la misma fecha. */
+  function limpiarParaElSiguiente(nombre: string) {
+    setUltimo(nombre);
+    setFirstName("");
+    setLastName("");
+    setPhone("");
+    setNivel(null);
+    setGrado(null);
+    setPlaza(null);
+    setResponsable("");
+    setResponsableTel("");
+    setParentesco("");
+    setDni("");
+    setBedId("");
+    // Las camas libres cambian con cada alta que asigna una: se vuelven a
+    // pedir en vez de quedarse con una lista que ya miente.
+    api<{ plantas: PlantaVista[] }>("/residencia/edificio")
+      .then((r) => setLibres(camasLibres(r.plantas)))
+      .catch(() => setLibres([]));
+  }
+
+  async function guardar(seguirDandoDeAlta = false) {
     setBusy(true);
     setError(null);
     try {
@@ -602,7 +686,14 @@ function ModalAlta({
           ...(bedId ? { bedId } : {}),
         },
       });
-      onHecho();
+      if (seguirDandoDeAlta) {
+        limpiarParaElSiguiente(
+          [firstName.trim(), lastName.trim()].filter(Boolean).join(" "),
+        );
+        onHechoYOtro();
+      } else {
+        onHecho();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado");
     } finally {
@@ -728,8 +819,16 @@ function ModalAlta({
           marcado como incompleto hasta que lo completes.
         </p>
       )}
+      {ultimo && (
+        <p
+          data-test="ultimo-ingreso"
+          className="mb-3 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[13px] text-emerald-800"
+        >
+          {ultimo} queda registrado. Sigue con el siguiente.
+        </p>
+      )}
       <FieldError message={error} />
-      <div className="mt-4">
+      <div className="mt-4 space-y-2">
         <PrimaryButton
           type="button"
           busy={busy}
@@ -738,6 +837,24 @@ function ModalAlta({
         >
           Registrar ingreso
         </PrimaryButton>
+        {/* primer-acceso (punto 5) · el segundo botón, DEBAJO y en
+            contorno: el primario sigue siendo «guardar y cerrar», que es
+            lo que se pulsa un día normal. El de abajo es el del día del
+            alta, cuando entran los cuarenta y ocho. */}
+        {/* alta-minima · **el mismo bloqueo que el primario: sólo el
+            nombre.** primer-acceso lo trajo pidiendo los cuatro datos
+            (`faltan.length > 0`), que era lo correcto cuando la API los
+            exigía; desde este bloque sería peor que inútil — el día del
+            alta masiva, que es justo para lo que este botón existe, lo
+            que hay es una columna de nombres, así que el botón habría
+            estado apagado las cuarenta y ocho veces. */}
+        <OutlineButton
+          onClick={() => void guardar(true)}
+          disabled={busy || faltaElNombre}
+          className="w-full"
+        >
+          Guardar y dar de alta otro
+        </OutlineButton>
       </div>
     </Modal>
   );

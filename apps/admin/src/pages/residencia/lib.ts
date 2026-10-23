@@ -146,8 +146,13 @@ export function faltanEnPalabras(faltan: DatoQueFalta[]): string {
  * hiciera por su cuenta, dos acabarían enseñando el mismo nombre distinto
  * — y la lista y la ficha se miran seguidas.
  */
-export function nombreVisible(nombre: string): string {
-  return enFormatoDeNombre(nombre);
+export function nombreVisible(nombre: string | null | undefined): string {
+  // El `?? ""` no es por si la API falla: es porque esto se llama una vez
+  // por fila y **una fila mal formada no puede dejar la lista en blanco**.
+  // La pantalla de Residentes es donde vive la dirección; que un campo
+  // que falta tumbe el `render` entero convierte un dato raro en un
+  // centro sin residentes. Lo encontró el merge con primer-acceso.
+  return enFormatoDeNombre(nombre ?? "");
 }
 
 export type NivelDependencia = "VALIDO" | "SEMIASISTIDO" | "DEPENDIENTE";
