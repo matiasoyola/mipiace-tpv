@@ -55,6 +55,9 @@ const PANTALLAS = [
   "pages/SalePage.hospitality.tsx",
   "pages/CartLineItem.tsx",
   "kitchen/tpv/ListoBanner.tsx",
+  // La hoja de opciones de una mesa (hallazgo 8). No es «de sala» por su
+  // nombre, pero en la mano es lo que sale al tocar una mesa.
+  "components/ConfirmSheet.tsx",
 ];
 
 /**
@@ -67,6 +70,10 @@ const SIMBOLOS_PERMITIDOS = new Set([
   "COBRAR_AMOUNT_FONT_PX_MANO",
   "TABLE_NAME_PX",
   "MIN_TOUCH_PX",
+  // El total del pie en la mano: 34 px, muy por encima del suelo. Entró
+  // con el adelgazamiento del pie del hallazgo 1, y este banco lo cazó
+  // en la pasada completa — que es exactamente para lo que está.
+  "TOTAL_PX_MANO",
 ]);
 
 /**
