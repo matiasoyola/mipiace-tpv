@@ -37,7 +37,8 @@ import {
 } from "./corrections.js";
 import { entrySentOffline } from "./offline.js";
 import { isInFuture } from "./routes.js";
-import { FICHAJE_TZ, localDate, monthRange } from "./time.js";
+import { maxOpenHoursFor } from "./max-open.js";
+import { esSalidaOlvidada, FICHAJE_TZ, localDate, monthRange } from "./time.js";
 import { groupByDay, toEntryView, totalMinutes, type TimeEntryRow } from "./view.js";
 
 /** Lo que vive un enlace de emparejamiento. Una semana: lo suficiente para
@@ -380,7 +381,8 @@ export async function registerFichajeAdminRoutes(
     const hoy = localDate(now);
     const { from, to } = monthRange(hoy.slice(0, 7));
 
-    const [employees, entries] = await Promise.all([
+    const [maxHoras, employees, entries] = await Promise.all([
+      maxOpenHoursFor(auth.tenantId),
       prisma.employee.findMany({
         where: { tenantId: auth.tenantId, active: true },
         select: { id: true, name: true },
@@ -393,7 +395,16 @@ export async function registerFichajeAdminRoutes(
       prisma.timeEntry.findMany({
         where: {
           tenantId: auth.tenantId,
-          OR: [{ startedAt: { gte: from, lt: to } }, { endedAt: null }],
+          OR: [
+            { startedAt: { gte: from, lt: to } },
+            // hotfix-fichaje-medianoche · y los que TERMINARON dentro del
+            // mes aunque empezaran antes. El 1 a las 07:00, el turno que
+            // entró el 31 a las 22:00 y salió a las 06:00 no entraba por
+            // ninguna de las otras dos ramas, y su autor salía en "no ha
+            // fichado" habiendo trabajado toda la noche.
+            { endedAt: { gte: from, lt: to } },
+            { endedAt: null },
+          ],
         },
         select: ENTRY_SELECT,
         orderBy: { startedAt: "asc" },
@@ -408,8 +419,12 @@ export async function registerFichajeAdminRoutes(
     const counts = new Map(correcciones.map((c) => [c.timeEntryId, c._count._all]));
     const nombre = new Map(employees.map((e) => [e.id, e.name]));
 
+    // DENTRO: todo tramo abierto que todavía no es una salida olvidada,
+    // empezara el día que empezara (hotfix-fichaje-medianoche). A las 02:00,
+    // quien entró ayer a las 22:00 está dentro —se le ve trabajar— y antes
+    // no salía aquí porque su tramo "no era de hoy".
     const dentro = entries
-      .filter((e) => e.endedAt === null && localDate(e.startedAt) === hoy)
+      .filter((e) => e.endedAt === null && !esSalidaOlvidada(e, now, maxHoras))
       .map((e) => ({
         employeeId: e.employeeId,
         employeeName: nombre.get(e.employeeId) ?? "—",
@@ -417,8 +432,24 @@ export async function registerFichajeAdminRoutes(
         startedAt: e.startedAt.toISOString(),
       }));
 
+    // El tramo pertenece AL DÍA EN QUE EMPEZÓ, aquí igual que en el
+    // registro y en la exportación: 22:00 del 23 → 08:00 del 24 es una
+    // jornada del 23.
     const deHoy = entries.filter((e) => localDate(e.startedAt) === hoy);
-    const conFichaje = new Set(deHoy.map((e) => e.employeeId));
+    // …con una excepción que no es una excepción al criterio sino a la
+    // pregunta: "no ha fichado" y "está dentro ahora mismo" no pueden ser
+    // verdad a la vez. El turno de noche que sigue abierto a las 02:00
+    // pertenece a ayer, pero esa persona ha aparecido.
+    const conFichaje = new Set([
+      ...deHoy.map((e) => e.employeeId),
+      ...dentro.map((e) => e.employeeId),
+      // …y quien FICHÓ LA SALIDA hoy: el turno de 19:00 a 01:00 es una
+      // jornada de ayer, pero a la 01:05 esa persona acaba de tocar su
+      // móvil y decir "me voy". Listarla en "no ha aparecido" es falso.
+      ...entries
+        .filter((e) => e.endedAt !== null && localDate(e.endedAt) === hoy)
+        .map((e) => e.employeeId),
+    ]);
 
     return {
       date: hoy,
@@ -431,10 +462,13 @@ export async function registerFichajeAdminRoutes(
         .filter((e) => !conFichaje.has(e.id))
         .map((e) => ({ employeeId: e.id, employeeName: e.name })),
       alerts: {
-        // Tramos abiertos de días ANTERIORES: la salida olvidada, vista
-        // desde la empresa. No se cierran solos, ni aquí ni en el móvil.
+        // La salida olvidada vista desde la empresa: un tramo que lleva
+        // abierto más del máximo del tenant. No se cierran solos, ni aquí
+        // ni en el móvil. Mismo `esSalidaOlvidada` que usan el cierre y la
+        // pantalla del empleado: un tramo no puede estar "dentro" en una
+        // columna y "olvidado" en la de al lado.
         missingExit: entries
-          .filter((e) => e.endedAt === null && localDate(e.startedAt) !== hoy)
+          .filter((e) => esSalidaOlvidada(e, now, maxHoras))
           .map((e) => ({
             entryId: e.id,
             employeeId: e.employeeId,
