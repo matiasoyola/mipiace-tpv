@@ -20,7 +20,48 @@ export function CenteredCard({ children }: { children: ReactNode }) {
   );
 }
 
-export function CenteredLoader({ label }: { label: string }) {
+/**
+ * El cargador de pantalla completa, y el único sitio donde se decide qué
+ * se pinta cuando la carga **falló**.
+ *
+ * hotfix-menu-capabilities · `error` es opcional pero no es decorativo.
+ * Lo que se vio en producción (Jardín de Gredos, pantalla de Bonos) es
+ * que una pila de pantallas guardaban el fallo de la carga en un estado
+ * y justo debajo tenían un `if (!datos) return <CenteredLoader/>` que se
+ * adelantaba a cualquier sitio donde ese estado se pintara. Resultado:
+ * «Cargando bonos…» girando para siempre y ni una palabra de qué pasó.
+ *
+ * Con el error aquí, el mismo `return` que antes se colgaba cuenta lo que
+ * pasó. Y lleva «Reintentar» porque estas pantallas se pintan ANTES de la
+ * barra lateral: sin botón, la única salida es el botón de atrás del
+ * navegador.
+ *
+ * Quien ya pinta su propio aviso de error —las pantallas que meten el
+ * cargador DENTRO del `AdminShell`, debajo de un `<FieldError>`— no tiene
+ * que pasar nada: el parámetro por defecto deja el cargador de siempre.
+ */
+export function CenteredLoader({
+  label,
+  error = null,
+}: {
+  label: string;
+  error?: string | null;
+}) {
+  if (error != null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mipiace-stone font-sans px-5">
+        <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 p-6 text-center">
+          <AlertCircle className="w-5 h-5 mx-auto mb-3 text-red-600" />
+          <p className="text-[13.5px] text-mipiace-ink">{error}</p>
+          <div className="mt-4 flex justify-center">
+            <OutlineButton onClick={() => window.location.reload()}>
+              Reintentar
+            </OutlineButton>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen flex items-center justify-center bg-mipiace-stone font-sans">
       <div className="flex flex-col items-center gap-3 text-slate-500">

@@ -118,7 +118,7 @@ export function TagSectionsPage() {
     }
   }
 
-  if (!etiquetas) return <CenteredLoader label="Cargando etiquetas…" />;
+  if (!etiquetas) return <CenteredLoader label="Cargando etiquetas…" error={error} />;
 
   const sinAsignar = etiquetas.filter(
     (e) => e.section == null && e.productCount > 0,

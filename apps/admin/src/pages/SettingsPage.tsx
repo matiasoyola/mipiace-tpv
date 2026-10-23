@@ -117,7 +117,7 @@ export function SettingsPage() {
     !!settings &&
     JSON.stringify(form) !== JSON.stringify(settings);
 
-  if (!form || !settings) return <CenteredLoader label="Cargando ajustes…" />;
+  if (!form || !settings) return <CenteredLoader label="Cargando ajustes…" error={error} />;
 
   // H1 · `!== false` y no `!`: la columna es `@default(true)`.
   const cajaEnabled = settings.cajaEnabled !== false;

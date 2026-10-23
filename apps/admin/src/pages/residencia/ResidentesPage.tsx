@@ -98,7 +98,7 @@ export function ResidentesPage() {
     }
   }
 
-  if (!filas) return <CenteredLoader label="Cargando residentes…" />;
+  if (!filas) return <CenteredLoader label="Cargando residentes…" error={error} />;
 
   const viven = filas.filter((f) => f.dischargeDate == null);
   const idos = filas.filter((f) => f.dischargeDate != null);
