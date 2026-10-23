@@ -59,7 +59,7 @@ describe("n1-hosteleria · buscando, las familias ceden el sitio", () => {
         vista: AHORA,
         rejillaAbierta: false,
       }),
-    ).toEqual({ rejilla: true, tira: false, cantidad: true });
+    ).toEqual({ rejilla: true, tira: false, cantidad: false });
     expect(
       repartoDelCatalogo({
         deMano: true,
@@ -67,7 +67,7 @@ describe("n1-hosteleria · buscando, las familias ceden el sitio", () => {
         vista: CAFE,
         rejillaAbierta: false,
       }),
-    ).toEqual({ rejilla: false, tira: true, cantidad: true });
+    ).toEqual({ rejilla: false, tira: true, cantidad: false });
   });
 });
 
@@ -80,7 +80,7 @@ describe("n1-hosteleria · con familia elegida, la rejilla se pliega", () => {
         vista: CAFE,
         rejillaAbierta: false,
       }),
-    ).toEqual({ rejilla: false, tira: true, cantidad: true });
+    ).toEqual({ rejilla: false, tira: true, cantidad: false });
   });
 
   it("«Cambiar» devuelve la rejilla sin perder la familia", () => {
@@ -93,7 +93,7 @@ describe("n1-hosteleria · con familia elegida, la rejilla se pliega", () => {
         vista: CAFE,
         rejillaAbierta: true,
       }),
-    ).toEqual({ rejilla: true, tira: false, cantidad: true });
+    ).toEqual({ rejilla: true, tira: false, cantidad: false });
   });
 
   it("en «Ahora» la rejilla está, que es la vista de entrada", () => {
@@ -104,7 +104,7 @@ describe("n1-hosteleria · con familia elegida, la rejilla se pliega", () => {
         vista: AHORA,
         rejillaAbierta: false,
       }),
-    ).toEqual({ rejilla: true, tira: false, cantidad: true });
+    ).toEqual({ rejilla: true, tira: false, cantidad: false });
     // Y «Ahora» no se pliega nunca: no hay familia que poner en la tira.
     expect(
       repartoDelCatalogo({
@@ -113,7 +113,7 @@ describe("n1-hosteleria · con familia elegida, la rejilla se pliega", () => {
         vista: AHORA,
         rejillaAbierta: true,
       }),
-    ).toEqual({ rejilla: true, tira: false, cantidad: true });
+    ).toEqual({ rejilla: true, tira: false, cantidad: false });
   });
 });
 
@@ -171,14 +171,18 @@ describe("n1-hosteleria · la hoja de la comanda no sobrevive a salir (8)", () =
   });
 });
 
-describe("n1-hosteleria · buscando, la fila de cantidad también cede (hierro 23-10)", () => {
-  // La pasada del 23-10 en el N1: con «tost» y el teclado abierto
-  // (ventana 449) la rejilla de familias SÍ cedía, pero la fila de
-  // cantidad no, y mide 120 px en estrecho. El primer resultado caía en
-  // 425 … 493, fuera. Cediendo pasa a 291 … 359 y caben dos.
+describe("n1-hosteleria-2 · en la mano la fila de cantidad NO se pinta nunca (5)", () => {
+  // `n1-hosteleria` la hizo ceder sólo al buscar, y así cerró el 🟡 2 de
+  // la pasada del 23-10: con «tost» y el teclado abierto (ventana 449)
+  // el primer resultado subió de 425 … 493 a 291 … 359.
   //
-  // La fila de la tabla de sabotajes:
-  //   | Buscando se sigue pintando la fila de cantidad | este banco
+  // Pero el hallazgo 5 de Matías usándolo como camarero es más ancho:
+  // con la mesa abierta y SIN buscar, esos 120 px siguen entre el
+  // buscador y el primer producto. La fila no ayuda en este formato.
+  //
+  // Las filas de la tabla de sabotajes:
+  //   | La fila de cantidad se pinta en la mano       | este banco
+  //   | La fila de cantidad desaparece a 1280         | el banco del terminal
 
   it("buscando en la mano, la fila de cantidad NO se pinta", () => {
     expect(
@@ -191,16 +195,21 @@ describe("n1-hosteleria · buscando, la fila de cantidad también cede (hierro 2
     ).toBe(false);
   });
 
-  it("sin buscar sí se pinta, con rejilla o con tira", () => {
+  it("y SIN buscar tampoco: ni con rejilla, ni con tira, ni con «Cambiar»", () => {
+    // Las seis combinaciones del camino de mano. Ninguna la pinta.
     for (const vista of [AHORA, CAFE]) {
-      expect(
-        repartoDelCatalogo({
-          deMano: true,
-          buscando: false,
-          vista,
-          rejillaAbierta: false,
-        }).cantidad,
-      ).toBe(true);
+      for (const rejillaAbierta of [true, false]) {
+        for (const buscando of [true, false]) {
+          expect(
+            repartoDelCatalogo({
+              deMano: true,
+              buscando,
+              vista,
+              rejillaAbierta,
+            }).cantidad,
+          ).toBe(false);
+        }
+      }
     }
   });
 

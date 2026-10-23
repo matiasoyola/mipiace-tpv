@@ -587,10 +587,18 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
         </div>
         )}
 
-        <div
-          className="h-px shrink-0"
-          style={{ background: DARK_SURFACE_RAISED }}
-        />
+        {/* n1-hosteleria-2 · el filete separa, así que sólo existe si
+            hay algo que separar. En la mano buscando no queda nada por
+            encima (ni rejilla, ni tira, ni —desde el hallazgo 5— fila de
+            cantidad), y el filete se quedaba como una raya suelta justo
+            debajo del buscador. En el terminal la rejilla está siempre,
+            así que esta condición es siempre cierta y no se mueve nada. */}
+        {(mostrarRejillaDeFamilias || familiaPlegada) && (
+          <div
+            className="h-px shrink-0"
+            style={{ background: DARK_SURFACE_RAISED }}
+          />
+        )}
 
         {/* Decisión 3c · la cantidad va ENTRE las familias y los
             productos. Ahí es donde la mano ya está: se toca la familia,

@@ -510,27 +510,30 @@ export interface RepartoDelCatalogo {
   /**
    * ¿Se pinta la fila de cantidad 1–6?
    *
-   * La añade la pasada del 23-10 en el N1. Buscando «tost» con el
-   * teclado abierto —ventana de 449 px— la rejilla de familias SÍ cedía
-   * su sitio, pero la fila de cantidad no, y en estrecho mide **120 px**
-   * porque `n1-vertical` la repartió en 3×2 (seis teclas de 56 en una
-   * fila piden 376 y a 360 no caben). Medido en el aparato:
+   * **En la mano, NUNCA.** No es una decisión de reparto: es el hallazgo
+   * 5 de Matías del 23-10 usándolo como camarero. La fila no ayuda en
+   * este formato y cuesta 120 px fijos porque `n1-vertical` la repartió
+   * en 3×2 (seis teclas de 56 en una fila piden 376 y a 360 no caben).
+   *
+   * `n1-hosteleria` la había hecho ceder SÓLO al buscar, y ésa fue la
+   * medida que cerró el 🟡 2 de la pasada:
    *
    *   cabecera de comanda   112 … 180   (68)
    *   buscador              194 … 250   (56)
    *   fila de cantidad      291 … 411   (120)  ← no cedía
    *   primer resultado      425 … 493          ← fuera de 449
    *
-   * El §2 del bloque pide que «los resultados van JUSTO DEBAJO del
-   * buscador», y con 120 px en medio no lo están. Cediendo, el primer
-   * resultado pasa a 291 … 359 —dentro— y caben dos.
+   * Pero ceder al buscar arreglaba el síntoma en una pantalla. Con la
+   * mesa abierta y sin buscar, esos 120 px siguen estando entre el
+   * buscador y el primer producto, que es donde el camarero marca.
    *
    * La cantidad no se pierde: se corrige sobre la propia línea con los
    * `−`/`+` de 56 px, que es lo que manda `principio-venta-bajo-estres`
-   * (regla 6). Y en el terminal la fila no se mueve.
+   * (regla 6) — y es además el gesto que el camarero hace de verdad,
+   * porque la cantidad se descubre al repetir («otra caña»), no al
+   * marcar.
    *
-   * En el banco no se vio porque su tenant no está en ensayo y no paga
-   * los 40 px de la banda.
+   * En el terminal la fila no se mueve: es la restricción del bloque.
    */
   cantidad: boolean;
 }
@@ -538,20 +541,21 @@ export interface RepartoDelCatalogo {
 /**
  * Qué se pinta por encima de los productos.
  *
- * Las dos reglas, que **sólo** aplican en un aparato de mano:
+ * Las tres reglas, que **sólo** aplican en un aparato de mano:
  *
- *   1. con texto en el buscador, NI rejilla, NI tira, NI fila de
- *      cantidad. Buscando, las familias no sirven para nada —la lista de
- *      productos llega ya filtrada por la búsqueda, y filtrar además por
- *      familia dejaría «sin resultados» con el producto a la vista en
- *      otra— así que su sitio entero es de los resultados. Lo de la fila
- *      de cantidad lo encontró la pasada del 23-10 en el N1: ver la nota
- *      de `cantidad`;
- *   2. con familia elegida, la rejilla se pliega a la tira, salvo que el
+ *   1. la **fila de cantidad 1–6 no se pinta nunca** (hallazgo 5 de
+ *      Matías, 23-10): ver la nota de `cantidad`;
+ *   2. con texto en el buscador, tampoco rejilla ni tira. Buscando, las
+ *      familias no sirven para nada —la lista de productos llega ya
+ *      filtrada por la búsqueda, y filtrar además por familia dejaría
+ *      «sin resultados» con el producto a la vista en otra— así que su
+ *      sitio entero es de los resultados;
+ *   3. con familia elegida, la rejilla se pliega a la tira, salvo que el
  *      camarero haya pedido verla otra vez (`rejillaAbierta`).
  *
- * En el terminal la rejilla está siempre: trece familias a seis columnas
- * son dos filas de 76 px y sobra pantalla. Es la restricción del bloque.
+ * En el terminal la rejilla y la fila de cantidad están siempre: trece
+ * familias a seis columnas son dos filas de 76 px y sobra pantalla. Es
+ * la restricción del bloque.
  */
 export function repartoDelCatalogo(opts: {
   deMano: boolean;
@@ -560,13 +564,13 @@ export function repartoDelCatalogo(opts: {
   rejillaAbierta: boolean;
 }): RepartoDelCatalogo {
   if (!opts.deMano) return { rejilla: true, tira: false, cantidad: true };
-  // Buscando no se pinta NADA por encima de los resultados: ni familias
-  // ni tira ni la fila de cantidad. Ver la nota de `cantidad`.
+  // En la mano la fila de cantidad no se pinta NUNCA, busque o no busque
+  // el camarero: hallazgo 5. Ver la nota de `cantidad`.
   if (opts.buscando) {
     return { rejilla: false, tira: false, cantidad: false };
   }
   const plegada = opts.vista.kind === "family" && !opts.rejillaAbierta;
-  return { rejilla: !plegada, tira: plegada, cantidad: true };
+  return { rejilla: !plegada, tira: plegada, cantidad: false };
 }
 
 // ──────────────────────────────────────────────────────────────────────
