@@ -942,9 +942,29 @@ Mecánico en cuanto haya adb. El orden importa: **el KDS se comprueba ANTES de
 enviar**, porque una comanda que sale y no llega es lo que cortó la pasada del
 23-10 (§9.2-ter de `n1-hosteleria-done`).
 
+**LO PRIMERO: el N1 se trabaja en 5555.** Decisión de Matías, 23-10. El puerto de
+la depuración inalámbrica rota solo —y no sólo al reiniciar: también al
+bloquearse la pantalla y al tocar los ajustes de depuración—. En esta sesión
+cambió **tres veces** (42911 → 39221 → 41733 → 35829) y cada una costó parar y
+pedirlo. Con el puerto fijo deja de ser un tema:
+
 ```bash
-N1=192.168.5.144:<puerto>
-APK=apps/tpv-android/build-releases/mipiacetpv-1.29.0-12900.apk
+adb -s 192.168.5.144:<el-que-te-pase-Matías> tcpip 5555
+adb connect 192.168.5.144:5555
+# y a partir de aquí SIEMPRE  -s 192.168.5.144:5555
+```
+
+Y «Pantalla siempre encendida» puesta en el aparato. Dos avisos: `tcpip 5555`
+reinicia adbd, así que **el reenvío del CDP se cae y hay que rehacerlo**; y si
+Ajustes se queda en primer plano **los toques se los come Ajustes** mientras el
+CDP sigue leyendo el DOM del TPV tan contento — se comprueba con
+`dumpsys activity activities | grep topResumedActivity` y se retoma con
+`am start -n es.mipiace.tpv/.MainActivity`, que trae la tarea al frente sin
+gastar la única apertura del arranque.
+
+```bash
+N1=192.168.5.144:5555
+APK=apps/tpv-android/build-releases/mipiacetpv-1.29.1-12901.apk
 
 # 0 · que es el N1 y no otro aparato
 adb -s $N1 shell getprop ro.product.model          # -> N1
