@@ -119,6 +119,21 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
   let auxiliarId = "";
   let tokenDeLaTablet = "";
   let comoDirectora: Record<string, string> = {};
+  // ── EL SEGUNDO CENTRO, y existe por UNA prueba ──────────────────
+  //
+  // La del contrato revocado (§3). Revocar el contrato de encargado es
+  // lo único de este fichero que cambia el estado DEL CENTRO, y el
+  // estado se cachea 30 s (`contrato.ts`): mientras esté revocado, toda
+  // escritura del centro contesta 423.
+  //
+  // Con un solo centro eso convierte una prueba en una bomba de
+  // relojería para las otras cuarenta — y lo fue: el mismo commit pasó
+  // en una pasada de CI y en la siguiente **falló desde el primer test**
+  // con `CONTRATO_ENCARGADO_NO_VIGENTE`. Una prueba que apaga el centro
+  // entero no puede compartirlo.
+  let centroSinContrato = "";
+  let directoraSinContrato = "";
+  let comoLaOtraDirectora: Record<string, string> = {};
   /** El PIN de la auxiliar. Cuatro cifras: su rol es por zona (D-68). */
   const PIN_DE_ANA = "7391";
 
@@ -209,8 +224,36 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
                '${createHash("sha256").update(tokenDeLaTablet, "utf8").digest("hex")}')`,
     );
 
+    // ── El SEGUNDO centro, para §3. Lo mínimo: tenant, dueña, rol y
+    // contrato aceptado. Ni edificio ni camas: ahí sólo se comprueba que
+    // sin contrato no se crea nadie.
+    centroSinContrato = randomUUID();
+    directoraSinContrato = randomUUID();
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO tenants (id, name, residencia_enabled, clinical_records_enabled, crm_enabled, agenda_enabled, caja_enabled, updated_at)
+       VALUES ('${centroSinContrato}', 'Centro del contrato (e2e)', true, true, true, true, false, now())`,
+    );
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO users (id, tenant_id, email, alias, role, is_clinician, clinical_scope)
+       VALUES ('${directoraSinContrato}', '${centroSinContrato}', 'dir2-${directoraSinContrato.slice(0, 8)}@gredos.es', 'Marta', 'OWNER', true, 'SELECTION')`,
+    );
+    await sembrarResidencia(prisma as never, centroSinContrato);
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO care_role_assignments (id, tenant_id, user_id, care_role_id, from_at, granted_by_user_id)
+       SELECT '${randomUUID()}', '${centroSinContrato}', '${directoraSinContrato}', id, now() - interval '1 day', '${directoraSinContrato}'
+       FROM care_roles WHERE tenant_id = '${centroSinContrato}' AND code = 'DIRECCION'`,
+    );
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
+       VALUES ('${randomUUID()}', '${centroSinContrato}', 1, '${"d".repeat(64)}', '${directoraSinContrato}', now())`,
+    );
+    olvidarEstado();
+
     comoDirectora = {
       authorization: `Bearer ${signAccessToken({ sub: directoraId, tid: tenantId, role: "OWNER" })}`,
+    };
+    comoLaOtraDirectora = {
+      authorization: `Bearer ${signAccessToken({ sub: directoraSinContrato, tid: centroSinContrato, role: "OWNER" })}`,
     };
 
     app = Fastify({ logger: false });
@@ -535,23 +578,28 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
   // ══════════════════════════════════════════════════════════════════
 
   describe("el contrato de encargado · el 423 de siempre", () => {
+    // **En su propio centro.** Ver `centroSinContrato`: revocar el
+    // contrato apaga la escritura del centro entero durante 30 s, así que
+    // hacerlo en el de los demás tests los tumba a todos.
     it("revocado: ni el alta de uno ni la de varios", async () => {
-      const antes = await prisma.residentProfile.count({ where: { tenantId } });
+      const antes = await prisma.residentProfile.count({
+        where: { tenantId: centroSinContrato },
+      });
       // Se REVOCA insertando una fila, que es como se retira desde
       // clinica-7 §2: nadie pone un booleano a `false`.
       await prisma.$executeRawUnsafe(
         `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at, revokes_agreement_id)
-         SELECT '${randomUUID()}', '${tenantId}', 1, '${"b".repeat(64)}', '${directoraId}', now(), id
+         SELECT '${randomUUID()}', '${centroSinContrato}', 1, '${"b".repeat(64)}', '${directoraSinContrato}', now(), id
          FROM clinical_processor_agreements
-         WHERE tenant_id = '${tenantId}' AND revokes_agreement_id IS NULL
+         WHERE tenant_id = '${centroSinContrato}' AND revokes_agreement_id IS NULL
          LIMIT 1`,
       );
-      olvidarEstado();
+      olvidarEstado(centroSinContrato);
 
       const uno = await app.inject({
         method: "POST",
         url: "/residencia/residentes",
-        headers: comoDirectora,
+        headers: comoLaOtraDirectora,
         payload: { firstName: "SIN CONTRATO UNO" },
       });
       expect(uno.statusCode, uno.body).toBe(423);
@@ -559,23 +607,37 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
       const varios = await app.inject({
         method: "POST",
         url: "/residencia/residentes/varios",
-        headers: comoDirectora,
+        headers: comoLaOtraDirectora,
         payload: { texto: "SIN CONTRATO DOS\nSIN CONTRATO TRES" },
       });
       expect(varios.statusCode, varios.body).toBe(423);
 
-      expect(await prisma.residentProfile.count({ where: { tenantId } })).toBe(antes);
+      expect(
+        await prisma.residentProfile.count({ where: { tenantId: centroSinContrato } }),
+      ).toBe(antes);
 
-      // Y se vuelve a aceptar, que es como sigue el resto del fichero.
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-         VALUES ('${randomUUID()}', '${tenantId}', 1, '${"c".repeat(64)}', '${directoraId}', now())`,
-      );
-      olvidarEstado();
-      const otra = await app.inject({
+      // Y el centro de al lado sigue escribiendo: el 423 es DE ESE
+      // centro, no del módulo. Es la mitad que un solo tenant no podía
+      // comprobar.
+      const elDeAlLado = await app.inject({
         method: "POST",
         url: "/residencia/residentes",
         headers: comoDirectora,
+        payload: { firstName: "CON CONTRATO AL LADO" },
+      });
+      expect(elDeAlLado.statusCode, elDeAlLado.body).toBe(201);
+    });
+
+    it("y al volver a aceptarlo, se vuelve a poder", async () => {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
+         VALUES ('${randomUUID()}', '${centroSinContrato}', 1, '${"c".repeat(64)}', '${directoraSinContrato}', now())`,
+      );
+      olvidarEstado(centroSinContrato);
+      const otra = await app.inject({
+        method: "POST",
+        url: "/residencia/residentes",
+        headers: comoLaOtraDirectora,
         payload: { firstName: "CON CONTRATO OTRA VEZ" },
       });
       expect(otra.statusCode, otra.body).toBe(201);

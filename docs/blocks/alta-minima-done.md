@@ -439,6 +439,13 @@ días. Este bloque es la parte mínima que hacía falta **ya**, y está preparad
   guarda el último valor que pintó y descarta el evento si el `value` del nodo coincide: la
   asignación directa se pierde en silencio y el test falla diciendo que el botón sigue
   deshabilitado.
+- **Una prueba que apaga el centro no puede compartir centro.** §3 revoca el contrato de encargado
+  para comprobar el 423, y el estado del contrato **se cachea 30 s por tenant** (`contrato.ts`):
+  mientras está revocado, toda escritura del centro contesta 423. Con un solo tenant eso convierte
+  una prueba en una bomba de relojería para las otras cuarenta, y lo fue — **el mismo commit pasó en
+  una pasada de CI y falló en la siguiente desde el primer test**, con
+  `CONTRATO_ENCARGADO_NO_VIGENTE`. Ahora §3 tiene su propio centro, y de paso comprueba algo que con
+  uno solo no se podía: que el 423 es **de ese centro** y el de al lado sigue escribiendo.
 - **En CI no hay Redis, y el e2e lo descubrió en rojo.** El bloque 9 entra por la puerta con un PIN,
   y el rate-limit del PIN habla con Redis; el job `e2e` sólo levanta Postgres. El cliente va con
   `maxRetriesPerRequest: null` (lo exige BullMQ), así que sin Redis **no falla: espera**. En el
