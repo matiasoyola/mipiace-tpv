@@ -1,7 +1,8 @@
-# n1-hosteleria · que el N1 sirva para un bar — DONE (parcial: falta el hierro)
+# n1-hosteleria · que el N1 sirva para un bar — DONE
 
-Rama `n1-hosteleria`, desde `master` (`a82843a`). Seis commits. **La pasada en
-el hierro está pendiente** y es el criterio de cierre del bloque: ver §9.
+Rama `n1-hosteleria`, desde `master` (`a82843a`). **La pasada en el hierro está
+hecha** (§9.3, 23-10-2026, N1 con la 1.28.1 y el KDS del AP11): los cinco
+hallazgos del bloque cerrados y medidos en el aparato.
 
 ---
 
@@ -548,20 +549,92 @@ No es de este bloque —no se ha tocado nada del envío— pero **bloquea el pas
 §9 que pide ver la comanda llegar al AP11**. Para cerrar la pasada hace falta el
 KDS del AP11 levantado y vinculado.
 
-### 9.3 · Lo que queda de la pasada
+### 9.3 · La pasada completa, con la 1.28.1
 
-Sin hacer todavía: 3–6 líneas con dos cafés distintos, comanda revisada, envío a
-cocina visto en el AP11, «Tickets pasados» y volver (hoja cerrada) y cobro en
-efectivo. **No se han creado tickets `TEST`**: la mesa T1 que se abrió se cerró
-sin líneas y la sala quedó en «0 abiertas · 0,00 €».
+**23-10-2026, 12:30–12:45**, N1 con la **1.28.1 (12801)** instalada por adb
+(`install -r`, huella `e659e67a…` verificada contra la construida) y el **KDS
+del AP11 levantado** (`last_seen_at` 12:31:13 frente a `now()` 12:31:20,
+secciones `{COCINA, BARRA}`). Mesa **T2**, para no tocar la T1 que dejó la
+segunda sesión.
 
-Se hará de una sola pasada **después** de arreglar 9.2 y reconstruir la APK: con
-el criterio del §2 fallando, la pasada habría que repetirla igual.
+| paso | medido | criterio |
+|---|---|---|
+| mapa a 360 | `innerWidth` **360**, `scrollWidth` 360, alto de página **720** | 🔴 cerrado |
+| cabecera | **120 px, 2 filas** | — |
+| lado de mesa | **88** | — |
+| chip «Terraza» | toque real → `enElPunto: ÉL`; **8/8** mesas a la vista | zona entera ✓ |
+| abrir T2 | toque real → `ÉL`; 13 familias y fila de cantidad | — |
+| **buscar «tost» con teclado** | ventana **449**; rejilla, tira y fila de cantidad **no se pintan**; primer resultado **291 … 359 VISIBLE**; **4 resultados a la vista** | 🟡 2 cerrado |
+| borrar la búsqueda | vuelven rejilla y fila de cantidad | reversible ✓ |
+| familia «Cafe» | rejilla **no**, **tira sí** con «Cafe» y «Cambiar» (56 px); primer producto **322 … 442 visible**; **6 productos a la vista** | 🟡 7 cerrado |
+| comanda de 6 líneas | las seis en cajas de **336 px**, `scrollWidth` 336 → **todas enteras**; «Café Americano» y «Café Solo» se distinguen | 🟡 3 cerrado |
+| «Espera» de la última | **432 … 472**, dentro; `elementFromPoint` → **EL PROPIO ESPERA** | 🟡 9 ✓ |
+| envío a cocina | comanda **nº 1 · BARRA · T2**, enviada **12:35:53**, `lan_received_at` **12:36:00** | ✓ |
+| vista en el AP11 | tarjeta verde «T2 · 1 min» con Café Solo, Café con leche y Café Americano; KDS «En línea» | ✓ |
+| salir y volver | BACK con la hoja abierta → mapa y hoja **cerrada**; al reabrir T2 **no reaparece** y la rejilla vuelve a recibir los toques | 🟡 8 cerrado |
+| cobro en efectivo | 9,90 €, «Pagado · cuadra»; vuelve solo al mapa y T2 queda **POR RECOGER** | ✓ |
 
-El AP11 está conectado y listo (`adb connect 192.168.5.74:5555` →
-`model:AP11_1006`).
+Capturas `06-mapa-1281` … `18-cobrado`, más `13-ap11-comanda-recibida`.
 
----
+**Comparación con la pasada del 18-10**, que es lo que el bloque venía a
+arreglar:
+
+| | 18-10 (1.27.1) | 23-10 (1.28.1) |
+|---|---|---|
+| `innerWidth` del mapa | 845 | **360** |
+| px fuera de pantalla | 485 | **0** |
+| alto de la página | 4.020 | **720** |
+| mesas a la vista | **3** de 23 | **14** de 23 |
+| «Salón» / «Terraza» | inalcanzables | alcanzables, zona entera a la vista |
+| 1.er resultado con teclado | y=592, **fuera** | **y=291, dentro**, y 4 a la vista |
+| 1.er producto con familia | y=833, **fuera** | **y=322, dentro**, y 6 a la vista |
+| nombre en la comanda | 71 px de 178 → «Café…» | **336 de 336, entero** |
+| «Espera» de la última | «⚡ Urgente» | **el propio «Espera»** |
+| hoja al volver de navegar | seguía abierta y bloqueaba toques | **cerrada** |
+
+### 9.4 · Dos cosas que se vieron y NO se tocan
+
+- **La ruta del hallazgo 8 ya no existe tocando la barra.** Con la hoja abierta,
+  un `fixed inset-0 z-40` cubre la pantalla entera, así que «Tickets» no se
+  puede tocar desde ahí: `elementFromPoint` sobre el botón devuelve la propia
+  hoja. La ruta que sí queda es el **BACK de Android**, y por ahí se comprobó.
+- **El N1 sigue en `Asia/Shanghai`**: pinta «Último acceso hoy 17:40» y
+  «23/10/2026 18:20» cuando aquí son las 12:2x. Es el **hallazgo 5** del 18-10,
+  que tiene bloque propio y está fuera de alcance.
+
+### 9.5 · INVENTARIO PARA EL «RESETEAR ENSAYO»
+
+Todo lo que hay en Sirope-ensayo a 23-10 12:45, lo de esta sesión y lo de la
+segunda sesión, para que el reset no deje nada fuera.
+
+**Tickets de hoy (5):**
+
+| estado | número | total | mesa | hora | de quién |
+|---|---|---|---|---|---|
+| VOIDED | `D-7da61ab7…` | 0,00 € | B2 | 11:41:23 | 2.ª sesión |
+| VOIDED | `D-9def36f6…` | 0,00 € | T1 | 11:42:41 | esta sesión (abrir y salir) |
+| **DRAFT** | `D-ba2d5996…` | **9,00 €** | **T1** | 11:46:53 | **2.ª sesión — sigue abierta** |
+| **TEST** | **`000029`** | **9,90 €** | **T2** | 12:32:03 | **esta sesión — el cobro del §9** |
+| VOIDED | `D-a4f41ae6…` | 0,00 € | B5 | 12:40:32 | esta sesión (toque errado, cerrada sin líneas) |
+
+**Mesas no libres ahora (3):**
+
+| mesa | zona | estado | total |
+|---|---|---|---|
+| M3 | SALÓN | POR RECOGER | 0,00 € | anterior a hoy |
+| **T1** | TERRAZA | **DRAFT** | **9,00 €** | 2.ª sesión |
+| **T2** | TERRAZA | **POR RECOGER** | 0,00 € | esta sesión, tras cobrar |
+
+**Comandas de cocina de hoy (2):**
+
+| nº | sección | mesa | enviada | recibida |
+|---|---|---|---|---|
+| 1 | BARRA | T1 | 11:54:35 | **nunca** (el KDS estaba apagado) |
+| 1 | BARRA | T2 | 12:35:53 | 12:36:00 |
+
+**Un solo ticket `TEST`: el 000029.** Los demás son borradores anulados o
+abiertos. Nada subió a Holded ni generó registro fiscal: el tenant está en
+ensayo.
 
 ## 9.bis · Qué hace falta para rehacerla
 
