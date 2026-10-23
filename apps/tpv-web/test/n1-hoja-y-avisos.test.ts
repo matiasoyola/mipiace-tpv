@@ -109,6 +109,31 @@ describe("n1-hosteleria-2 · los avisos no tapan trabajo (3)", () => {
   });
 });
 
+describe("n1-hosteleria-2 · las dos salidas de la hoja (6)", () => {
+  // R3 · «toda hoja o ventana se cierra también con el atrás de
+  // Android», y el objetivo que se toca mide ≥ 48.
+  //
+  // La X medía 44 (`h-11 w-11`) y se le da `MIN_TOUCH_PX` = 56, que es el
+  // suelo de la casa para la venta y la sala. Y con la hoja a pantalla
+  // completa esta X es la ÚNICA salida que se ve —el velo que se tocaba
+  // para cerrar ya no existe, porque no hay fuera—, así que es el último
+  // objetivo de la pantalla que puede quedarse corto.
+  //
+  // La fila de la tabla de sabotajes: «una X de 32 px».
+
+  it("la X de cerrar mide el suelo de la casa, no los 44 de antes", () => {
+    expect(MIN_TOUCH_PX).toBe(56);
+    expect(MIN_TOUCH_PX).toBeGreaterThanOrEqual(48);
+  });
+
+  it("SABOTAJE · una X de 32 px no llega ni al suelo de R3", () => {
+    // 32 es el tamaño de los objetivos sueltos que `n1-hosteleria` dejó
+    // apuntados sin tocar (§2.6). Aquí no vale.
+    expect(32).toBeLessThan(48);
+    expect(44).toBeLessThan(MIN_TOUCH_PX);
+  });
+});
+
 describe("n1-hosteleria-2 · lo que esto le devuelve a la comanda", () => {
   // La cuenta que justifica el hallazgo 1, con los números del aparato:
   // la hoja de la mano mide 720 y el 88 % eran 633,6.
