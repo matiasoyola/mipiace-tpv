@@ -16,6 +16,7 @@ import { registerAdminTicketDeliveryRoutes } from "./admin/ticket-delivery.js";
 import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
 import { registerDevolucionesAsesorRoutes } from "./admin/devoluciones-asesor.js";
 import { registerAuthRoutes } from "./auth/routes.js";
+import { registerInvitacionRoutes } from "./auth/invitacion-routes.js";
 import { registerPasswordResetRoutes } from "./auth/password-reset.js";
 import { registerCashiersRoutes } from "./cashiers/routes.js";
 import { registerCatalogRoutes } from "./catalog/routes.js";
@@ -256,6 +257,9 @@ async function main() {
   await registerSuperAdminRoutes(app);
   await registerAuthRoutes(app);
   await registerPasswordResetRoutes(app);
+  // primer-acceso · el enlace del primer acceso. Junto al reset porque es
+  // su misma maquinaria con otro tipo de token (decisión 1).
+  await registerInvitacionRoutes(app);
   await registerOnboardingRoutes(app);
   await registerCatalogRoutes(app);
   // catalogo-local · el CRUD del catálogo propio (ADR-017).

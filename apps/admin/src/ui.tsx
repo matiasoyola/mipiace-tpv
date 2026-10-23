@@ -3,8 +3,14 @@
 // Cajeros, Seguridad, Forgot/Reset password) los reutilicen.
 
 import { useState, type ReactNode } from "react";
-import { AlertCircle, Check, Eye, EyeOff, Loader2 } from "lucide-react";
+import { AlertCircle, Check, Eye, EyeOff, FileSignature, Loader2 } from "lucide-react";
 
+import {
+  MENSAJE_CONTRATO_NO_VIGENTE,
+  MENSAJE_CONTRATO_SIN_ACEPTAR,
+} from "@mipiacetpv/contrato-encargado";
+
+import { readEffectiveAuth } from "./api.js";
 import { Logo } from "./Logo.js";
 
 export function CenteredCard({ children }: { children: ReactNode }) {
@@ -20,7 +26,48 @@ export function CenteredCard({ children }: { children: ReactNode }) {
   );
 }
 
-export function CenteredLoader({ label }: { label: string }) {
+/**
+ * El cargador de pantalla completa, y el único sitio donde se decide qué
+ * se pinta cuando la carga **falló**.
+ *
+ * hotfix-menu-capabilities · `error` es opcional pero no es decorativo.
+ * Lo que se vio en producción (Jardín de Gredos, pantalla de Bonos) es
+ * que una pila de pantallas guardaban el fallo de la carga en un estado
+ * y justo debajo tenían un `if (!datos) return <CenteredLoader/>` que se
+ * adelantaba a cualquier sitio donde ese estado se pintara. Resultado:
+ * «Cargando bonos…» girando para siempre y ni una palabra de qué pasó.
+ *
+ * Con el error aquí, el mismo `return` que antes se colgaba cuenta lo que
+ * pasó. Y lleva «Reintentar» porque estas pantallas se pintan ANTES de la
+ * barra lateral: sin botón, la única salida es el botón de atrás del
+ * navegador.
+ *
+ * Quien ya pinta su propio aviso de error —las pantallas que meten el
+ * cargador DENTRO del `AdminShell`, debajo de un `<FieldError>`— no tiene
+ * que pasar nada: el parámetro por defecto deja el cargador de siempre.
+ */
+export function CenteredLoader({
+  label,
+  error = null,
+}: {
+  label: string;
+  error?: string | null;
+}) {
+  if (error != null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mipiace-stone font-sans px-5">
+        <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 p-6 text-center">
+          <AlertCircle className="w-5 h-5 mx-auto mb-3 text-red-600" />
+          <p className="text-[13.5px] text-mipiace-ink">{error}</p>
+          <div className="mt-4 flex justify-center">
+            <OutlineButton onClick={() => window.location.reload()}>
+              Reintentar
+            </OutlineButton>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen flex items-center justify-center bg-mipiace-stone font-sans">
       <div className="flex flex-col items-center gap-3 text-slate-500">
@@ -202,8 +249,71 @@ export function OutlineButton({
   );
 }
 
+// primer-acceso (decisión 6) · EL 423 DEL CONTRATO NO ES UN ERROR ROJO.
+//
+// «Si cualquier pantalla de clínica o residencia recibe ese 423, en vez de
+// un error enseña "Falta aceptar el contrato de datos" y, a la
+// propietaria, el botón para ir.»
+//
+// ── Por qué AQUÍ y no en cada pantalla ─────────────────────────────
+//
+// Son unas veinte pantallas de clínica y residencia, y todas pintan el
+// mensaje del servidor con este mismo componente. Tocarlas una a una
+// habría sido veinte sitios donde olvidarse de una, y la olvidada sería
+// precisamente la que la directora abra el primer día.
+//
+// El reconocimiento va por el MENSAJE y no por el código HTTP porque eso
+// es lo que llega hasta aquí: las pantallas guardan `err.message` en un
+// `useState<string>`. Y no es frágil: los dos textos son constantes
+// exportadas del paquete `contrato-encargado` —la misma fuente que los
+// manda— así que no hay dos cadenas que mantener. Si alguien cambia el
+// texto allí, esto lo sigue.
+const MENSAJES_DEL_CONTRATO = [
+  MENSAJE_CONTRATO_SIN_ACEPTAR,
+  MENSAJE_CONTRATO_NO_VIGENTE,
+];
+
+/** `true` si este mensaje es la negativa del contrato de encargado. */
+export function esFaltaDeContrato(message: string | null): boolean {
+  return message != null && MENSAJES_DEL_CONTRATO.includes(message);
+}
+
+function FaltaElContrato({ message }: { message: string }) {
+  // El rol decide si hay botón, no si hay aviso: a quien no puede
+  // aceptarlo se le dice qué falta y quién lo hace, y no se le pinta un
+  // botón que la ruta le va a negar.
+  const esDuena = readEffectiveAuth().role === "OWNER";
+  return (
+    <div
+      data-test="falta-contrato"
+      className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[13px] leading-relaxed text-amber-900"
+    >
+      <div className="flex items-start gap-2">
+        <FileSignature className="mt-px h-4 w-4 shrink-0" aria-hidden />
+        <div>
+          <p className="font-semibold">Falta aceptar el contrato de datos</p>
+          <p className="mt-1">
+            {esDuena
+              ? message
+              : "La propietaria del centro tiene que aceptarlo antes de usar esta pantalla."}
+          </p>
+          {esDuena && (
+            <a
+              href="/admin/contrato-tratamiento"
+              className="mt-2.5 inline-flex min-h-[36px] items-center rounded-lg border border-amber-300 bg-white px-3 text-[13px] font-medium text-amber-900"
+            >
+              Ir al contrato
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function FieldError({ message }: { message: string | null }) {
   if (!message) return null;
+  if (esFaltaDeContrato(message)) return <FaltaElContrato message={message} />;
   return (
     <div className="mt-3 flex items-start gap-2 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
       <AlertCircle className="w-4 h-4 mt-px shrink-0" />

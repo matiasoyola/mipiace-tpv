@@ -3609,22 +3609,46 @@ model TicketEmailJob {
   @@map("ticket_email_jobs")
 }
 
+// primer-acceso · DOS CLASES DE ENLACE, UNA SOLA MAQUINARIA.
+//
+// `RESET` es el de siempre: «olvidé mi contraseña», 1 hora.
+// `INVITE` es el primer acceso: lo manda el correo de bienvenida cuando
+// un super-admin activa la cuenta, y dura 7 días porque el día del alta
+// la persona del centro puede estar de visita con la inspección.
+//
+// Son la MISMA tabla y el mismo mecanismo (hash argon2id, un solo uso,
+// `usedAt`) por decisión 1 del bloque: inventar un segundo mecanismo
+// habría duplicado el sitio donde se decide si un enlace sigue vivo, y
+// entonces una de las dos copias se quedaría sin el `usedAt` o sin el
+// throttle. Lo que los separa es el tipo, y el tipo lo mira cada ruta:
+// un token de reset NO vale como invitación ni al revés.
+enum PasswordResetTokenType {
+  RESET
+  INVITE
+}
+
 // Token de recuperación de contraseña del propietario (§17.6). El token
 // plano se envía sólo por email; en BD guardamos sólo su hash argon2id.
-// TTL 1h, un solo uso. La revocación masiva al confirmar el reset se
-// hace vía `user.tokenVersion += 1`.
+// TTL 1h para `RESET` y 7 días para `INVITE`, un solo uso. La revocación
+// masiva al confirmar el reset se hace vía `user.tokenVersion += 1`.
 model PasswordResetToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  tokenHash String    @map("token_hash")
-  expiresAt DateTime  @map("expires_at") @db.Timestamptz()
-  usedAt    DateTime? @map("used_at") @db.Timestamptz()
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  id        String                 @id @default(uuid()) @db.Uuid
+  userId    String                 @map("user_id") @db.Uuid
+  tokenHash String                 @map("token_hash")
+  // `RESET` por defecto: las filas que ya existían son todas de reset, y
+  // el default hace que la migración no tenga que reescribirlas.
+  type      PasswordResetTokenType @default(RESET)
+  expiresAt DateTime               @map("expires_at") @db.Timestamptz()
+  usedAt    DateTime?              @map("used_at") @db.Timestamptz()
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz()
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
+  // El candidato de una invitación se busca por tipo + vivos: sin este
+  // índice, cada aceptación recorre también los resets de la casa.
+  @@index([type, usedAt])
   @@map("password_reset_tokens")
 }
 

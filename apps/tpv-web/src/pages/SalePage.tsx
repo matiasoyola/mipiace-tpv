@@ -3045,6 +3045,11 @@ export function SalePage(props: SalePageProps) {
             )}
             <HospitalityWorkspace
               overlayEncima={overlayEncima}
+              // n1-hosteleria (hallazgo 8) · más ancho que `overlayEncima`: el
+              // cajón y «Tickets pasados» no quitan la barra del total, pero sí
+              // cierran la hoja de la comanda, que al volver tapaba la búsqueda
+              // y las familias.
+              fueraDeLaVenta={overlayEncima || showHistory || drawerOpen}
               products={filtered}
               searchQuery={query}
               catalogError={catalogError}

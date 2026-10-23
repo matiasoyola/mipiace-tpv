@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cuadro de control · residencia (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.383.0/dist/umd/lucide.min.js"></script>
+<style>
+  :root{
+    --coral:#E97058; --coral-dark:#C75A45; --coral-soft:#FDEAE3;
+    --ink:#1F2937; --ink-soft:#374151; --stone:#F8F6F3;
+    --line:#E2E8F0; --muted:#64748B; --faint:#94A3B8;
+    --amber-bg:#FFFBEB; --amber-line:#FCD34D; --amber-tx:#B45309;
+    --red-bg:#FEF2F2; --red-line:#FCA5A5; --red-tx:#B91C1C;
+    --green-bg:#ECFDF5; --green-tx:#047857;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'DM Sans',-apple-system,system-ui,sans-serif;font-feature-settings:'cv11','ss01';
+    -webkit-font-smoothing:antialiased;background:var(--stone);color:var(--ink);font-size:14px}
+  a{color:inherit;text-decoration:none}
+  .num{font-variant-numeric:tabular-nums}
+  .app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+
+  /* menú */
+  aside{background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:20px 14px}
+  .centro{padding:4px 10px 22px}
+  .centro b{display:block;font-weight:600;font-size:15.5px;letter-spacing:-.01em}
+  .centro span{font-size:12px;color:var(--muted)}
+  nav a{display:flex;align-items:center;gap:12px;height:46px;padding:0 12px;border-radius:14px;color:#475569;font-weight:500;margin-bottom:2px}
+  nav a svg{width:19px;height:19px;stroke-width:2.25;color:#94A3B8}
+  nav a.on{background:var(--coral-soft);color:var(--coral-dark)}
+  nav a.on svg{color:var(--coral)}
+  nav a:hover:not(.on){background:#F8FAFC}
+  nav .badge{margin-left:auto;font-size:11.5px;font-weight:500;border-radius:9px;padding:2px 8px;background:var(--stone);color:var(--ink-soft)}
+  nav .badge.r{background:var(--red-bg);color:var(--red-tx)}
+  nav .badge.a{background:var(--amber-bg);color:var(--amber-tx)}
+  .spacer{flex:1}
+  .conf{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+  .yo{display:flex;align-items:center;gap:10px;padding:12px 10px 0}
+  .yo i{width:34px;height:34px;border-radius:11px;background:var(--ink);color:#fff;display:grid;place-items:center;font-style:normal;font-size:12.5px;font-weight:600}
+  .yo b{font-weight:500;font-size:13px;display:block}.yo span{font-size:12px;color:var(--muted)}
+
+  /* contenido */
+  main{padding:26px 32px 40px;max-width:1240px}
+  .cab{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px}
+  .cab h1{font-size:23px;font-weight:600;letter-spacing:-.015em}
+  .cab p{color:var(--muted);margin-top:3px}
+  .hoy{display:flex;gap:18px;color:var(--ink-soft);font-size:13.5px}
+  .hoy b{font-weight:600}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:20px;padding:16px 18px 15px;display:flex;flex-direction:column;gap:2px;position:relative}
+  .kpi:hover{box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .kpi .eti{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:7px}
+  .kpi .eti svg{width:16px;height:16px;stroke-width:2.25}
+  .kpi .cifra{font-size:38px;font-weight:600;letter-spacing:-.03em;line-height:1.15}
+  .kpi .det{font-size:12.5px;color:var(--ink-soft)}
+  .kpi .ir{position:absolute;right:16px;top:16px;width:16px;height:16px;color:var(--faint)}
+  .kpi.r{background:var(--red-bg);border-color:var(--red-line)} .kpi.r .eti,.kpi.r .det b{color:var(--red-tx)}
+  .kpi.a{background:var(--amber-bg);border-color:var(--amber-line)} .kpi.a .eti,.kpi.a .det b{color:var(--amber-tx)}
+  .kpi.c{border-color:rgba(233,112,88,.35)} .kpi.c .eti{color:var(--coral-dark)}
+
+  .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-bottom:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:18px 22px}
+  .card h2{font-size:16.5px;font-weight:600;letter-spacing:-.01em;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .card h2 small{font-size:12.5px;font-weight:500;color:var(--coral-dark)}
+  .card h2 em{font-style:normal;font-weight:400;font-size:13px;color:var(--muted);margin-left:6px}
+
+  .planta{display:grid;grid-template-columns:86px 1fr 74px;align-items:center;gap:12px;padding:6px 0}
+  .planta .bar{height:8px;border-radius:6px;background:#EEF2F6;overflow:hidden}
+  .planta .bar i{display:block;height:100%;background:var(--coral);border-radius:6px}
+  .planta .n{font-size:13px;color:var(--ink-soft);text-align:right}
+  .nota{font-size:12.5px;color:var(--muted);margin:6px 0 14px}
+
+  .sub{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;margin:6px 0 6px}
+  .fila{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #F1F5F9}
+  .fila:first-of-type{border-top:0}
+  .niv{font-size:11px;font-weight:600;border-radius:7px;padding:3px 7px;min-width:30px;text-align:center}
+  .n3{background:#FEE2E2;color:var(--red-tx)} .n2{background:#FEF3C7;color:var(--amber-tx)} .n1{background:#F1F5F9;color:#475569}
+  .fila .q{flex:1}.fila .q b{font-weight:500;display:block}.fila .q span{font-size:12.5px;color:var(--muted)}
+  .fila .h{font-size:12.5px;color:var(--muted)}
+  .chk{width:20px;height:20px;border-radius:7px;border:1.5px solid #CBD5E1;flex:none}
+  .chk.ok{background:var(--green-bg);border-color:#6EE7B7;display:grid;place-items:center}
+  .chk.ok svg{width:13px;height:13px;color:var(--green-tx);stroke-width:3}
+  .vencida{color:var(--red-tx)!important;font-weight:500}
+  .boton{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:12px;background:var(--stone);font-weight:500;font-size:13px}
+
+  .mes{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  .ind{border-radius:16px;padding:11px 13px;background:var(--stone)}
+  .ind span{font-size:12px;color:var(--muted);display:block;line-height:1.3;min-height:31px}
+  .ind b{font-size:20px;font-weight:600;letter-spacing:-.02em}
+  .ind.mal{background:var(--red-bg)} .ind.mal b{color:var(--red-tx)}
+  .ind.bien{background:var(--green-bg)} .ind.bien b{color:var(--green-tx)}
+
+  .leyenda{max-width:1240px;margin:0 32px 28px;padding:14px 18px;border:1px dashed #CBD5E1;border-radius:16px;color:var(--ink-soft);font-size:13px;line-height:1.55;background:#fff}
+  .leyenda b{font-weight:600}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="centro"><b>Jardín de Gredos</b><span>Residencia · 49 plazas</span></div>
+    <nav>
+      <a class="on" href="#"><i data-lucide="layout-dashboard"></i>Panel</a>
+      <a href="#"><i data-lucide="users"></i>Residentes<span class="badge a num">12</span></a>
+      <a href="#"><i data-lucide="triangle-alert"></i>Incidencias<span class="badge r num">4</span></a>
+      <a href="#"><i data-lucide="repeat-2"></i>Relevos<span class="badge a num">2</span></a>
+      <a href="#"><i data-lucide="calendar-check"></i>Obligaciones<span class="badge r num">1</span></a>
+    </nav>
+    <div class="spacer"></div>
+    <nav class="conf"><a href="#"><i data-lucide="settings"></i>Configuración</a></nav>
+    <div class="yo"><i>CO</i><div><b>Carmen Oyola</b><span>Dirección</span></div></div>
+  </aside>
+
+  <main>
+    <div class="cab">
+      <div>
+        <h1>Buenos días, Carmen</h1>
+        <p>Viernes 23 de octubre · turno de mañana, hasta las 15:00</p>
+      </div>
+      <div class="hoy num">
+        <span><b>41</b> residentes en el centro</span>
+        <span><b>2</b> fuera (hospital, familia)</span>
+      </div>
+    </div>
+
+    <!-- lo que hay que mirar: cada cifra se abre -->
+    <div class="kpis">
+      <a class="kpi r" href="#"><i class="ir" data-lucide="arrow-up-right"></i>
+        <span class="eti"><i data-lucide="triangle-alert"></i>Incidencias abiertas</span>
+        <span class="cifra num">4</span>
+        <span class="det"><b>1 grave</b> · 2 sin comunicar a la familia</span></a>
+      <a class="kpi a" href="#"><i class="ir" data-lucide="arrow-up-right"></i>
+        <span class="eti"><i data-lucide="repeat-2"></i>Relevos sin confirmar</span>
+        <span class="cifra num">2</span>
+        <span class="det">El de noche de ayer, <b>planta segunda</b></span></a>
+      <a class="kpi r" href="#"><i class="ir" data-lucide="arrow-up-right"></i>
+        <span class="eti"><i data-lucide="calendar-check"></i>Obligaciones</span>
+        <span class="cifra num">1</span>
+        <span class="det"><b>vencida</b> · 3 para hoy</span></a>
+      <a class="kpi c" href="#"><i class="ir" data-lucide="arrow-up-right"></i>
+        <span class="eti"><i data-lucide="file-pen-line"></i>Fichas incompletas</span>
+        <span class="cifra num">12</span>
+        <span class="det">de 43 · faltan 31 datos · <b style="color:var(--coral-dark);font-weight:500">Completar</b></span></a>
+    </div>
+
+    <div class="cols">
+      <!-- izquierda: ahora -->
+      <section class="card">
+        <h2><span>Ahora<em>turno de mañana · 10:42</em></span><small>Ver el turno</small></h2>
+        <div class="planta num"><span>Primera</span><span class="bar"><i style="width:62%"></i></span><span class="n">18 de 29</span></div>
+        <div class="planta num"><span>Segunda</span><span class="bar"><i style="width:41%"></i></span><span class="n">9 de 22</span></div>
+        <p class="nota">Cuidados registrados en las puertas sobre lo que toca a esta hora.</p>
+
+        <div class="sub">Lo que no puede esperar</div>
+        <a class="fila" href="#"><span class="niv n3">N3</span><span class="q"><b>Caída en el baño · hab. 112 A</b><span>Pendiente de que la cierre otra persona · DUE avisada</span></span><span class="h num">08:55</span></a>
+        <a class="fila" href="#"><span class="niv n2">N2</span><span class="q"><b>No ha desayunado, segundo día · hab. 204 B</b><span>Sin comunicar a la familia</span></span><span class="h num">09:30</span></a>
+        <a class="fila" href="#"><span class="niv n2">N2</span><span class="q"><b>Queja de un familiar por la ropa · hab. 118 A</b><span>Sin respuesta · plazo 10 días</span></span><span class="h">ayer</span></a>
+        <a class="fila" href="#"><span class="niv n1">N1</span><span class="q"><b>Persiana rota · hab. 206</b><span>Avería · mantenimiento</span></span><span class="h">ayer</span></a>
+      </section>
+
+      <!-- derecha: hoy -->
+      <section class="card">
+        <h2><span>Hoy</span><small>Ver obligaciones</small></h2>
+        <div class="fila"><span class="chk"></span><span class="q"><b class="vencida">Revisión mensual de extintores</b><span class="vencida">Venció el 20/10</span></span></div>
+        <div class="fila"><span class="chk"></span><span class="q"><b>Registros APPCC de cocina</b><span>Cocina · antes de las 15:00</span></span></div>
+        <div class="fila"><span class="chk"></span><span class="q"><b>Pedido de alimentación</b><span>Dirección</span></span></div>
+        <div class="fila"><span class="chk ok"><i data-lucide="check"></i></span><span class="q"><b>Registro diario de jornada</b><span>Hecho · 08:05</span></span></div>
+
+        <div class="sub" style="margin-top:14px">Relevos</div>
+        <div class="fila"><span class="chk"></span><span class="q"><b>Noche del 22 · planta segunda</b><span>14 líneas · nadie lo ha confirmado</span></span><a class="boton" href="#">Abrir</a></div>
+        <div class="fila"><span class="chk ok"><i data-lucide="check"></i></span><span class="q"><b>Noche del 22 · planta primera</b><span>Confirmado por Rosa (DUE) · 08:10</span></span></div>
+      </section>
+    </div>
+
+    <!-- abajo: el mes, compacto -->
+    <section class="card">
+      <h2><span>Octubre<em>4 de 6 indicadores fuera de objetivo</em></span><small>Ver indicadores</small></h2>
+      <div class="mes num">
+        <div class="ind bien"><span>Más de 3 días sin deposición</span><b>0</b></div>
+        <div class="ind mal"><span>Vistos por el médico</span><b>62 %</b></div>
+        <div class="ind"><span>Gimnasia de mantenimiento</span><b>—</b></div>
+        <div class="ind mal"><span>Estimulación cognitiva</span><b>41 %</b></div>
+        <div class="ind mal"><span>Actividades socioculturales</span><b>1</b></div>
+        <div class="ind mal"><span>Averías de más de 24 h</span><b>2</b></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="leyenda">
+  <b>Mockup · cuadro de control de la residencia.</b> Datos inventados. Qué cambia respecto a hoy:
+  el menú tiene sólo las 5 cosas del día a día (con su contador) y todo lo que se configura una vez va a
+  «Configuración»; sin «Tiendas», sin agenda, sin el aviso de cuenta en ensayo del TPV, sin
+  «Declaración responsable» y sin la marca del TPV. El panel usa todo el ancho y cabe en una pantalla:
+  arriba las 4 cifras que hay que mirar (cada una se abre), en medio «Ahora» (el turno por planta y lo
+  que no puede esperar) y «Hoy» (lo que vence hoy y los relevos sin confirmar, como lista para tachar),
+  y abajo el mes en una sola fila. Lo que pasa de 4-5 elementos se ve con «Ver…», no alarga la página.
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>

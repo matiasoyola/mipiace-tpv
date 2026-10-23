@@ -212,15 +212,37 @@ export function SentLineCocina(props: SentLineCocinaProps) {
             {props.units}
           </span>
         )}
-        {/* Sin `−`/`+`, la fila es la de v2-H1: nombre e importe aquí. */}
+        {/* Sin `−`/`+`, la fila es la de v2-H1: nombre e importe aquí.
+
+            n1-hosteleria (hallazgo 3) · y el nombre llega a DOS líneas,
+            como el de la rama con `−`/`+` que arregló auditoria-sirope
+            (#8). Era la última línea de la comanda que seguía con
+            `truncate`: la pasada del 18-10 midió «Café Americano» en 71
+            px visibles de 178 («Café…») y «Café Solo» en 64 de 104
+            («Caf…»), y con dos cafés distintos en la misma comanda no hay
+            forma de distinguirlos antes de enviar.
+
+            Pasa de `truncate` (una línea, puntos suspensivos) a
+            `line-clamp: 2`. No es `truncate` con dos líneas: `truncate`
+            lleva `white-space: nowrap` dentro y las anularía. Y
+            `wordBreak: break-word` para que no corte a mitad de palabra,
+            que es de lo que se queja el hallazgo. */}
         {!props.puedeCorregir && (
           <>
             <button
               type="button"
               onClick={props.onClick}
               data-testid="cart-line-name"
-              className="flex-grow min-w-0 truncate font-medium text-left"
-              style={{ fontSize: SENT_LINE_NAME_PX }}
+              className="flex-grow min-w-0 font-medium text-left"
+              style={{
+                fontSize: SENT_LINE_NAME_PX,
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 2,
+                overflow: "hidden",
+                lineHeight: 1.15,
+                wordBreak: "break-word",
+              }}
             >
               {props.nombre}
             </button>

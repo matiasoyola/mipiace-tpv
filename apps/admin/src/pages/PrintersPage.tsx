@@ -195,7 +195,7 @@ export function PrintersPage() {
     return map;
   }, [printers]);
 
-  if (!stores) return <CenteredLoader label="Cargando impresoras…" />;
+  if (!stores) return <CenteredLoader label="Cargando impresoras…" error={error} />;
 
   return (
     <AdminShell title="Impresoras">

@@ -13,6 +13,7 @@ import { DevicesPage } from "./pages/DevicesPage.js";
 import { DevolucionesAsesorPage } from "./pages/DevolucionesAsesorPage.js";
 import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { HoldedPage } from "./pages/HoldedPage.js";
+import { BienvenidaPage } from "./pages/BienvenidaPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { PrintersPage } from "./pages/PrintersPage.js";
 import { ContratoTratamientoPage } from "./pages/ContratoTratamientoPage.js";
@@ -138,6 +139,16 @@ interface MeResponse {
     // hace que una residencia entre al panel de dirección en vez de a su
     // cuenta. Opcional por la misma razón que los otros cuatro.
     residenciaEnabled?: boolean;
+    // primer-acceso (punto 3) · el estado del contrato de encargado, en la
+    // misma respuesta que decide a dónde entra. Opcional por lo mismo que
+    // los módulos: si el front va por delante del backend, `undefined` se
+    // comporta como el master de siempre. `null` en una sesión de
+    // impersonación — Mi Piace no abre nada clínico (clinica-7 · 24).
+    contratoClinico?: {
+      estado: "APAGADO" | "SIN_CONTRATO" | "VIGENTE" | "SOLO_LECTURA";
+      falta: boolean;
+      puedeAceptar: boolean;
+    } | null;
   };
 }
 
@@ -181,6 +192,10 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/change-password-initial" element={<ChangePasswordInitialPage />} />
+        {/* primer-acceso · a donde lleva el botón del correo de
+            bienvenida. Fuera de cualquier gate: quien llega aquí no tiene
+            sesión todavía — el enlace ES su credencial. */}
+        <Route path="/bienvenida" element={<BienvenidaPage />} />
         <Route path="/onboarding" element={<ConnectHoldedPage />} />
         <Route path="/onboarding/sync" element={<SyncProgressPage />} />
         <Route path="/onboarding/done" element={<SyncSummaryPage />} />
@@ -341,6 +356,29 @@ export function RootRouter() {
       try {
         const me = await api<MeResponse>("/auth/me");
         if (cancelled) return;
+        // primer-acceso (punto 3) · **EL CONTRATO, ANTES QUE NADA.**
+        //
+        // En una cuenta con la clínica encendida, nadie le decía a la
+        // dueña que lo primero es aceptar el contrato de datos: la sección
+        // existe en el menú, pero si no la encuentra, cada pantalla de
+        // residentes le contesta con un 423. La directora de una
+        // residencia no tiene por qué saber qué es un contrato de
+        // encargado ni dónde está.
+        //
+        // Va DELANTE del desvío del MANAGER y del de los módulos a
+        // propósito: con el contrato sin aceptar, ninguna de las dos
+        // pantallas de destino funciona. Y quien no puede aceptarlo
+        // aterriza igual en la misma pantalla, que le dice que la
+        // propietaria tiene que hacerlo — y no le pinta botones que no
+        // puede usar (lo decide el servidor con `puedeAceptar`).
+        //
+        // No es un muro nuevo (decisión 6): el 423 de `negativaClinica`
+        // sigue siendo la garantía. Esto sólo hace que llegue al contrato
+        // antes de chocar con él.
+        if (me.tenant.contratoClinico?.falta === true) {
+          navigate("/admin/contrato-tratamiento", { replace: true });
+          return;
+        }
         // B6 §1: el MANAGER nunca pasa por onboarding (no puede conectar
         // Holded ni mover el sync inicial). Va directo a la bandeja de
         // tickets-errors, que es su pantalla operativa principal.
@@ -1536,7 +1574,7 @@ function SkuReviewPage() {
     setItems((curr) => (curr ?? []).filter((it) => it.id !== productId));
   }
 
-  if (!items) return <CenteredLoader label="Cargando bandeja…" />;
+  if (!items) return <CenteredLoader label="Cargando bandeja…" error={error} />;
   return (
     <AdminShell title="Productos pendientes de SKU">
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">

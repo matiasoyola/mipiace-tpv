@@ -21,11 +21,20 @@ import {
   type RoomZone,
 } from "../src/lib/roomGrid.js";
 
-/** La sala de Sirope el 18-10: barra, salón y terraza, pocas mesas. */
+/**
+ * La sala de Sirope, **contada en producción el 18-10-2026**: BARRA 8,
+ * SALÓN 7, TERRAZA 8 = 23 mesas, ninguna agrupada. En el orden en que
+ * las pinta el lienzo (`ZONE_ORDER`, Barra primero).
+ *
+ * El 3 + 6 + 4 que había aquí eran 13 y no cuadraban con la pasada del
+ * 18-10, que midió 23 sobre la cuenta real (hallazgo 1). Las
+ * conclusiones de #13 no cambian: en el D8 sigue eligiendo 152, que es
+ * lo que este banco afirma.
+ */
 const SIROPE: RoomZone[] = [
-  { tables: 3, isBar: true },
-  { tables: 6 },
-  { tables: 4 },
+  { tables: 8, isBar: true },
+  { tables: 7 },
+  { tables: 8 },
 ];
 
 /** La Maestranza, que es el caso que fijó el 144. */

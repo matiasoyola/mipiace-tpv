@@ -110,7 +110,7 @@ export function PlantillasPage() {
     void recargar();
   }, []);
 
-  if (!datos || !borrador) return <CenteredLoader label="Cargando plantillas…" />;
+  if (!datos || !borrador) return <CenteredLoader label="Cargando plantillas…" error={error} />;
 
   async function guardar(nivel: NivelDependencia) {
     setError(null);
