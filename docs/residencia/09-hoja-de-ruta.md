@@ -20,16 +20,20 @@ implante, regla: desplegar = migrar + dejar el papel.
 
 ---
 
-## Estado a 22-10-2026
+## Estado a 23-10-2026
 
 **En producción `2157e7d` (desplegado el 22-10-2026): residencia-1, 1b, 2, 3, 4, 5 y 6. La v1 está
 completa.** Ningún tenant tiene aún la residencia encendida.
+
+**`calidad-1` hecho y en PR contra master** (`docs/blocks/calidad-1-done.md`): el mapa único de
+procesos cierra la NC 01 de AENOR por construcción, los indicadores pasan de 6 a 13 y las no
+conformidades tienen su ciclo entero con verificación de eficacia y PAC en PDF.
 
 ## Mapa de documentos
 
 | Doc | Módulo |
 |---|---|
-| `00-decisiones.md` | Decisiones D-01 a D-76 y v1 |
+| `00-decisiones.md` | Decisiones D-01 a D-76 y v1 (D-70 a D-76: el módulo de calidad) |
 | `01-modelo-datos.md` | Modelo de la v1 sobre mipiacetpv |
 | `02-medicacion.md` | Medicación |
 | `03-historia-residente.md` | Ficha clínica, PAI, escalas, lesiones, ausencias, sujeciones, ingreso y alta |
@@ -64,8 +68,8 @@ fecha del informe del 22/10/2026 (R4-R6, R17, R18, §3 y §5 del doc de registro
 
 | Bloque | Contenido | Inspección |
 |---|---|---|
-| calidad-1 | Mapa de procesos único, riesgos, indicadores calculados, NC y acciones con verificación de eficacia y PAC (`code-prompts/bloque-calidad-1.md`) | R9 (indicador de cumplimentación por turno) |
-| calidad-2 | Documentos versionados con revisión obligatoria, auditorías, paquete de evidencias, revisión por la dirección, personal | R13 (órganos de participación con acta), R14 (cuadrante), R15 (listado de personal con bajas y sustitutos), **«Paquete de inspección»** (PDF firmado por periodo, mismo patrón que el de AENOR), exportación del libro (R2) y de quejas con respuesta comunicada (R3) |
+| calidad-1 **· hecho** | Mapa de procesos único, riesgos, indicadores calculados, NC y acciones con verificación de eficacia y PAC (`code-prompts/bloque-calidad-1.md` · `blocks/calidad-1-done.md`) | R9 (indicador de cumplimentación por turno y zona) **hecho** |
+| calidad-2 | Documentos versionados con revisión obligatoria, auditorías, paquete de evidencias, revisión por la dirección, personal. **Y lo que calidad-1 deja anotado**: el PAC como obligación disparada por un hecho, el histórico de revisiones de un riesgo, el indicador de absentismo (necesita el cuadrante) y la representatividad de las encuestas | R13 (órganos de participación con acta), R14 (cuadrante), R15 (listado de personal con bajas y sustitutos), **«Paquete de inspección»** (PDF firmado por periodo, mismo patrón que el de AENOR), exportación del libro (R2) y de quejas con respuesta comunicada (R3) |
 
 ### Fase 2 · historia clínica y medicación — objetivo: verano 2027
 
