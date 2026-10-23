@@ -316,6 +316,11 @@ export interface Panel {
   };
   indicadores: ValorDeIndicador[];
   mes: string;
+  /** primer-acceso (punto 4) · el centro no tiene todavía ni un
+   *  residente. Opcional porque el panel de una API anterior a este
+   *  bloque no lo trae — y `undefined` se comporta como «no está vacío»,
+   *  que es el panel de siempre. */
+  centroVacio?: boolean;
   generadoEn: string;
 }
 
