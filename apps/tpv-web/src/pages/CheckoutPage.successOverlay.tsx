@@ -975,7 +975,7 @@ function QrModal({
  * el documento. Quien lo necesite en PDF lo tiene en el histórico desde
  * un aparato que sepa abrirlo.
  */
-function LecturaDelTicket({ document }: { document: TicketDocument }) {
+export function LecturaDelTicket({ document }: { document: TicketDocument }) {
   const { ticket, store, lines, totals, payment } = document;
   return (
     <div

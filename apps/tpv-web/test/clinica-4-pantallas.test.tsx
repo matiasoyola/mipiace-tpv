@@ -199,6 +199,31 @@ describe("clinica-4 · el consentimiento se firma con el dedo", () => {
     expect(texto()).toContain("Carmen Rodríguez López");
   });
 
+  // clinica-8 (fase B, 15) · EL TEXTO SE DEJA DESPLAZAR HASTA LA FIRMA.
+  //
+  // Auditoría del 18-10, punto 12: «el texto largo se come el gesto de
+  // desplazar; la firma solo se alcanza arrastrando por los márgenes».
+  // El texto vivía en una caja con `max-h-[260px] overflow-y-auto`: el
+  // dedo que baja por encima mueve el texto DENTRO de su caja y, al
+  // llegar abajo, el navegador no encadena el scroll a la página hasta
+  // que se levanta el dedo. Para llegar a la caja de firma había que
+  // acertar en los 16 px de margen de la tarjeta.
+  //
+  // Un scroll dentro de otro scroll es un problema de desplazamiento,
+  // no de altura: se quita el de dentro.
+  it("el texto NO tiene scroll propio: un gesto llega de la primera línea a la firma", async () => {
+    await montarConsentimientos();
+    await pulsar(host.querySelector('[data-test="plantilla-cirugia-ungueal"]'));
+    const caja = host.querySelector('[data-test="texto-del-consentimiento"]')!;
+    expect(caja.className).not.toContain("overflow-y-auto");
+    expect(caja.className).not.toContain("max-h-");
+    // Y el texto sigue estando entero: lo que se quita es la caja, no
+    // los párrafos. La ley pide que se lea con el paciente.
+    expect(caja.textContent).toContain(
+      "Se me ha explicado en qué consiste la cirugía",
+    );
+  });
+
   it("NO SE FIRMA SIN TRAZO: el botón nace desactivado", async () => {
     await montarConsentimientos();
     await pulsar(host.querySelector('[data-test="plantilla-cirugia-ungueal"]'));

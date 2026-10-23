@@ -1264,3 +1264,157 @@ describe("clinica-3 · la cabecera son fichas con título", () => {
     expect(texto()).not.toContain("Edad");
   });
 });
+
+// ══ clinica-8 · FASE B · 12 Y 13 ════════════════════════════════════
+//
+// Las tres cosas que la fase B le hace a esta pantalla viven aquí y no
+// en un fichero propio porque necesitan ESTA vista: una segunda copia de
+// las trescientas líneas de `vista()` sería un segundo sitio donde
+// mantenerla al día, y la primera que se quedara vieja probaría otra
+// pantalla.
+
+describe("clinica-8 (12) · cerrar la sesión pide confirmación", () => {
+  // «Cerrar la sesión es irreversible y se hace con un toque, sin
+  // confirmar» (auditoría del 18-10, punto 13). Y es literal: lo que el
+  // POST escribe es una entrada firmada con el colegiado, cifrada, que
+  // clinica-6 no sabe editar — una corrección se hace añadiendo.
+
+  it("el primer toque NO manda nada: abre la hoja con el resumen", async () => {
+    await montar(vista({ verImportes: true }));
+    await pulsar(botonPorTexto("4"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    expect(enviado.filter((e) => e.url.endsWith("/cerrar"))).toHaveLength(0);
+    expect(host.querySelector('[data-test="confirmar-cierre"]')).not.toBeNull();
+  });
+
+  it("la hoja no es un «¿seguro?»: enseña LO QUE SE VA A FIRMAR", async () => {
+    await montar(vista({ verImportes: true }));
+    await pulsar(host.querySelector(`[data-zona="${ZONA}"]`) as HTMLElement);
+    await pulsar(botonPorTexto("Uña encarnada"));
+    await pulsar(botonPorTexto("Corte de uñas"));
+    await pulsar(botonPorTexto("7"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    const hoja = host.querySelector('[data-test="confirmar-cierre"]')!;
+    const t = hoja.textContent ?? "";
+    // Quién y a quién.
+    expect(t).toContain("Carmen Rodríguez López");
+    expect(t).toContain("Lucía Martín");
+    // El tipo, la zona con su lesión, el dolor y lo que pasa a caja.
+    expect(t).toContain("Quiropodia");
+    expect(t).toContain("Pie izq. · Dedo gordo: Uña encarnada");
+    expect(t).toContain("7 de 10");
+    expect(t).toContain("Quiropodia básica");
+    // Y las dos cosas que la hacen irreversible.
+    expect(t).toContain("ya no se edita");
+  });
+
+  it("«Seguir en la sesión» vuelve sin mandar nada, y no pierde lo tocado", async () => {
+    await montar(vista({ verImportes: true }));
+    await pulsar(botonPorTexto("4"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await pulsar(host.querySelector('[data-test="volver-a-la-sesion"]')!);
+    expect(host.querySelector('[data-test="confirmar-cierre"]')).toBeNull();
+    expect(enviado.filter((e) => e.url.endsWith("/cerrar"))).toHaveLength(0);
+    // El 4 sigue marcado: no se ha reiniciado nada.
+    expect(botonPorTexto("4")!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("«Cerrar y firmar» es el que manda el POST", async () => {
+    await montar(vista({ verImportes: true }));
+    await pulsar(botonPorTexto("4"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await pulsar(host.querySelector('[data-test="firmar-cierre"]')!);
+    expect(enviado.filter((e) => e.url.endsWith("/cerrar"))).toHaveLength(1);
+  });
+
+  it("la hoja va DESPUÉS de las preguntas de los pendientes", async () => {
+    // Las respuestas también se firman, así que un resumen anterior a
+    // las preguntas sería el resumen de otra cosa.
+    await montar(vista({ verImportes: true, conPendiente: true }));
+    await pulsar(botonPorTexto("4"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    expect(host.querySelector('[data-test="dialogo-de-pendiente"]')).not.toBeNull();
+    expect(host.querySelector('[data-test="confirmar-cierre"]')).toBeNull();
+    await pulsar(botonPorTexto("Sí, hecho"));
+    expect(host.querySelector('[data-test="confirmar-cierre"]')).not.toBeNull();
+    expect(enviado.filter((e) => e.url.endsWith("/cerrar"))).toHaveLength(0);
+  });
+});
+
+describe("clinica-8 (13) · con diabetes se RECOMIENDA «Pie de riesgo»", () => {
+  it("lo dice, dice por qué, y lo marca de un toque", async () => {
+    // `alertaIds` trae «diab» por la valoración de Carmen.
+    await montar(vista({ verImportes: true }));
+    const banda = host.querySelector('[data-test="recomendar-pie-de-riesgo"]');
+    expect(banda).not.toBeNull();
+    expect(banda!.textContent).toContain("diabetes");
+    expect(banda!.textContent).toContain("sensibilidad y los pulsos");
+    // No lo ha marcado solo: el tipo queda escrito en el cuerpo y
+    // congela la especialidad de la sesión.
+    expect(chipDeTipo("Pie de riesgo")!.getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    await pulsar(host.querySelector('[data-test="marcar-pie-de-riesgo"]')!);
+    expect(chipDeTipo("Pie de riesgo")!.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("marcado, la recomendación se va: ya no dice nada", async () => {
+    await montar(vista({ verImportes: true }));
+    await pulsar(host.querySelector('[data-test="marcar-pie-de-riesgo"]')!);
+    expect(
+      host.querySelector('[data-test="recomendar-pie-de-riesgo"]'),
+    ).toBeNull();
+  });
+
+  it("sin diabetes no se recomienda nada", async () => {
+    const v = vista({ verImportes: true });
+    v.cabecera.alertas = ["Anticoagulación"];
+    v.cabecera.alertaIds = ["antic"];
+    await montar(v);
+    expect(
+      host.querySelector('[data-test="recomendar-pie-de-riesgo"]'),
+    ).toBeNull();
+  });
+});
+
+describe("clinica-8 (13) · la escala de dolor y la primera visita", () => {
+  it("las once teclas van en una rejilla de SEIS, así que el «10» no cae solo", async () => {
+    await montar(vista({ verImportes: true }));
+    const escala = host.querySelector('[data-test="escala-de-dolor"]')!;
+    expect(escala.querySelectorAll("button")).toHaveLength(11);
+    // Seis columnas: 0-5 arriba, 6-10 abajo. El «10» siempre con el 6,
+    // el 7, el 8 y el 9. Con `flex-wrap` dependía del ancho, y a los
+    // anchos reales de esta tarjeta entraban diez.
+    expect(escala.className).toContain("grid-cols-6");
+    expect(escala.className).not.toContain("flex-wrap");
+    // Y ninguna tecla baja del peldaño táctil de la casa.
+    for (const b of escala.querySelectorAll("button")) {
+      expect(b.className).toContain("min-w-touch");
+      expect(b.className).toContain("h-touch");
+    }
+  });
+
+  it("en la PRIMERA visita no se pregunta «Desde la última visita»", async () => {
+    // Las tres opciones son «mejor / igual / peor» y en una primera
+    // visita las tres son falsas. Contestada, quedaría escrita en el
+    // cuerpo y mañana la historia pintaría una evolución respecto de una
+    // visita que no existe.
+    await montar(vista({ verImportes: true, conAnterior: false }));
+    expect(texto()).not.toContain("Desde la última visita");
+  });
+
+  it("con visita anterior sí se pregunta, como siempre", async () => {
+    await montar(vista({ verImportes: true }));
+    expect(texto()).toContain("Desde la última visita");
+  });
+
+  it("y el cierre de una primera visita manda `evolucion: null`", async () => {
+    await montar(vista({ verImportes: true, conAnterior: false }));
+    await pulsar(botonPorTexto("4"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
+    expect(cuerpoDelCierre().evolucion).toBeNull();
+  });
+});

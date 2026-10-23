@@ -230,7 +230,8 @@ export function saveToneAssignments(
 function hintedTone(tag: string): CategoryTone | null {
   const slug = normalizeTag(tag);
   for (const { tone, words } of TONE_HINTS) {
-    if (words.some((w) => slug.includes(w))) return tone;
+    // clinica-8 (fase B, 19) · la misma regla que los iconos: ver `casa`.
+    if (words.some((w) => casa(slug, w))) return tone;
   }
   return null;
 }
@@ -286,6 +287,27 @@ export function resolveToneAssignments(
 }
 
 /**
+ * ¿Casa esta palabra con este slug?
+ *
+ * clinica-8 (fase B, 19) · **una palabra de dos o tres letras tiene que
+ * ser el slug ENTERO.** Con `includes` a secas, la pista «te» del té se
+ * comía media lista: «orTEsis» → taza de café, y «corTEs» de la
+ * peluquería también. Es un fallo que estaba desde v1.14 y que el
+ * catálogo de Rosario destapa, porque «órtesis» es una de sus cinco
+ * categorías.
+ *
+ * El corte en cuatro letras no es un número redondo elegido a gusto: es
+ * el único tramo donde `includes` miente. De cuatro para arriba las
+ * palabras de la lista («cafe», «vino», «pan» no, pero «pizza» sí) son
+ * raíces de verdad y acertar por subcadena es lo que hace que
+ * «panaderia» y «panes» caigan en la misma. Por debajo son sílabas.
+ */
+function casa(slug: string, palabra: string): boolean {
+  if (palabra.length <= 3) return slug === palabra;
+  return slug.includes(palabra);
+}
+
+/**
  * Icono Lucide de una categoría. Nunca devuelve null.
  *
  * clinica-8 (fase B, 19) · `porDefecto` es lo que se usa cuando ninguna
@@ -305,7 +327,7 @@ export function iconNameForTag(
 ): CategoryIconName {
   const slug = normalizeTag(tag);
   for (const { icon, words } of ICON_HINTS) {
-    if (words.some((w) => slug.includes(w))) return icon;
+    if (words.some((w) => casa(slug, w))) return icon;
   }
   return porDefecto ?? ICON_BY_TONE[tone];
 }

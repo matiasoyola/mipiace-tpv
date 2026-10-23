@@ -38,6 +38,7 @@ interface FakeUser {
   id: string;
   tenantId: string;
   email: string;
+  alias: string | null;
   passwordHash: string | null;
   pinHash: string | null;
   role: string;
@@ -128,6 +129,10 @@ const fakePrisma: any = {
         id: randomUUID(),
         tenantId: data.tenantId,
         email: data.email,
+        // clinica-8 (fase B, 11) · el nombre visible. `undefined` se
+        // queda en `null`, igual que en la base: así el fake distingue
+        // «la ruta no lo escribió» de «lo escribió vacío».
+        alias: data.alias ?? null,
         passwordHash: data.passwordHash ?? null,
         pinHash: data.pinHash ?? null,
         role: data.role,
@@ -136,7 +141,7 @@ const fakePrisma: any = {
         deletedAt: null,
       };
       users.set(u.id, u);
-      return { id: u.id, email: u.email };
+      return { id: u.id, email: u.email, alias: u.alias };
     }),
   },
   superAdminUser: {
@@ -225,6 +230,32 @@ describe("H1 · activar SIN caja", () => {
     expect(body.tempPassword).toHaveLength(16);
     const owner = [...users.values()].find((u) => u.role === "OWNER")!;
     expect(owner.mustChangePasswordAt).not.toBeNull();
+  });
+
+  // clinica-8 (fase B, 11) · EL NOMBRE DE LA ACTIVACIÓN LLEGA A LA FILA.
+  //
+  // «El nombre de la activación no llega a ningún sitio» (auditoría del
+  // 18-10, punto 17). `ownerName` se pedía en el formulario, se mandaba
+  // en el email de bienvenida y se apuntaba en la auditoría — y no
+  // tocaba la fila. Así que la propietaria nacía sin `alias` y lo que el
+  // TPV pintaba en «Atiende», en «Firmada por» y en el informe de la
+  // paciente era su EMAIL.
+  it("escribe el `alias` del propietario, recortado", async () => {
+    seed();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/activate`,
+      headers: { authorization: `Bearer ${sa()}` },
+      payload: {
+        ownerEmail: "m.oyola+clinica-demo@mipiace.es",
+        ownerName: "  Rosa Martín  ",
+      },
+    });
+    const owner = [...users.values()].find((u) => u.role === "OWNER")!;
+    expect(owner.alias).toBe("Rosa Martín");
+    // Y el email sigue donde estaba: es la credencial y el canal.
+    expect(owner.email).toBe("m.oyola+clinica-demo@mipiace.es");
   });
 
   it("no genera PIN de cajero, y lo dice en la respuesta", async () => {

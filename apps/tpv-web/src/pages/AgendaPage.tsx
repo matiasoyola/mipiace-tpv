@@ -2148,6 +2148,7 @@ function StaffColumn(props: {
     // Con una sola columna no hay nada con lo que repartir: `flex-1`, y
     // el mínimo se queda en el ancho de siempre para que nada encoja.
     <div
+      data-columna-staff={props.staff.userId}
       className={
         props.unica
           ? "flex-1 min-w-44 border-l border-slate-200"
