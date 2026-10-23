@@ -56,16 +56,21 @@ export interface ObligacionParaGenerar {
   startsOn: string;
 }
 
-/** Cuántos días tiene un mes. `mes` 1–12. */
-export function diasDelMes(anio: number, mes: number): number {
-  // El día 0 del mes siguiente es el último del mes pedido, y `Date.UTC`
-  // lo resuelve sin tabla de bisiestos ni `%4`.
-  return new Date(Date.UTC(anio, mes, 0)).getUTCDate();
-}
+// historia-1 · `diasDelMes` SE LLAMABA ASÍ Y VIVÍA AQUÍ.
+//
+// Se renombró a `cuantosDiasTieneElMes` y se movió a `ausencias.ts`,
+// donde ahora la usan las dos: esta página (para recortar «el 31» en
+// febrero) y `diasDelMes(residente, mes)` de D-93, que es la que la
+// facturación de concertadas va a llamar.
+//
+// El nombre se cedió a propósito: «los días del mes de este residente»
+// es la pregunta del producto, y «cuántos días tiene este mes» es una
+// cuenta de calendario. La segunda no puede quedarse el nombre bueno.
+import { cuantosDiasTieneElMes } from "./ausencias.js";
 
 /** El día del mes, recortado a lo que el mes da de sí. Ver la cabecera. */
 export function diaRecortado(anio: number, mes: number, dia: number): number {
-  return Math.min(dia, diasDelMes(anio, mes));
+  return Math.min(dia, cuantosDiasTieneElMes(anio, mes));
 }
 
 /** «YYYY-MM-DD» de un año, mes y día ya recortado. */

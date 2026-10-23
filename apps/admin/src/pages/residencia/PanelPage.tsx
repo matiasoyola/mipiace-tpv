@@ -143,9 +143,20 @@ export function PanelPage() {
   const porArreglar = panel.porArreglar ?? {
     pinesPorRenovar: [],
     residentesSinPlan: [],
+    vueltasPorRevisar: [],
+    ingresosConPendientes: [],
   };
+  // historia-1 · las dos filas nuevas son opcionales por lo mismo que
+  // `panel.porArreglar` lo era en residencia-6: un panel servido por una
+  // API de antes del bloque no las trae, y la pantalla no se puede caer
+  // por eso.
+  const vueltasPorRevisar = porArreglar.vueltasPorRevisar ?? [];
+  const ingresosConPendientes = porArreglar.ingresosConPendientes ?? [];
   const cosasPorArreglar =
-    porArreglar.pinesPorRenovar.length + porArreglar.residentesSinPlan.length;
+    porArreglar.pinesPorRenovar.length +
+    porArreglar.residentesSinPlan.length +
+    vueltasPorRevisar.length +
+    ingresosConPendientes.length;
   const conDato = indicadores.filter((i) => i.valor != null);
   const fuera = conDato.filter((i) => i.dentro === false);
 
@@ -508,6 +519,79 @@ export function PanelPage() {
                           {p.roles.join(", ")}
                         </span>
                       )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* ── historia-1 (D-92) · LAS VUELTAS POR REVISAR ─────
+                **Las primeras de la sección**, y es lo que las distingue
+                de las otras tres: las demás son configuración a medias y
+                esto es una tarea clínica con alguien delante. Quien vuelve
+                de un hospital trae medicación cambiada e informes que
+                nadie ha leído todavía. */}
+            {vueltasPorRevisar.length > 0 && (
+              <div className="rounded-2xl border border-rose-300 bg-rose-50 px-5 py-4">
+                <p className="text-[13.5px] font-medium text-rose-900">
+                  {vueltasPorRevisar.length === 1
+                    ? "1 vuelta del hospital pendiente de revisar"
+                    : `${vueltasPorRevisar.length} vueltas del hospital pendientes de revisar`}
+                </p>
+                <p className="mt-1 text-[13px] text-rose-900">
+                  Vuelven con medicación cambiada e informes que hay que
+                  leer. Lo confirma la DUE, y queda quién y cuándo.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {vueltasPorRevisar.map((v) => (
+                    <li key={v.absenceId} className="text-[13.5px]">
+                      <Link
+                        to={`/admin/residencia/residentes/${v.clientId}/ausencias`}
+                        className="underline"
+                      >
+                        {v.nombre}
+                      </Link>
+                      <span className="text-slate-600">
+                        {" · volvió "}
+                        {v.deDonde}
+                        {v.habitacion ? ` · habitación ${v.habitacion}` : ""}
+                        {v.diasEsperando > 0
+                          ? ` · hace ${v.diasEsperando} ${v.diasEsperando === 1 ? "día" : "días"}`
+                          : " · hoy"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* ── historia-1 (D-94) · LOS INGRESOS CON PENDIENTES ── */}
+            {ingresosConPendientes.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                <p className="text-[13.5px] font-medium text-amber-900">
+                  {ingresosConPendientes.length === 1
+                    ? "1 ingreso con el expediente a medias"
+                    : `${ingresosConPendientes.length} ingresos con el expediente a medias`}
+                </p>
+                <p className="mt-1 text-[13px] text-amber-900">
+                  Lo que falta de un expediente se descubre cuando lo pide un
+                  inspector. Aquí está antes.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {ingresosConPendientes.map((i) => (
+                    <li key={i.clientId} className="text-[13.5px]">
+                      <Link
+                        to={`/admin/residencia/residentes/${i.clientId}/ingreso`}
+                        className="underline"
+                      >
+                        {i.nombre}
+                      </Link>
+                      <span className="text-slate-600">
+                        {" · "}
+                        {i.pendientes} sin cerrar
+                        {i.vencidos > 0
+                          ? ` · ${i.vencidos} con el plazo pasado`
+                          : ""}
+                        {i.queFalta.length > 0 ? ` · ${i.queFalta.join(", ")}` : ""}
+                      </span>
                     </li>
                   ))}
                 </ul>

@@ -64,6 +64,17 @@ import {
 // residencia-2 · el plan de cuidados, que se precarga al dar de alta a un
 // residente y se recalcula al cambiarle el nivel (D-53).
 import { aplicarPlantilla, cerrarPlanPorAlta } from "./plan.js";
+// historia-1 · el ingreso guiado (D-94), el cierre de la ausencia
+// abierta (D-92) y la obligación de comunicar la baja (D-96).
+import {
+  crearChecklistDeIngreso,
+  plazosDelCentro,
+} from "./ingreso.js";
+import { cerrarAusenciaPorAlta } from "./ausencias.js";
+import {
+  crearObligacionDeBaja,
+  seComunicaLaBaja,
+} from "./alta-del-residente.js";
 import { ensureResidenciaEnabled } from "./gate.js";
 
 const PUERTAS_LECTURA = [
@@ -132,6 +143,16 @@ async function consentimientoDeImagen(
 const NIVELES = ["VALIDO", "SEMIASISTIDO", "DEPENDIENTE"] as const;
 const GRADOS = ["I", "II", "III"] as const;
 const PLAZAS = ["PRIVADA", "CONCERTADA", "TEMPORAL"] as const;
+/** historia-1 (D-96) · las cuatro clases de alta. Copiadas del enum y no
+ *  importadas de `@mipiacetpv/db`: el `schema` de Fastify necesita un
+ *  array de cadenas en tiempo de ejecución, y un enum de Prisma es un
+ *  objeto. Es lo mismo que `NIVELES`, `GRADOS` y `PLAZAS` ya hacían. */
+const CLASES_DE_ALTA = [
+  "TRASLADO",
+  "VOLUNTARIA",
+  "FALLECIMIENTO",
+  "OTRA",
+] as const;
 
 /**
  * La ficha de un residente tal y como la pinta el admin. **Sin DNI ni NSS
@@ -171,6 +192,7 @@ const PERFIL_SELECT = {
   clientId: true,
   admissionDate: true,
   dischargeDate: true,
+  dischargeKind: true,
   dischargeReason: true,
   // residencia-1b · la que MANDA. La clara se queda para las filas que ya
   // estaban escritas cuando llegó el cifrado.
@@ -226,6 +248,7 @@ interface FilaResidente {
   dischargeDate: Date | null;
   dischargeReason: string | null;
   dischargeReasonCifrado: string | null;
+  dischargeKind: string | null;
   dependencyLevel: string;
   dependencyGrade: string | null;
   placeType: string;
@@ -283,6 +306,9 @@ function vistaResidente(p: FilaResidente, sobre: Sobre) {
       sobre.dek,
       sitioMotivoDeAlta(sobre.tenantId, p.clientId),
     ),
+    /** historia-1 (D-96) · `null` en las filas dadas de alta antes de
+     *  este bloque: no se les inventa una clase. La pantalla lo dice. */
+    dischargeKind: p.dischargeKind,
     dependencyLevel: p.dependencyLevel,
     dependencyGrade: p.dependencyGrade,
     placeType: p.placeType,
@@ -628,6 +654,26 @@ export async function registerResidenciaResidentesRoutes(
             // segunda llamada dentro de la misma transacción sería la
             // misma clave con una consulta más.
             dek,
+          });
+
+          // ── historia-1 (D-94) · LA LISTA DEL INGRESO ─────────────
+          //
+          // En la MISMA transacción que el perfil, la cama y el plan, y
+          // por la misma razón que el plan: si la lista se creara
+          // después, un fallo dejaría a un residente ingresado **sin
+          // expediente**, y eso no se ve hasta que lo pide un inspector
+          // (R20) — que es exactamente el problema que D-94 viene a
+          // cerrar.
+          //
+          // Y los dos plazos del centro se leen DENTRO: el del PAI
+          // decide la fecha límite de `PAI_INICIAL`, y el plazo corre
+          // desde hoy.
+          const plazos = await plazosDelCentro(tx, auth.tenantId);
+          await crearChecklistDeIngreso(tx, {
+            tenantId: auth.tenantId,
+            clientId,
+            ingreso: body.admissionDate,
+            diasDePai: plazos.diasDePai,
           });
 
           const fila = await tx.residentProfile.findUniqueOrThrow({
@@ -1006,6 +1052,27 @@ export async function registerResidenciaResidentesRoutes(
   // cama seguiría ocupada por alguien que ya no vive aquí y el índice
   // parcial no dejaría meter al siguiente — que es la forma en que esto se
   // habría descubierto, con una familia esperando en la puerta.
+  //
+  // ── historia-1 (D-96) · LO QUE EL ALTA CIERRA AHORA, Y LO QUE ABRE ─
+  //
+  // Cuatro cosas en la misma transacción, y las cuatro tienen su razón:
+  //
+  //   1. la **cama** (residencia-1) y el **plan** (residencia-2), que ya
+  //      estaban;
+  //   2. la **ausencia abierta**, si la hay. Sin esto, un residente dado
+  //      de alta desde el hospital se queda **ausente para siempre**: los
+  //      días del mes lo seguirían contando fuera y el panel seguiría
+  //      pidiendo la revisión de su vuelta, y la pantalla de ausencias no
+  //      lo lista porque sólo enseña a los que viven aquí. Una fila que
+  //      nadie puede volver a tocar;
+  //   3. la **clase del alta** (traslado · voluntaria · fallecimiento ·
+  //      otra), que es obligatoria desde hoy;
+  //   4. y si la plaza es **concertada**, la **obligación con fecha** de
+  //      comunicar la baja a la administración
+  //      (`alta-del-residente.ts`).
+  //
+  // Lo que NO hace, y es la mitad de D-96: **borrar**. La historia se
+  // conserva ≥ 5 años (Ley 41/2002) y todas las FK son `RESTRICT`.
   app.post(
     "/residencia/residentes/:clientId/alta",
     {
@@ -1019,10 +1086,15 @@ export async function registerResidenciaResidentesRoutes(
         },
         body: {
           type: "object",
-          required: ["dischargeDate"],
+          // historia-1 (D-96) · **la clase es obligatoria desde hoy**. La
+          // columna es nullable por las filas que ya estaban (no se les
+          // inventa una clase), y la ruta la pide: lo que entra desde
+          // ahora la lleva.
+          required: ["dischargeDate", "dischargeKind"],
           additionalProperties: false,
           properties: {
             dischargeDate: { type: "string", format: "date" },
+            dischargeKind: { type: "string", enum: CLASES_DE_ALTA },
             dischargeReason: { type: "string", maxLength: 300 },
           },
         },
@@ -1033,13 +1105,22 @@ export async function registerResidenciaResidentesRoutes(
       const { clientId } = request.params as { clientId: string };
       const body = request.body as {
         dischargeDate: string;
+        dischargeKind: (typeof CLASES_DE_ALTA)[number];
         dischargeReason?: string;
       };
       const prisma = getPrisma();
 
       const perfil = await prisma.residentProfile.findFirst({
         where: { clientId, tenantId: auth.tenantId },
-        select: { clientId: true, admissionDate: true, dischargeDate: true },
+        select: {
+          clientId: true,
+          admissionDate: true,
+          dischargeDate: true,
+          // historia-1 (D-96) · de la clase de plaza depende si hay que
+          // comunicar la baja, y del nombre, cómo se llama la obligación.
+          placeType: true,
+          client: { select: { firstName: true, lastName: true } },
+        },
       });
       if (!perfil) {
         return reply.code(404).send({
@@ -1072,6 +1153,9 @@ export async function registerResidenciaResidentesRoutes(
               where: { clientId },
               data: {
                 dischargeDate,
+                // historia-1 (D-96) · la clase, que el texto libre no
+                // podía decidir. El detalle sigue en el texto cifrado.
+                dischargeKind: body.dischargeKind,
                 // residencia-1b · «fallecimiento» o «traslado al hospital
                 // por ictus» caben enteros aquí, así que va cifrado y el
                 // claro a NULL.
@@ -1128,6 +1212,37 @@ export async function registerResidenciaResidentesRoutes(
               motivo: "alta del residente",
               dek,
             });
+
+            // ── historia-1 (D-92, D-96) · Y SU AUSENCIA ABIERTA ────
+            //
+            // **Sin dejar revisión pendiente**, aunque venga de un
+            // hospital: la DUE no tiene que revisar la medicación de
+            // alguien que ya no vive aquí. Por eso es otra función y no
+            // `cerrarAusencia` con un booleano.
+            await cerrarAusenciaPorAlta(tx, {
+              tenantId: auth.tenantId,
+              clientId,
+              cuando: dischargeDate,
+              userId: auth.userId,
+            });
+
+            // ── historia-1 (D-96) · LA COMUNICACIÓN DE LA BAJA ─────
+            //
+            // Sólo si la plaza es concertada, y con el plazo que el
+            // centro configura. **Sin plazo configurado la obligación
+            // nace igual**, con la fecha del alta y marcada «periodicidad
+            // por verificar»: ver `crearObligacionDeBaja`.
+            if (seComunicaLaBaja(perfil.placeType)) {
+              const plazos = await plazosDelCentro(tx, auth.tenantId);
+              await crearObligacionDeBaja(tx, {
+                tenantId: auth.tenantId,
+                clientId,
+                nombre: `${perfil.client.firstName} ${perfil.client.lastName}`.trim(),
+                alta: body.dischargeDate,
+                diasDePlazo: plazos.diasParaComunicarLaBaja,
+                userId: auth.userId,
+              });
+            }
             return dek;
           });
           const actualizado = await prisma.residentProfile.findUniqueOrThrow({

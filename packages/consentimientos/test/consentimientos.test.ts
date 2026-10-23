@@ -12,6 +12,8 @@
 //   5. El firmante y el informante, con sus negativas.
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -24,6 +26,8 @@ import {
   informantePuedeInformar,
   plantillaDe,
   plantillaVigente,
+  claseDeLaPlantilla,
+  PLANTILLAS_DEL_INGRESO,
   PLANTILLAS_DE_SERVICIO,
   PLANTILLAS_IDS,
   PLANTILLAS_VIGENTES,
@@ -39,23 +43,88 @@ function huella(texto: string): string {
 // ── 1 · las plantillas ───────────────────────────────────────────────
 
 describe("clinica-4 · las plantillas son dato versionado", () => {
-  it("hay tres, con ids estables", () => {
+  it("hay cinco, con ids estables", () => {
+    // Las tres de clinica-4 y **las dos de la residencia** (historia-1,
+    // D-95). Los ids viajan en la fila firmada para siempre: cambiar uno
+    // deja un consentimiento que no se puede volver a enseñar.
     expect([...PLANTILLAS_IDS]).toEqual([
       "cirugia-ungueal",
       "anestesia-local",
       "fotos-clinicas",
+      "proteccion-datos-residente",
+      "imagen-residente",
     ]);
   });
 
-  it("todas son clínicas y todas están pendientes de validar", () => {
-    // Las tres son contenido de la historia (Ley 41/2002 art. 15.2), y
-    // las tres llevan texto de ejemplo: el `-done` lo lista como pendiente
-    // de Rosario, y este test es lo que impide que se olvide quitar la
-    // marca cuando ella los dé por buenos.
+  it("todas están pendientes de validar", () => {
+    // Las cinco llevan texto de ejemplo: el `-done` lo lista, y este test
+    // es lo que impide que se olvide quitar la marca cuando un jurista o
+    // la profesional los dé por buenos.
     for (const p of PLANTILLAS_VIGENTES) {
-      expect(p.clinica, p.id).toBe(true);
       expect(p.pendienteDeValidar, p.id).toBe(true);
     }
+  });
+
+  it("las tres de la CLÍNICA son clínicas; las dos de la RESIDENCIA, no", () => {
+    // `clinica` significa «contenido mínimo de la historia clínica» (Ley
+    // 41/2002 art. 15.2) y de ella cuelgan dos reglas: el PDF pasa por
+    // `conHistoria` y **el informante tiene que ser sanitario**.
+    //
+    // La segunda es la que decide en la residencia: quien informa de la
+    // protección de datos de un ingreso es la administrativa del centro,
+    // no la DUE. Con `clinica: true`, la plantilla que D-94 pone en la
+    // lista de TODO ingreso sólo la podría firmar personal sanitario — y
+    // los ingresos se quedarían esperando a que pase la DUE.
+    for (const id of ["cirugia-ungueal", "anestesia-local", "fotos-clinicas"]) {
+      expect(plantillaVigente(id)!.clinica, id).toBe(true);
+    }
+    for (const id of PLANTILLAS_DEL_INGRESO) {
+      expect(plantillaVigente(id)!.clinica, id).toBe(false);
+    }
+  });
+
+  // ── historia-1 (D-95) · EL `kind` DE LA FILA ─────────────────────
+  it("el `kind` sale de la plantilla, y sin él es TREATMENT", () => {
+    // `TREATMENT` por defecto es lo que las tres de clinica-4 ya hacían:
+    // nada de lo firmado antes de este bloque cambia de significado.
+    expect(claseDeLaPlantilla(plantillaVigente("cirugia-ungueal")!)).toBe(
+      "TREATMENT",
+    );
+    expect(claseDeLaPlantilla(plantillaVigente("fotos-clinicas")!)).toBe(
+      "TREATMENT",
+    );
+    // Y las dos de la residencia llevan el suyo. **El de imagen importa
+    // de verdad**: D-64 pinta la foto del residente en la puerta sólo con
+    // un consentimiento `IMAGE` vigente, así que una fila `TREATMENT`
+    // dejaría la foto apagada para siempre con el consentimiento firmado.
+    expect(claseDeLaPlantilla(plantillaVigente("proteccion-datos-residente")!)).toBe(
+      "DATA",
+    );
+    expect(claseDeLaPlantilla(plantillaVigente("imagen-residente")!)).toBe(
+      "IMAGE",
+    );
+  });
+
+  it("las tres clases son EXACTAMENTE las del enum de la base", () => {
+    // Este paquete es puro y no puede importar `ClientConsentKind` de
+    // `@mipiacetpv/db`, así que la unión de cadenas se repite. Lo que
+    // impide que las dos listas se separen es esto: se lee el enum del
+    // `schema.prisma` y se comparan.
+    //
+    // Sin el test, añadir un valor al enum y olvidarlo aquí dejaría una
+    // plantilla que no se puede firmar — y el fallo saldría como un error
+    // de Prisma en la cara de quien firma, no al desplegar.
+    const schema = readFileSync(
+      join(import.meta.dirname, "..", "..", "db", "prisma", "schema.prisma"),
+      "utf8",
+    );
+    const bloque = /enum ClientConsentKind \{([\s\S]*?)\n\}/.exec(schema);
+    expect(bloque, "no se encontró el enum ClientConsentKind").toBeTruthy();
+    const valores = bloque![1]!
+      .split("\n")
+      .map((l) => l.replace(/\/\/.*$/, "").trim())
+      .filter((l) => /^[A-Z_]+$/.test(l));
+    expect(valores.sort()).toEqual(["DATA", "IMAGE", "TREATMENT"]);
   });
 
   it("la de FOTOS no se ata a ningún servicio", () => {
@@ -81,7 +150,7 @@ describe("clinica-4 · las plantillas son dato versionado", () => {
   });
 
   it("el texto canónico es título + párrafos, y SU HUELLA ESTÁ FIJADA", () => {
-    // Las tres huellas, calculadas sobre el texto de hoy. **Este es el
+    // Las cinco huellas, calculadas sobre el texto de hoy. **Este es el
     // test que impide reescribir una versión publicada**: cambiar una
     // palabra de un texto que alguien ya firmó rompe la correspondencia
     // entre la fila (`text_sha256`) y la plantilla, y entonces la huella
@@ -89,6 +158,10 @@ describe("clinica-4 · las plantillas son dato versionado", () => {
     //
     // Cuando Rosario dé sus textos, lo que se hace es **una versión
     // nueva** y estos números se quedan donde están, con su versión.
+    //
+    // historia-1 añade las dos de la residencia (D-95) y **las tres de la
+    // clínica no cambian ni un dígito**, que es la mitad de lo que este
+    // test guarda: una plantilla nueva no puede tocar lo firmado antes.
     const huellas: Record<string, string> = {};
     for (const p of PLANTILLAS_VIGENTES) {
       huellas[`${p.id} v${p.version}`] = huella(textoCanonico(p));
@@ -98,6 +171,8 @@ describe("clinica-4 · las plantillas son dato versionado", () => {
         "anestesia-local v1": "ac844e8cb6f6fc35bdddd7bfe14fd2f4c35e02f706522abd5914381df6e1982f",
         "cirugia-ungueal v1": "eea51d83e23263365fd7ca2b57de9a0ec7d1442d2c35c7aa4625bd2dc65becd9",
         "fotos-clinicas v1": "f48d36c2e5d850d5677f6fa1fe3ae8dbe8af18b9ddb451e0c806ebf6921f9c24",
+        "imagen-residente v1": "9ad844c534be006ef11642bef2b73745d2bbd9435e3ccbb12fa88108882f0223",
+        "proteccion-datos-residente v1": "5c3a32c8d57637f7ea971bd08114dc84448b5a5a08b4c320056b59408520662f",
       }
     `);
   });

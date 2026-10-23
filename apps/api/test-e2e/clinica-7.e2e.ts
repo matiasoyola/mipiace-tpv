@@ -304,15 +304,18 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       expect(msg).toContain("body_cifrado_formato");
     });
 
-    it("las VEINTIDÓS columnas cifradas tienen su CHECK de formato", async () => {
+    it("las TREINTA Y SIETE columnas cifradas tienen su CHECK de formato", async () => {
       // Que no falte ninguna. Una columna cifrada sin CHECK es una columna
       // donde el texto en claro cabe.
       //
-      // ── NUEVE, QUINCE, DIECISIETE, VEINTIDÓS Y AHORA VEINTICUATRO ──
+      // ── NUEVE, QUINCE, DIECISIETE, VEINTIDÓS, VEINTICUATRO Y AHORA
+      //    TREINTA Y SIETE ──
       //
       // Nueve de clinica-7, seis de residencia-1b (D-63), dos del
       // registro de cuidados (residencia-3), cinco del libro de
-      // incidencias (residencia-4) y dos del relevo (residencia-5). Están
+      // incidencias (residencia-4), dos del relevo (residencia-5) y
+      // **trece de la ficha clínica del residente** (historia-1, D-90 a
+      // D-94). Están
       // aquí a propósito en vez de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
       // motor sostiene cifrado en toda la casa. Partirla en dos habría sido
       // dos listas que pueden dejar de cubrirse, y lo que hace falta saber
@@ -367,6 +370,26 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           // lógicas, por lo mismo que las cinco de arriba.
           "handover_late_additions_resumen_cifrado_formato",
           "handovers_content_cifrado_formato",
+          // historia-1 · la ficha clínica del residente, sus ausencias y
+          // su ingreso. **Trece columnas lógicas y no cinco**, y la
+          // pareja que importa es la primera con la tercera: el texto de
+          // un diagnóstico y la FRASE DE ALERTA son dos columnas de la
+          // misma fila, y la segunda es la única de la ficha que llega a
+          // una tablet de pasillo (D-91). Con el mismo nombre lógico, un
+          // `UPDATE` publicaría el diagnóstico en la pared.
+          "resident_diagnoses_text_cifrado_formato",
+          "resident_diagnoses_icd10_cifrado_formato",
+          "resident_diagnoses_alert_phrase_cifrado_formato",
+          "resident_diagnoses_withdraw_reason_cifrado_formato",
+          "allergies_agent_cifrado_formato",
+          "allergies_reaction_cifrado_formato",
+          "allergies_withdraw_reason_cifrado_formato",
+          "allergy_reviews_source_cifrado_formato",
+          "resident_devices_detail_cifrado_formato",
+          "diet_profiles_notes_cifrado_formato",
+          "resident_absences_destination_cifrado_formato",
+          "resident_absences_reason_cifrado_formato",
+          "admission_checklist_items_done_note_cifrado_formato",
         ].sort(),
       );
     });

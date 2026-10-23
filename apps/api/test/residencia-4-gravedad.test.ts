@@ -80,8 +80,12 @@ describe("el fichero de datos está sano", () => {
     expect(problemasDeLaPlantilla()).toEqual([]);
   });
 
-  it("empieza en la versión 1", () => {
-    expect(VERSION_DE_LA_PLANTILLA).toBe(1);
+  it("va por la versión 2 (historia-1, D-92)", () => {
+    // La 1 fue la de residencia-4. **historia-1 la sube a 2** para añadir
+    // la regla de la salida no controlada (D-92). El número se fija aquí
+    // para que no suba por descuido: una versión nueva jubila todas las
+    // filas vigentes y las incidencias abiertas guardan a cuál apuntaban.
+    expect(VERSION_DE_LA_PLANTILLA).toBe(2);
   });
 
   it("todos los tipos que abre tienen nombre para la pantalla", () => {
@@ -220,16 +224,41 @@ describe("§3 · los eventos", () => {
   });
 
   it("y las DIECISIETE filas del §3 están todas", () => {
-    // El §3 tiene diecisiete filas y la plantilla tiene VEINTITRÉS
+    // El §3 tiene diecisiete filas y la plantilla tiene VEINTICUATRO
     // reglas, y la diferencia no es un error: tres bandas de temperatura
     // son tres reglas y una sola fila del §3 («≥ 37,5 → N1 · ≥ 38 → N2 ·
     // ≥ 39,5 → N3»), los dos extremos de la tensión son dos reglas y una
     // fila, y una caída son tres (la base y sus dos matices).
     //
+    // historia-1 (D-92) añade la vigesimocuarta: **la salida no
+    // controlada**, que es la segunda mitad de la fila «residente no
+    // localizado / salida no autorizada» del §3 — con tipo propio para
+    // poder contarla aparte de `NO_LOCALIZADO` (ver
+    // `TIPOS_DE_INCIDENCIA`).
+    //
     // El número se fija aquí para que quitar una regla por descuido se
     // vea. Si cambia a propósito, se cambia aquí y se sube la versión de
     // la plantilla.
-    expect(PLANTILLA_DE_GRAVEDAD).toHaveLength(23);
+    expect(PLANTILLA_DE_GRAVEDAD).toHaveLength(24);
+  });
+
+  // ── historia-1 (D-92) · LA REGLA NUEVA ───────────────────────────
+  it("la salida no controlada nace N4 y con su tipo propio", () => {
+    const regla = gravedadDeEvento("SALIDA_NO_CONTROLADA", null, REGLAS);
+    expect(regla?.nivel).toBe("N4");
+    expect(regla?.tipo).toBe("SALIDA_NO_CONTROLADA");
+  });
+
+  it("y no se confunde con `NO_LOCALIZADO`, que sigue siendo otra cosa", () => {
+    // Las dos son N4 y las dos suenan igual, y están separadas a
+    // propósito: `NO_LOCALIZADO` es «nadie sabe dónde está» (la ronda de
+    // la auxiliar) y `SALIDA_NO_CONTROLADA` es «se sabe que se ha ido».
+    // Un centro con tres fugas por la puerta de la calle y cero
+    // desapariciones dentro tiene un problema de puerta, no de
+    // vigilancia, y juntas en un tipo el indicador no lo distingue.
+    expect(gravedadDeEvento("NO_LOCALIZADO", null, REGLAS)?.tipo).toBe(
+      "NO_LOCALIZADO",
+    );
   });
 });
 

@@ -42,7 +42,7 @@ visita y (2) **exportarse en PDF firmado** por periodo, que es el formato que ex
 | R17 | **Ventilación y humedad** | Requerida | mantenimiento-1 | Ronda diaria con check; sensores opcionales por zona |
 | R18 | **Llamadores** por habitación | Avisos que no funcionan o no se oyen | mantenimiento-1 | Revisión semanal por pulsador; ronda registrada mientras haya zonas sin aviso |
 | R19 | **Inventario de ropa** y ropa marcada | Se revisa | familias-2 (`04` §4) | Diseñado |
-| R20 | **Expediente del residente**: contrato, PIAP con revisión anual y auxiliar de referencia, plan de acogida | Se revisa | historia-1/-2 (`03`) | Diseñado; exportación por residente |
+| R20 | **Expediente del residente**: contrato, PIAP con revisión anual y auxiliar de referencia, plan de acogida | Se revisa | historia-1/-2 (`03`) | **historia-1 hecho** (23-10-2026): lista del ingreso con doce elementos, contrato en PDF y panel con lo que falta. El PIAP y su revisión anual son historia-2; el elemento ya existe con su plazo corriendo |
 
 ## 3. Revisiones de un protocolo de seguridad y uso, como obligaciones periódicas (dato)
 

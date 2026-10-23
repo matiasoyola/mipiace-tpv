@@ -58,6 +58,7 @@ import {
   queToca,
   utcToWallTime,
   wallTimeToUtc,
+  fraseDeLaAusencia,
   type ControlParaNoHecho,
   type RegistroHecho,
 } from "@mipiacetpv/residencia-plan";
@@ -75,6 +76,7 @@ import {
 } from "../clinica/cripto-campos.js";
 import { dekONada } from "../clinica/claves.js";
 import { FRECUENCIA_SELECT, deColumnas } from "./frecuencia-columnas.js";
+import { ausenciasDelPlan } from "./ausencias.js";
 import { NOMBRE_DEL_NIVEL, NOMBRE_DEL_TIPO } from "./catalogo/plantilla-de-gravedad.js";
 
 // ── LO QUE EL PARTE ES, COMO TIPO ────────────────────────────────────
@@ -93,7 +95,18 @@ export type ClaseDeLinea =
   /** residencia-6 (punto 4) · residentes con cama y **sin plan de
    *  cuidados vigente**. Una línea por zona, no una por residente ni una
    *  por cuidado: ver §«los residentes sin plan» más abajo. */
-  | "SIN_PLAN_DE_CUIDADOS";
+  | "SIN_PLAN_DE_CUIDADOS"
+  /**
+   * historia-1 (D-92) · **el residente que no está.** UNA línea, colgada
+   * de él: «ausente: en el hospital desde el martes».
+   *
+   * Una y no treinta, y es el punto entero de D-92: un residente ausente
+   * no genera ocurrencias, así que no genera ni una línea de «no se
+   * hizo» — y sin esta línea se volvería **invisible** en el parte. El
+   * turno entrante tiene que saber que doña Carmen no está en su
+   * habitación antes de ir a buscarla.
+   */
+  | "AUSENTE";
 
 /**
  * Cómo se lee cada clase en la pantalla de la sala. Vive aquí y no en el
@@ -111,6 +124,7 @@ export const NOMBRE_DE_LA_CLASE: Record<ClaseDeLinea, string> = {
   REGISTRO_SIN_TURNO: "Registro sin turno",
   AVISO_QUE_NO_SALIO: "Aviso que no salió a tiempo",
   SIN_PLAN_DE_CUIDADOS: "Sin plan de cuidados",
+  AUSENTE: "Ausente",
 };
 
 /** Una línea del parte. */
@@ -254,6 +268,10 @@ export async function construirParte(
     cambiosDePlan,
     excepciones,
     avisos,
+    // historia-1 (D-92) · las ausencias que tocan la ventana del turno.
+    // Dos usos: `queToca` no genera lo de quien no está, y el parte dice
+    // **una vez** quién está fuera y desde cuándo.
+    ausencias,
   ] = await Promise.all([
     prisma.tenant.findUniqueOrThrow({
       where: { id: tenantId },
@@ -428,6 +446,10 @@ export async function construirParte(
         ackedWith: { select: { careRole: { select: { name: true } } } },
       },
     }),
+    // historia-1 (D-92) · solapadas con el turno, no «abiertas»: el
+    // parte de un turno de ayer tiene que decir quién estaba fuera AYER.
+    // Por eso `ausenciasDelPlan` y no `ausenciasAbiertas`.
+    ausenciasDelPlan(prisma, tenantId, desde, hasta),
   ]);
 
   // ── El decorado: nombres, plantas y habitaciones ──────────────────
@@ -648,6 +670,11 @@ export async function construirParte(
     momentos,
     desde,
     hasta,
+    // historia-1 (D-92) · un residente ausente no produce ocurrencias, y
+    // por tanto no produce ni una línea de «no se hizo». Lo que el parte
+    // dice de él es **una sola línea**: «ausente: en el hospital desde el
+    // martes» (ver la clase `AUSENTE` más abajo).
+    ausencias,
   );
   const paraControles: ControlParaNoHecho[] = controles.map((c) => ({
     code: c.code,
@@ -678,6 +705,51 @@ export async function construirParte(
       // Una franja no tiene hora: tocaba «durante la mañana». Poner la
       // hora de inicio diría que se incumplió a las 08:00.
       hora: n.esFranja ? null : hora(n.at),
+      nivel: null,
+      incidentId: null,
+      careRecordId: null,
+      aviso: null,
+    });
+  }
+
+  // ── historia-1 (D-92) · EL RESIDENTE AUSENTE, UNA LÍNEA ───────────
+  //
+  // Va DESPUÉS de «lo que no se hizo» y antes de «sin plan», y el orden
+  // de este bloque en el fichero da igual —las líneas se agrupan por
+  // residente al final— pero el de la LISTA no: la ausencia se anota con
+  // la hora de la salida, así que cae en su sitio cronológico dentro de
+  // las líneas del residente.
+  //
+  // ── Se anota la que SOLAPA el turno, no la que está abierta ───────
+  //
+  // El parte de la mañana de ayer tiene que decir quién estaba fuera
+  // ayer por la mañana, aunque hoy ya haya vuelto. Con las abiertas, un
+  // parte congelado de la semana pasada diría que no faltaba nadie —y el
+  // parte es la evidencia de lo que se supo en ese turno.
+  //
+  // ── Y la frase se calcula contra el TOPE del turno ────────────────
+  //
+  // No contra «ahora»: «desde el martes» en el parte congelado de la
+  // mañana del miércoles tiene que seguir diciendo «desde ayer» cuando
+  // alguien lo lea el viernes. La frase se congela con el parte, que es
+  // lo que `fraseDeLaAusencia(ausencia, tope)` hace.
+  for (const a of ausencias) {
+    if (!residentes.has(a.clientId)) continue;
+    // La que empezó DESPUÉS del tope no entra: un parte en vivo a las
+    // 10:00 no puede contar una salida de las 14:00 que todavía no ha
+    // pasado. `ausenciasDelPlan` ya acota por la ventana del turno, y
+    // esto acota por el corte — que es la misma distinción que el `tope`
+    // hace con todo lo demás de este parte.
+    if (a.desde.getTime() > tope.getTime()) continue;
+    const r = residentes.get(a.clientId)!;
+    anotar(a.clientId, r.floorId, {
+      clase: "AUSENTE",
+      texto: fraseDeLaAusencia(a, tope),
+      // La hora de la SALIDA sólo si fue en este turno: «desde el martes»
+      // con la hora de las 22:00 de hoy al lado se lee como que se fue
+      // hoy. Cuando se fue antes, la línea no tiene hora y la frase ya
+      // dice cuándo.
+      hora: a.desde.getTime() >= desde.getTime() ? hora(a.desde) : null,
       nivel: null,
       incidentId: null,
       careRecordId: null,
@@ -949,18 +1021,30 @@ function formatearNumero(n: number): string {
 function ordenarLineas(lineas: LineaDelParte[]): LineaDelParte[] {
   const peso: Record<ClaseDeLinea, number> = {
     INCIDENCIA_NUEVA: 0,
-    AVISO_QUE_NO_SALIO: 1,
-    INCIDENCIA_ABIERTA: 2,
-    CONSTANTE_FUERA_DE_RANGO: 3,
-    ALGO_NO_VA_BIEN: 4,
-    EXCEPCION_NUEVA: 5,
-    CAMBIO_DE_PLAN: 6,
-    NO_HECHO: 7,
-    REGISTRO_SIN_TURNO: 8,
+    // historia-1 (D-92) · **la ausencia va arriba, con las incidencias.**
+    //
+    // Es lo primero que el turno entrante tiene que saber de un
+    // residente: que no está. Ponerla al final, con lo administrativo,
+    // haría que alguien leyera sus cuatro líneas de ayer y fuera a su
+    // habitación a buscarla — y en una residencia eso son diez minutos de
+    // una auxiliar y un susto.
+    //
+    // Delante incluso de un «aviso que no salió», porque las dos cosas
+    // son del mismo tipo: información que cambia lo que la persona hace
+    // en los próximos cinco minutos.
+    AUSENTE: 1,
+    AVISO_QUE_NO_SALIO: 2,
+    INCIDENCIA_ABIERTA: 3,
+    CONSTANTE_FUERA_DE_RANGO: 4,
+    ALGO_NO_VA_BIEN: 5,
+    EXCEPCION_NUEVA: 6,
+    CAMBIO_DE_PLAN: 7,
+    NO_HECHO: 8,
+    REGISTRO_SIN_TURNO: 9,
     // residencia-6 · al final, con lo administrativo. No es algo que
     // haya pasado en el turno: es algo que falta por configurar, y el
     // orden del parte es el de la urgencia.
-    SIN_PLAN_DE_CUIDADOS: 9,
+    SIN_PLAN_DE_CUIDADOS: 10,
   };
   const nivel = (n: string | null): number =>
     n == null ? 0 : -Number(n.replace("N", ""));

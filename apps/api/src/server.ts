@@ -83,6 +83,12 @@ import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
 // registros y la foto del residente.
 import { registerResidenciaPuertaRegistroRoutes } from "./residencia/puerta-registro-routes.js";
 import { registerResidenciaFichaRoutes } from "./residencia/ficha-routes.js";
+// historia-1 · la ficha clínica (D-90), las ausencias y los días del mes
+// (D-92, D-93) y el ingreso guiado con los dos plazos del centro (D-94,
+// D-96).
+import { registerResidenciaFichaClinicaRoutes } from "./residencia/ficha-clinica-routes.js";
+import { registerResidenciaAusenciasRoutes } from "./residencia/ausencias-routes.js";
+import { registerResidenciaIngresoRoutes } from "./residencia/ingreso-routes.js";
 // residencia-4 · la gravedad, el libro de incidencias y el aviso. Las del
 // libro llevan las mismas puertas que el plan (clínica + gate + la
 // categoría del rol de cuidado); las de guardia tienen su propia auth de
@@ -359,6 +365,9 @@ async function main() {
   // hoy en la ficha del residente.
   await registerResidenciaPuertaRegistroRoutes(app);
   await registerResidenciaFichaRoutes(app);
+  await registerResidenciaFichaClinicaRoutes(app);
+  await registerResidenciaAusenciasRoutes(app);
+  await registerResidenciaIngresoRoutes(app);
   // residencia-4 · el libro de incidencias y la plantilla de gravedad en
   // solo lectura (panel), y el móvil de guardia con su socket.
   await registerResidenciaIncidenciasRoutes(app);

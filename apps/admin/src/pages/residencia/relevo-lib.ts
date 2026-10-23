@@ -111,6 +111,8 @@ export const NOMBRE_DE_LA_CLASE: Record<string, string> = {
   REGISTRO_SIN_TURNO: "Registro sin turno",
   AVISO_QUE_NO_SALIO: "Aviso que no salió a tiempo",
   SIN_PLAN_DE_CUIDADOS: "Sin plan de cuidados",
+  // historia-1 (D-92) · el residente ausente.
+  AUSENTE: "Ausente",
 };
 
 /** Y de qué es un añadido tardío. En castellano, no el enum: la lección
@@ -312,6 +314,26 @@ export interface Panel {
       clientId: string;
       nombre: string;
       habitacion: string | null;
+    }>;
+    /** historia-1 (D-92) · las vueltas del hospital que la DUE no ha
+     *  confirmado. Opcional por lo mismo que `porArreglar` entero. */
+    vueltasPorRevisar?: Array<{
+      clientId: string;
+      absenceId: string;
+      nombre: string;
+      habitacion: string | null;
+      deDonde: string;
+      volvioEn: string;
+      diasEsperando: number;
+    }>;
+    /** historia-1 (D-94) · los ingresos con el expediente a medias. */
+    ingresosConPendientes?: Array<{
+      clientId: string;
+      nombre: string;
+      ingreso: string;
+      pendientes: number;
+      vencidos: number;
+      queFalta: string[];
     }>;
   };
   indicadores: ValorDeIndicador[];

@@ -14,12 +14,15 @@ import { describe, expect, it } from "vitest";
 import {
   DIAS_DE_PREAVISO,
   diaRecortado,
-  diasDelMes,
   diasHasta,
   ocurrenciasDeObligacion,
   periodicidadEnPalabras,
 } from "../src/obligaciones.js";
 import type { ObligacionParaGenerar } from "../src/obligaciones.js";
+// historia-1 · se llamaba `diasDelMes` y vivía en `obligaciones.ts`; el
+// nombre se lo quedó `diasDelMes(residente, mes)` de D-93. La cuenta de
+// calendario es la misma y los ocho casos de abajo también.
+import { cuantosDiasTieneElMes } from "../src/ausencias.js";
 
 /** Una obligación con lo mínimo, y lo que haga falta encima. */
 function obligacion(extra: Partial<ObligacionParaGenerar>): ObligacionParaGenerar {
@@ -50,7 +53,7 @@ describe("cuántos días tiene un mes", () => {
     [2100, 2, 28],
     [2000, 2, 29],
   ])("%i-%i → %i días", (anio, mes, dias) => {
-    expect(diasDelMes(anio, mes)).toBe(dias);
+    expect(cuantosDiasTieneElMes(anio, mes)).toBe(dias);
   });
 
   it("el día se RECORTA al último del mes", () => {

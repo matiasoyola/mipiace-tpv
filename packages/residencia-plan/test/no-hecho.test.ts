@@ -19,6 +19,7 @@ import { loQueNoSeHizo, cuantoVaHecho } from "../src/no-hecho.js";
 import type { ControlParaNoHecho, RegistroHecho } from "../src/no-hecho.js";
 import { queToca } from "../src/que-toca.js";
 import type { AjusteDelCentro, LineaDePlan, Ocurrencia } from "../src/que-toca.js";
+import type { AusenciaDelPlan } from "../src/ausencias.js";
 import type { Frecuencia } from "../src/frecuencia.js";
 import type { TurnoDelCentro } from "../src/turnos.js";
 import { addDays, wallTimeToUtc } from "../src/tiempo.js";
@@ -30,6 +31,12 @@ const TURNOS: TurnoDelCentro[] = [
 ];
 
 const SIN_AJUSTES: AjusteDelCentro[] = [];
+// historia-1 · `queToca` pide las ausencias y **no tiene valor por
+// defecto**: los casos de este fichero no las usan —el «residente
+// ausente» de aquí es el `fuera` de `loQueNoSeHizo`, que es otra cosa: es
+// quien no tiene cama— y lo dicen pasando la lista vacía en vez de
+// callárselo. Lo que las ausencias pausan está en `ausencias.test.ts`.
+const SIN_AUSENCIAS: AusenciaDelPlan[] = [];
 
 /** Los tres controles que hacen falta para los casos de la tabla. */
 const CONTROLES: ControlParaNoHecho[] = [
@@ -81,7 +88,7 @@ describe("tocaba y no se hizo", () => {
   // 00:00, 06:00, 12:00 y 18:00) y ninguno registrado.
   const plan = [linea("CAMBIO_POSTURAL", { kind: "EVERY_N_HOURS", everyNHours: 6 })];
   const [desde, hasta] = elDia("2026-10-19");
-  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta);
+  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta, SIN_AUSENCIAS);
 
   it("las cuatro del día salen cuando el corte es el final del día", () => {
     expect(ocurrencias).toHaveLength(4);
@@ -119,6 +126,7 @@ describe("tocaba y no se hizo", () => {
       [],
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(franja).toHaveLength(1);
     expect(
@@ -146,7 +154,7 @@ describe("tocaba y no se hizo", () => {
 describe("se hizo tarde pero dentro de la franja", () => {
   const plan = [linea("CAMBIO_POSTURAL", { kind: "EVERY_SHIFT", shiftCodes: ["M"] })];
   const [desde, hasta] = elDia("2026-10-19");
-  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta);
+  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta, SIN_AUSENCIAS);
 
   it("a las 14:55 de una franja que acaba a las 15:00 → SE HIZO", () => {
     const no = loQueNoSeHizo({
@@ -202,7 +210,7 @@ describe("llegó sin red después del congelado", () => {
   // las 15:00.
   const plan = [linea("CAMBIO_POSTURAL", { kind: "EVERY_SHIFT", shiftCodes: ["M"] })];
   const [desde, hasta] = elDia("2026-10-19");
-  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta);
+  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta, SIN_AUSENCIAS);
   const congelado = wallTimeToUtc("2026-10-19", "15:00");
   const tardio = registro({
     occurrenceAt: ocurrencias[0]!.at,
@@ -243,6 +251,7 @@ describe("lo ON_DEMAND nunca es «no hecho»", () => {
       [],
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(ocurrencias).toHaveLength(0);
   });
@@ -279,7 +288,7 @@ describe("lo ON_DEMAND nunca es «no hecho»", () => {
 describe("la observación diaria se empareja por turno, no por instante", () => {
   const plan = [linea("ANIMO", { kind: "EVERY_SHIFT", shiftCodes: ["M", "T"] })];
   const [desde, hasta] = elDia("2026-10-19");
-  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta);
+  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta, SIN_AUSENCIAS);
 
   it("el «como siempre» de la mañana tapa la ocurrencia de la mañana", () => {
     expect(ocurrencias).toHaveLength(2);
@@ -320,7 +329,7 @@ describe("un residente ausente o dado de baja no cuenta", () => {
     }),
   ];
   const [desde, hasta] = elDia("2026-10-19");
-  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta);
+  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta, SIN_AUSENCIAS);
 
   it("ocho sin nadie fuera", () => {
     expect(
@@ -360,6 +369,7 @@ describe("el turno de noche que cruza medianoche", () => {
       [],
       wallTimeToUtc("2026-10-19", "00:00"),
       wallTimeToUtc("2026-10-20", "00:00"),
+      SIN_AUSENCIAS,
     );
     expect(ocurrencias).toHaveLength(1);
     expect(ocurrencias[0]!.dia).toBe("2026-10-19");
@@ -381,6 +391,7 @@ describe("el turno de noche que cruza medianoche", () => {
       [],
       wallTimeToUtc("2026-10-19", "00:00"),
       wallTimeToUtc("2026-10-20", "00:00"),
+      SIN_AUSENCIAS,
     );
     const no = loQueNoSeHizo({
       ocurrencias,
@@ -402,6 +413,7 @@ describe("el turno de noche que cruza medianoche", () => {
       [],
       wallTimeToUtc("2026-10-19", "00:00"),
       wallTimeToUtc("2026-10-20", "00:00"),
+      SIN_AUSENCIAS,
     );
     const no = loQueNoSeHizo({
       ocurrencias,
@@ -425,7 +437,7 @@ describe("el turno de noche que cruza medianoche", () => {
 describe("cuánto va hecho (la cuarta fila del panel)", () => {
   const plan = [linea("CAMBIO_POSTURAL", { kind: "EVERY_N_HOURS", everyNHours: 6 })];
   const [desde, hasta] = elDia("2026-10-19");
-  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta);
+  const ocurrencias = queToca(plan, SIN_AJUSTES, TURNOS, [], desde, hasta, SIN_AUSENCIAS);
 
   it("cuenta sobre TODO lo que toca, cerrado o no", () => {
     // A mitad de la mañana la respuesta correcta es «1 de 4», no «cero

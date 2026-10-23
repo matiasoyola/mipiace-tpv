@@ -27,7 +27,9 @@ import {
   ClipboardCheck,
   ClipboardList,
   LogOut,
+  PlaneTakeoff,
   Plus,
+  Stethoscope,
   X,
 } from "lucide-react";
 // residencia-2 · el enlace al plan de cuidados, desde la ficha.
@@ -43,6 +45,7 @@ import {
   TextField,
 } from "../../ui.js";
 import {
+  CLASE_DE_ALTA_LABEL,
   fechaCorta,
   hoyISO,
   NIVEL_LABEL,
@@ -656,6 +659,12 @@ function ModalFicha({
         {residente.dischargeDate && (
           <Dato k="Alta">
             {fechaCorta(residente.dischargeDate)}
+            {/* historia-1 (D-96) · la CLASE del alta. `null` en quien se
+                fue antes de este bloque: no se le inventa una, y la
+                pantalla lo dice en vez de poner «Otra». */}
+            {residente.dischargeKind
+              ? ` · ${CLASE_DE_ALTA_LABEL[residente.dischargeKind] ?? residente.dischargeKind}`
+              : " · sin clasificar (alta anterior a este bloque)"}
             {residente.dischargeReason ? ` · ${residente.dischargeReason}` : ""}
           </Dato>
         )}
@@ -697,6 +706,30 @@ function ModalFicha({
           className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
         >
           <ClipboardCheck className="h-4 w-4" /> Lo registrado en la puerta
+        </Link>
+        {/* historia-1 · **la ficha clínica va la PRIMERA de las tres**, y
+            delante incluso del plan sería tentador: es de donde sale la
+            franja de alertas. Se deja detrás a propósito — el plan y lo
+            registrado son lo que la dirección abre a diario, y la ficha
+            clínica la abren el médico y la DUE, que entran menos veces y
+            se quedan más tiempo. */}
+        <Link
+          to={`/admin/residencia/residentes/${residente.clientId}/ficha`}
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
+        >
+          <Stethoscope className="h-4 w-4" /> Su ficha clínica
+        </Link>
+        <Link
+          to={`/admin/residencia/residentes/${residente.clientId}/ausencias`}
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
+        >
+          <PlaneTakeoff className="h-4 w-4" /> Ausencias y días del mes
+        </Link>
+        <Link
+          to={`/admin/residencia/residentes/${residente.clientId}/ingreso`}
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
+        >
+          <ClipboardList className="h-4 w-4" /> Su ingreso guiado
         </Link>
       </div>
 
@@ -824,6 +857,7 @@ function ModalDarDeAlta({
   onHecho: () => void;
 }) {
   const [fecha, setFecha] = useState(hoyISO());
+  const [clase, setClase] = useState("TRASLADO");
   const [motivo, setMotivo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -836,6 +870,7 @@ function ModalDarDeAlta({
         method: "POST",
         body: {
           dischargeDate: fecha,
+          dischargeKind: clase,
           ...(motivo.trim() ? { dischargeReason: motivo.trim() } : {}),
         },
       });
@@ -854,6 +889,7 @@ function ModalDarDeAlta({
       <p className="mb-4 text-[13.5px] text-slate-500">
         Su ficha y su historia se conservan: dar de alta no borra nada.
         {residente.cama && " Se libera su cama."}
+        {" Se cierra su plan de cuidados y, si está fuera, su ausencia."}
       </p>
       <TextField
         id="alta-fecha"
@@ -862,12 +898,40 @@ function ModalDarDeAlta({
         value={fecha}
         onChange={setFecha}
       />
+      {/* historia-1 (D-96) · **la clase es obligatoria**: de ella depende
+          la comunicación a la administración, y «se va con su hija» no se
+          puede clasificar después. El detalle sigue en el texto libre. */}
+      <label className="mt-3 flex flex-col gap-1 text-[13px] font-medium text-slate-600">
+        Por qué se va
+        <select
+          value={clase}
+          onChange={(e) => setClase(e.target.value)}
+          className="rounded-xl border border-slate-200 px-3 py-2 text-[15px] text-mipiace-ink"
+        >
+          {Object.entries(CLASE_DE_ALTA_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </label>
       <TextField
         id="alta-motivo"
-        label="Motivo (opcional)"
+        label="Detalle (opcional)"
         value={motivo}
         onChange={setMotivo}
       />
+      {/* La obligación de comunicar la baja **sólo en las concertadas**
+          (D-96). Se avisa antes de pulsar: lo que el botón va a crear es
+          una obligación legal con fecha en el panel de dirección. */}
+      {residente.placeType === "CONCERTADA" && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          La plaza es concertada: se creará una obligación con fecha para
+          comunicar la baja a la administración. Si el centro no tiene el
+          plazo configurado, nacerá con la fecha del alta y marcada «por
+          verificar».
+        </p>
+      )}
       <FieldError message={error} />
       <div className="mt-4">
         <PrimaryButton type="button" busy={busy} onClick={() => void guardar()}>

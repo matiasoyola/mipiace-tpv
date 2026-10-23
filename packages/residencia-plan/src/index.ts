@@ -31,6 +31,14 @@
 //     que tener un PIN de cuidado según el alcance de sus roles, y
 //     cuándo el que tiene puesto se quedó corto. La ejecutan la puerta
 //     SIN RED, la sala, el móvil de guardia y el admin.
+//   · `ficha.ts`      — historia-1 (D-90, D-91): el catálogo de
+//     dispositivos y restricciones de dieta del producto, y la FRANJA DE
+//     ALERTAS que sale de la ficha. Lo ejecuta el servidor para el admin
+//     y —recortado a las frases accionables— para la puerta: ver por qué
+//     son dos textos y no uno en su cabecera.
+//   · `ausencias.ts`  — historia-1 (D-92, D-93): si un residente está
+//     fuera, su frase para el parte y la puerta, y `diasDelMes`, que es
+//     el dato que hoy se teclea a mano para facturar las concertadas.
 //   · `gravedad.ts`   — residencia-4: `gravedadDe`, la función que
 //     convierte una constante o un evento en un nivel N0-N4. La ejecutan
 //     la tablet (al instante y sin red) y el servidor (que es el que
@@ -74,6 +82,44 @@ export {
 } from "./que-toca.js";
 
 export {
+  CODIGOS_DE_DISPOSITIVO,
+  CODIGOS_DE_RESTRICCION,
+  DISPOSITIVOS_DE_SERIE,
+  RESTRICCIONES_DE_SERIE,
+  alertasDeLaFicha,
+  dispositivoDeSerie,
+  frasesParaLaPuerta,
+  nombreDeRestriccion,
+  nombreDeTextura,
+  type AlergiaParaLaFranja,
+  type AlertaDeLaFicha,
+  type ClaseDeAlerta,
+  type DiagnosticoParaLaFranja,
+  type DietaParaLaFranja,
+  type DispositivoDeSerie,
+  type DispositivoParaLaFranja,
+  type FichaParaLaFranja,
+  type RestriccionDeSerie,
+  type TexturaDeDieta,
+} from "./ficha.js";
+
+export {
+  DE_DONDE_VOLVIO,
+  NOMBRE_CORTO_DE_LA_AUSENCIA,
+  NOMBRE_DE_LA_AUSENCIA,
+  ausenciaEn,
+  cuantosDiasTieneElMes,
+  diasDelMes,
+  diasDelMesDelCentro,
+  estaAusente,
+  fraseDeLaAusencia,
+  type AusenciaDelPlan,
+  type DiasDelMes,
+  type ResidenteParaLosDias,
+  type TipoDeAusencia,
+} from "./ausencias.js";
+
+export {
   DESTINATARIOS_DE_SERIE,
   MINUTOS_DE_ESCALADO_DE_SERIE,
   NIVELES,
@@ -105,7 +151,6 @@ export {
 export {
   DIAS_DE_PREAVISO,
   diaRecortado,
-  diasDelMes,
   diasHasta,
   ocurrenciasDeObligacion,
   periodicidadEnPalabras,

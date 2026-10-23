@@ -29,7 +29,23 @@
 // contesta igual el día que la segunda exista.
 //
 // Tampoco genera incumplimientos ni eventos: eso es residencia-4.
+//
+// ── historia-1 (D-92) · LO QUE SÍ HACE DESDE ESTE BLOQUE: PAUSAR ────
+//
+// Un residente AUSENTE —ingresado, en urgencias, de salida con su
+// familia, en una consulta— **no produce ocurrencias**. No es un filtro
+// de la pantalla: es esta función la que no las genera, y por eso todo lo
+// que se construye sobre ellas lo hereda sin escribir una línea — «lo que
+// no se hizo», el parte de relevo, el panel y el denominador de todos los
+// indicadores de AENOR, los de hoy y los que calidad-1 añada.
+//
+// La alternativa era una segunda lista de «residentes que no cuentan» al
+// lado del `fuera` de `loQueNoSeHizo` (que es para quien no tiene cama),
+// y dos listas con dos criterios es la forma de que un indicador nuevo
+// use la que no toca y cuente veintiocho cuidados «no hechos» de alguien
+// que llevaba tres días en el hospital.
 
+import { estaAusente, type AusenciaDelPlan } from "./ausencias.js";
 import type { Frecuencia, MomentoDelCentro } from "./frecuencia.js";
 import {
   CENTER_TZ,
@@ -123,6 +139,15 @@ export function queToca(
   momentos: MomentoDelCentro[],
   desde: Date,
   hasta: Date,
+  /**
+   * historia-1 (D-92) · las ausencias de estos residentes. **Sin valor
+   * por defecto a propósito**: un `= []` habría dejado que una llamada
+   * nueva se olvidara de pasarlas y volviera en silencio al
+   * comportamiento de antes de este bloque. `[]` es una respuesta
+   * legítima —la pantalla del plan que mira el futuro— pero tiene que
+   * estar escrita.
+   */
+  ausencias: AusenciaDelPlan[],
   tz: string = CENTER_TZ,
 ): Ocurrencia[] {
   // ── Los controles apagados por el centro no «tocan» ────────────────
@@ -169,6 +194,21 @@ export function queToca(
         if (oc.at < linea.fromAt) continue;
         if (linea.toAt !== null && oc.at >= linea.toAt) continue;
         if (oc.at < desde || oc.at >= hasta) continue;
+        // ── historia-1 (D-92) · Y SI NO ESTABA, NO LE TOCABA ────────
+        //
+        // Se mide contra la OCURRENCIA y no contra el día, por la misma
+        // razón exacta que la vigencia de la línea: una señora que se va
+        // al hospital el martes a las 15:00 sí tenía la higiene de la
+        // mañana de ese martes, y no tiene nada de la tarde. Comparando
+        // días se le perdonaría el turno entero —o se le reprocharía—, y
+        // las dos cosas son mentira en el parte de ese turno.
+        //
+        // Va DESPUÉS del filtro de la ventana y no antes porque es la
+        // comprobación más cara de las cuatro: con 49 residentes y una
+        // ventana de un mes, lo que se descarta por la ventana son
+        // decenas de miles de ocurrencias que no hace falta cruzar con
+        // ninguna ausencia.
+        if (estaAusente(ausencias, linea.clientId, oc.at)) continue;
         fuera.push(oc);
       }
     }

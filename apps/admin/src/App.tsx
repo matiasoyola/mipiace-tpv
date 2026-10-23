@@ -49,6 +49,13 @@ import { RelevosPage } from "./pages/residencia/RelevosPage.js";
 import { RelevoPage } from "./pages/residencia/RelevoPage.js";
 import { ObligacionesPage } from "./pages/residencia/ObligacionesPage.js";
 import { IndicadoresPage } from "./pages/residencia/IndicadoresPage.js";
+// historia-1 · la ficha clínica, las ausencias con sus días, el ingreso
+// guiado de un residente, los ingresos del centro y los días del mes.
+import { FichaClinicaPage } from "./pages/residencia/FichaClinicaPage.js";
+import { AusenciasResidentePage } from "./pages/residencia/AusenciasResidentePage.js";
+import { IngresoResidentePage } from "./pages/residencia/IngresoResidentePage.js";
+import { IngresosPage } from "./pages/residencia/IngresosPage.js";
+import { DiasPage } from "./pages/residencia/DiasPage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -279,6 +286,15 @@ export function App() {
         {/* La excepción de umbral cuelga del residente y no del centro,
             porque es una prescripción suya (D-22). */}
         <Route path="/admin/residencia/residentes/:clientId/umbrales" element={<ResidenciaGate title="Umbrales propios"><UmbralesResidentePage /></ResidenciaGate>} />
+        {/* historia-1 (D-90 a D-96) · la ficha clínica y lo que cuelga de
+            ella. Las tres de un residente van bajo su `clientId`, como el
+            plan y los umbrales; las dos del centro, al nivel de
+            «Residentes». */}
+        <Route path="/admin/residencia/residentes/:clientId/ficha" element={<ResidenciaGate title="Ficha clínica"><FichaClinicaPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/residentes/:clientId/ausencias" element={<ResidenciaGate title="Ausencias"><AusenciasResidentePage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/residentes/:clientId/ingreso" element={<ResidenciaGate title="Ingreso guiado"><IngresoResidentePage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/ingresos" element={<ResidenciaGate title="Ingresos"><IngresosPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/dias" element={<ResidenciaGate title="Días del mes"><DiasPage /></ResidenciaGate>} />
         {/* residencia-5 · el panel es la pantalla de INICIO de un centro de
             residencia (decisión de producto 5). Las cuatro van envueltas en
             <ResidenciaGate> como las demás, y la puerta de verdad sigue

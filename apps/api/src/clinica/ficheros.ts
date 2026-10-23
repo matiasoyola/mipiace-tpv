@@ -102,7 +102,20 @@ export type ClaseDeFichero =
    *  centro y con la huella del claro. La razón es que no se inventa un
    *  segundo almacén para esto: un volumen más es una copia de seguridad
    *  más que alguien tiene que acordarse de hacer. */
-  | "EVIDENCIA";
+  | "EVIDENCIA"
+  /** historia-1 (D-94) · el **CONTRATO DE ESTANCIA** firmado del
+   *  residente, adjunto a su elemento del ingreso guiado. PDF.
+   *
+   *  No es un dato de salud —es un contrato— y va al mismo volumen por lo
+   *  mismo que la evidencia de una obligación: un volumen más es una
+   *  copia de seguridad más que alguien tiene que acordarse de hacer.
+   *
+   *  Y **clase propia, no `EVIDENCIA`**: la clase va en el AAD
+   *  (`sitioDelFichero` la pone como «columna»), así que con la misma
+   *  clase el certificado de los extintores y el contrato de doña Carmen
+   *  serían intercambiables — y el expediente que la inspección pide
+   *  (R20) podría acabar con el PDF de otra cosa dentro. */
+  | "CONTRATO";
 
 /** Qué carpeta le toca a cada clase.
  *
@@ -117,6 +130,7 @@ export const CARPETA_DE_LA_CLASE: Record<ClaseDeFichero, string> = {
   RESIDENTE: "residentes",
   VOZ: "voz",
   EVIDENCIA: "evidencias",
+  CONTRATO: "contratos",
 };
 
 const CARPETA = CARPETA_DE_LA_CLASE;
@@ -128,6 +142,7 @@ const EXTENSION: Record<ClaseDeFichero, string> = {
   RESIDENTE: "jpg",
   VOZ: "webm",
   EVIDENCIA: "pdf",
+  CONTRATO: "pdf",
 };
 
 export const MIME_DE_FOTO = "image/jpeg";

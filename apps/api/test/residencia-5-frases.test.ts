@@ -59,7 +59,7 @@ const DEL_ADMIN = frasesDe(
 );
 
 describe("los nombres de las clases de línea", () => {
-  it("el servidor tiene las nueve del prompt de residencia-5 y la de residencia-6", () => {
+  it("el servidor tiene las nueve de residencia-5, la de residencia-6 y la de historia-1", () => {
     expect(Object.keys(DEL_SERVIDOR).sort()).toEqual(
       [
         "ALGO_NO_VA_BIEN",
@@ -76,6 +76,11 @@ describe("los nombres de las clases de línea", () => {
         // algo que falta por configurar, y sin decirlo el residente es
         // invisible (no genera ni un «no hecho»).
         "SIN_PLAN_DE_CUIDADOS",
+        // historia-1 (D-92) · **el residente ausente**. Una línea y no
+        // treinta: un residente fuera no genera ocurrencias, así que no
+        // genera ni un «no hecho», y sin esta línea se volvería invisible
+        // en el parte — y alguien iría a su habitación a buscarlo.
+        "AUSENTE",
       ].sort(),
     );
   });

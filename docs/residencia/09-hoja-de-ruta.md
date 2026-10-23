@@ -25,11 +25,18 @@ implante, regla: desplegar = migrar + dejar el papel.
 **En producción `2157e7d` (desplegado el 22-10-2026): residencia-1, 1b, 2, 3, 4, 5 y 6. La v1 está
 completa.** Ningún tenant tiene aún la residencia encendida.
 
+**La Fase 2 arrancó el 23-10-2026 con historia-1** (ficha clínica, ausencias, ingreso y alta), que
+añade D-90 a D-97. Con él, tres cosas que la v1 no sabía hacer: un residente ausente deja de generar
+cuidados «no hechos» y sale del denominador de los indicadores, «sin alergias conocidas» es un dato
+registrado (y no una lista vacía) y el expediente de un ingreso se ve completo o a medias antes de
+que lo pida un inspector. Los días de la factura de las concertadas los cuenta ya el sistema, con la
+regla de los días frontera **pendiente de confirmar con la Junta**.
+
 ## Mapa de documentos
 
 | Doc | Módulo |
 |---|---|
-| `00-decisiones.md` | Decisiones D-01 a D-76 y v1 |
+| `00-decisiones.md` | Decisiones D-01 a D-97 y v1 |
 | `01-modelo-datos.md` | Modelo de la v1 sobre mipiacetpv |
 | `02-medicacion.md` | Medicación |
 | `03-historia-residente.md` | Ficha clínica, PAI, escalas, lesiones, ausencias, sujeciones, ingreso y alta |
@@ -69,10 +76,10 @@ fecha del informe del 22/10/2026 (R4-R6, R17, R18, §3 y §5 del doc de registro
 
 ### Fase 2 · historia clínica y medicación — objetivo: verano 2027
 
-| Bloque | Contenido | Inspección |
-|---|---|---|
-| historia-1 | Ficha clínica (diagnósticos, alergias, dispositivos, dieta), **ausencias**, ingreso guiado y alta | R20 |
-| historia-2 | PAI versionado, firmas, enlace PAI → plan, revisiones disparadas | R20 |
+| Bloque | Contenido | Inspección | Estado |
+|---|---|---|---|
+| historia-1 | Ficha clínica (diagnósticos, alergias, dispositivos, dieta), **ausencias**, ingreso guiado y alta | R20 | **hecho** · `docs/blocks/historia-1-done.md` |
+| historia-2 | PAI versionado, firmas, enlace PAI → plan, revisiones disparadas | R20 | siguiente |
 | historia-3 | Escalas Barthel, Lobo, Tinetti, Norton | — |
 | historia-4 | Lesiones con mapa corporal, curas y fotos | — |
 | medicacion-1 | Catálogo, prescripción, transcripción pendiente de validar, preparación (casillero / SPD) | R16 |
@@ -83,7 +90,7 @@ fecha del informe del 22/10/2026 (R4-R6, R17, R18, §3 y §5 del doc de registro
 
 | Bloque | Contenido | Depende de | Inspección |
 |---|---|---|---|
-| facturacion-1 | Plazas, concesiones, tarifas, estancia mensual derivada, motor (`calculo.py`) con test de oro | historia-1 | — |
+| facturacion-1 | Plazas, concesiones, tarifas, estancia mensual derivada, motor (`calculo.py`) con test de oro. **Los días ya los cuenta historia-1** (D-93); lo que falta aquí es el dinero, y confirmar con la Junta la regla de los días frontera | historia-1 ✔ | — |
 | facturacion-2 | Factura a la Junta 1:1, recibos, extras, rectificativas, Verifactu, paquete PECAM | 1 | — |
 | facturacion-3 | Remesa SEPA, estado de cobro y factoring, certificado anual | 2 | — |
 | familias-1 | Portal: acceso sin contraseña, publicación automática, comunicados, documentos | residencia-4 | R13 (órgano de familiares) |

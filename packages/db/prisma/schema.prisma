@@ -1704,6 +1704,19 @@ model Tenant {
   dutyOccurrences               DutyOccurrence[]
   indicatorTargets              IndicatorTarget[]
 
+  // historia-1 · la ficha clínica del residente, sus ausencias y su
+  // ingreso. `Restrict` en todo lo clínico —un centro con fichas no se
+  // borra, igual que no se borra con historias— y `Cascade` sólo en los
+  // dos plazos del centro, que son configuración y no evidencia.
+  residentDiagnoses       ResidentDiagnosis[]
+  allergies               Allergy[]
+  allergyReviews          AllergyReview[]
+  residentDevices         ResidentDevice[]
+  dietProfiles            DietProfile[]
+  residentAbsences        ResidentAbsence[]
+  admissionChecklistItems AdmissionChecklistItem[]
+  admissionSetting        CenterAdmissionSetting?
+
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
   // de tabla; con 1 tenant es invisible, pero ya documentamos el
@@ -2054,6 +2067,27 @@ model User {
   managementDutiesOwned    ManagementDuty[]  @relation("ManagementDutyResponsible")
   managementDutiesCreated  ManagementDuty[]  @relation("ManagementDutyCreatedBy")
   indicatorTargets         IndicatorTarget[]
+
+  // historia-1 · las firmas de la ficha clínica. **Todas `Restrict`**,
+  // por lo mismo que las de arriba: «esta alergia la escribió la DUE» es
+  // la evidencia, y un `SetNull` la dejaría huérfana el día que la DUE se
+  // vaya del centro. La única excepción es quien configura los plazos
+  // (`CenterAdmissionSetting.updatedBy`), que es configuración.
+  diagnosesCreated         ResidentDiagnosis[]      @relation("ResidentDiagnosisCreatedBy")
+  diagnosesResolved        ResidentDiagnosis[]      @relation("ResidentDiagnosisResolvedBy")
+  diagnosesWithdrawn       ResidentDiagnosis[]      @relation("ResidentDiagnosisWithdrawnBy")
+  allergiesCreated         Allergy[]                @relation("AllergyCreatedBy")
+  allergiesWithdrawn       Allergy[]                @relation("AllergyWithdrawnBy")
+  allergyReviews           AllergyReview[]          @relation("AllergyReviewBy")
+  devicesCreated           ResidentDevice[]         @relation("ResidentDeviceCreatedBy")
+  devicesClosed            ResidentDevice[]         @relation("ResidentDeviceClosedBy")
+  dietProfilesCreated      DietProfile[]            @relation("DietProfileCreatedBy")
+  absencesCreated          ResidentAbsence[]        @relation("ResidentAbsenceCreatedBy")
+  absencesClosed           ResidentAbsence[]        @relation("ResidentAbsenceClosedBy")
+  absencesReviewed         ResidentAbsence[]        @relation("ResidentAbsenceReviewedBy")
+  absencesCorrected        ResidentAbsence[]        @relation("ResidentAbsenceCorrectedBy")
+  admissionItemsDone       AdmissionChecklistItem[] @relation("AdmissionChecklistDoneBy")
+  admissionSettingsUpdated CenterAdmissionSetting[]
 
   @@index([tenantId])
   @@map("users")
@@ -3887,6 +3921,18 @@ model Client {
   /// residencia-5 · lo suyo que llegó después de un relevo congelado.
   /// `Restrict`, por lo mismo.
   handoverLateAdditions HandoverLateAddition[]
+
+  /// historia-1 (D-90 a D-94) · **su ficha clínica de residencia**: lo
+  /// que hoy está en una ficha de papel, el PAI en Word y la cabeza de la
+  /// DUE. `Restrict` en las siete: es historia clínica suya y se conserva
+  /// cinco años (Ley 41/2002, D-45).
+  residentDiagnoses  ResidentDiagnosis[]
+  allergies          Allergy[]
+  allergyReviews     AllergyReview[]
+  residentDevices    ResidentDevice[]
+  dietProfiles       DietProfile[]
+  absences           ResidentAbsence[]
+  admissionChecklist AdmissionChecklistItem[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -6218,19 +6264,28 @@ model ResidentProfile {
 
   /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
   /// ingreso y pedirla sería un campo que se rellena mal.
-  admissionDate          DateTime  @map("admission_date") @db.Date
+  admissionDate          DateTime               @map("admission_date") @db.Date
   /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
   /// aquí. El motivo es texto corto y libre a propósito: «se va con su
   /// hija», «traslado a hospital», «fallecimiento». Un enum habría
   /// obligado a elegir mal el día que no encaja ninguno, y esto no
   /// alimenta ninguna estadística en la v1.
-  dischargeDate          DateTime? @map("discharge_date") @db.Date
-  dischargeReason        String?   @map("discharge_reason")
+  dischargeDate          DateTime?              @map("discharge_date") @db.Date
+  dischargeReason        String?                @map("discharge_reason")
   /// residencia-1b · «fallecimiento», «traslado al hospital por ictus»
   /// caben enteros en ese texto libre, así que desde este bloque va
   /// cifrado. El CHECK `resident_profiles_alta_coherente` mira LAS DOS
   /// columnas: un motivo, en claro o cifrado, sigue exigiendo fecha.
-  dischargeReasonCifrado String?   @map("discharge_reason_cifrado")
+  dischargeReasonCifrado String?                @map("discharge_reason_cifrado")
+  /// historia-1 (D-96) · **POR QUÉ se fue**, como enum. Traslado,
+  /// voluntaria, fallecimiento u otra.
+  ///
+  /// Nullable, y no es una concesión: las filas dadas de alta ANTES de
+  /// este bloque tienen fecha y motivo libre y **no se les inventa una
+  /// clase**. El CHECK `resident_profiles_alta_clase` sólo exige la
+  /// coherencia que se puede exigir —una clase sin fecha de alta no
+  /// significa nada— y la ruta la pide obligatoria desde hoy.
+  dischargeKind          ResidentDischargeKind? @map("discharge_kind")
 
   /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
   /// la Ley de Dependencia (lo reconoce la administración, y puede no
@@ -6591,6 +6646,17 @@ model CareRoleAssignment {
   /// demás de esta lista.
   handoverAcks             HandoverAck[]
   dutyOccurrencesDone      DutyOccurrence[]
+
+  // historia-1 · con qué capacidad se escribió cada cosa de la ficha
+  // (D-31). `Restrict`: la capacidad con la que se firmó no se borra.
+  diagnosesCreated    ResidentDiagnosis[]      @relation("ResidentDiagnosisCreatedWith")
+  allergiesCreated    Allergy[]                @relation("AllergyCreatedWith")
+  allergyReviews      AllergyReview[]          @relation("AllergyReviewWith")
+  devicesCreated      ResidentDevice[]         @relation("ResidentDeviceCreatedWith")
+  dietProfilesCreated DietProfile[]            @relation("DietProfileCreatedWith")
+  absencesCreated     ResidentAbsence[]        @relation("ResidentAbsenceCreatedWith")
+  absencesReviewed    ResidentAbsence[]        @relation("ResidentAbsenceReviewedWith")
+  admissionItemsDone  AdmissionChecklistItem[]
 
   @@index([tenantId])
   @@index([tenantId, userId])
@@ -7914,6 +7980,10 @@ model Incident {
   /// residencia-5 · las veces que esta incidencia se añadió a un parte ya
   /// congelado.
   lateAdditions        HandoverLateAddition[]
+  /// historia-1 (D-92) · la ausencia que esta incidencia abrió, cuando
+  /// fue una **salida no controlada** (N4). `Restrict` al otro lado: una
+  /// incidencia del libro no se borra, y la ausencia tampoco.
+  residentAbsences     ResidentAbsence[]
 
   @@index([tenantId])
   /// **«Qué hay abierto hoy»**, que es literalmente la métrica de éxito
@@ -8848,4 +8918,663 @@ model IndicatorTarget {
   @@unique([tenantId, code])
   @@index([tenantId])
   @@map("indicator_targets")
+}
+
+// ══ historia-1 · LA FICHA CLÍNICA DEL RESIDENTE (D-90 a D-96) ══════════
+//
+// Lo que hoy vive repartido entre una `FICHA DE RESIDENTES` en papel, el
+// PAI en Word y la cabeza de la DUE. Siete tablas nuevas y dos columnas,
+// todas colgando del **`Client` residente** (D-49): no hay un segundo
+// sistema clínico, así que el acceso, el registro de accesos, la
+// inmutabilidad y el cifrado son los de clinica-1 y clinica-7 sin tocar
+// una línea de ellos (D-90).
+//
+// ── LO QUE VA CIFRADO Y LO QUE VA EN CLARO, DECLARADO (D-63) ─────────
+//
+// **Cifrado**: todo lo que alguien escribe a mano. El texto de un
+// diagnóstico y su código CIE-10 —que *es* el diagnóstico—, la frase de
+// alerta, el agente y la reacción de una alergia, el detalle de un
+// dispositivo, las restricciones de una dieta, el destino y el motivo de
+// una ausencia, y la nota de cada elemento del ingreso.
+//
+// **En claro**, y es lo que sostiene el producto: el residente, las
+// fechas, los códigos cerrados (clase de alergia, gravedad, textura, tipo
+// de ausencia, código de dispositivo, código de elemento del ingreso) y
+// las firmas. De ahí salen «¿quién está ausente hoy?», «¿qué ingresos
+// tienen pendientes?» y los días del mes, que son consultas SQL. La
+// consecuencia es la misma que residencia-1b §2 y residencia-4 ya
+// aceptaron: un `SELECT` sigue diciendo que doña Carmen tiene una alergia
+// a un medicamento y que está en el hospital desde el martes. Lo que no
+// dice es a qué medicamento, con qué reacción ni por qué ingresó.
+
+/// historia-1 (D-96) · POR QUÉ SE VA.
+///
+/// Enum y no el texto libre que residencia-1 dejó: al alta le cuelgan dos
+/// cosas que un texto no puede decidir —si hay que comunicar la baja a la
+/// administración y qué cuenta como plaza liberada— y «se va con su hija»
+/// no se puede clasificar después.
+///
+/// El texto libre **no desaparece**: `discharge_reason_cifrado` sigue ahí
+/// para el detalle («traslado a la residencia de Talavera»). Lo que esta
+/// columna añade es la clase, que es lo que la estadística y la
+/// comunicación necesitan.
+enum ResidentDischargeKind {
+  /// A otro centro, a un hospital de larga estancia, a casa de un hijo.
+  TRASLADO
+  /// Se va porque quiere. La diferencia con el traslado la marca quién
+  /// decide, y la inspección pregunta por ella.
+  VOLUNTARIA
+  FALLECIMIENTO
+  /// Lo que no es ninguna de las tres. Con el detalle en el texto.
+  OTRA
+}
+
+/// historia-1 (D-90) · DE QUÉ ES LA ALERGIA.
+///
+/// Las tres de `03-historia-residente.md` §1. Es un enum y no un código
+/// de fichero —al contrario que los dispositivos— porque de la clase
+/// cuelga el BLOQUEO de medicación (Fase 2): una alergia a un
+/// medicamento para una prescripción, una alimentaria para la hoja de
+/// cocina. Tres valores que no van a crecer y de los que depende un
+/// bloqueo clínico se escriben en el motor.
+enum AllergyClass {
+  MEDICAMENTO
+  ALIMENTO
+  OTRA
+}
+
+/// historia-1 (D-90, D-91) · CUÁNTO IMPORTA.
+///
+/// `GRAVE` es la que entra en la franja de alertas y la que llega a la
+/// puerta como frase accionable (D-91). Las otras dos están en la ficha y
+/// no interrumpen a nadie en un pasillo: una banda que lo pinta todo es
+/// una banda que no se lee.
+enum AllergySeverity {
+  LEVE
+  MODERADA
+  GRAVE
+}
+
+/// historia-1 (D-90) · LA TEXTURA DE LA DIETA.
+///
+/// Las cuatro de `03` §1. `NORMAL` es la única que **no** genera alerta:
+/// cualquier otra significa que quien le da de comer tiene que saberlo
+/// antes de entrar, y eso es exactamente la frase de la puerta.
+enum DietTexture {
+  NORMAL
+  BLANDA
+  TRITURADA
+  ENTERAL
+}
+
+/// historia-1 (D-92) · POR QUÉ NO ESTÁ.
+///
+/// Los cuatro tipos de `03` §5 más **`SALIDA_NO_CONTROLADA`**, que es la
+/// que no es una ausencia planificada sino una emergencia: nace como
+/// incidencia **N4** con su aviso a guardia (regla nueva de la plantilla
+/// de gravedad, versión 2).
+///
+/// De los dos primeros cuelga además la **revisión al volver** (D-92):
+/// quien vuelve de un hospital o de urgencias trae medicación cambiada e
+/// informes que alguien tiene que leer. De unas vacaciones con la hija,
+/// no.
+enum ResidentAbsenceKind {
+  INGRESO_HOSPITALARIO
+  URGENCIAS
+  /// Vacaciones o salida con la familia. Las dos son la misma cosa a
+  /// efectos de días: el residente está fuera y no es por salud.
+  VACACIONES_FAMILIA
+  /// La consulta del especialista: sale y vuelve el mismo día. Cuenta
+  /// como presente (ver `diasDelMes`), y existe como ausencia para que
+  /// no salgan «no hechos» de las horas que estuvo fuera.
+  CONSULTA_EXTERNA
+  SALIDA_NO_CONTROLADA
+}
+
+/// historia-1 (D-90) · DIAGNÓSTICOS Y ANTECEDENTES.
+///
+/// Texto libre con un código CIE-10-ES **opcional y sin catálogo** en este
+/// bloque (el buscador es fuera de alcance, declarado). Activo o resuelto,
+/// y con la marca de alerta de la que sale la franja (D-91).
+///
+/// ── NO SE SOBRESCRIBE: se resuelve o se anota ───────────────────────
+///
+/// El trigger `resident_diagnoses_inmutable` deja pasar **dos**
+/// transiciones en un `UPDATE` y nada más: resolverlo (`resolved_on` de
+/// NULL a puesto, con su firma) y retirarlo por error (`withdrawn_at`,
+/// con su firma y su motivo). Corregir el texto es una fila nueva. Es la
+/// misma regla que `clinical_entries` de clinica-1, con las dos
+/// escapatorias que una ficha —al contrario que una anotación de
+/// evolución— sí necesita.
+///
+/// ── Y LA FRASE DE ALERTA ES UNA COLUMNA, no el diagnóstico ──────────
+///
+/// `alert_phrase_cifrado` es lo ÚNICO de esta tabla que puede llegar a la
+/// puerta (D-91): «Toma anticoagulantes: cualquier golpe, avisa». El
+/// CHECK `resident_diagnoses_alerta_completa` la exige cuando
+/// `alert_flag` está puesto, y es a propósito —marcar una alerta sin
+/// escribir qué hacer dejaría a la puerta con una banda vacía o, peor,
+/// con el diagnóstico dentro.
+model ResidentDiagnosis {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// El diagnóstico, como lo escribe el médico. Cifrado.
+  textCifrado  String  @map("text_cifrado")
+  /// El CIE-10-ES, **cifrado también**: «E11.9» *es* la diabetes. Nada de
+  /// este bloque ni de la hoja de ruta lo consulta en SQL (el catálogo con
+  /// buscador es fuera de alcance), así que no hay nada que perder
+  /// cifrándolo. El día que haya un indicador por diagnóstico hará falta
+  /// un índice ciego, y es la misma conversación que D-69.
+  icd10Cifrado String? @map("icd10_cifrado")
+
+  /// `true` = antecedente **quirúrgico** («prótesis de cadera, 2019»).
+  /// Una columna y no un tipo aparte: es el mismo objeto con otra
+  /// pestaña en la pantalla.
+  surgical Boolean @default(false)
+
+  /// Desde cuándo se sabe. `@db.Date`: nadie apunta la hora de un
+  /// diagnóstico, igual que `admission_date`.
+  diagnosedOn DateTime  @map("diagnosed_on") @db.Date
+  /// Cuándo se resolvió. NULL = **activo**, y es lo que miran la ficha y
+  /// la franja de alertas.
+  resolvedOn  DateTime? @map("resolved_on") @db.Date
+
+  /// ── LA MARCA DE ALERTA (D-91) ─────────────────────────────────────
+  alertFlag          Boolean @default(false) @map("alert_flag")
+  /// La frase accionable, cifrada. Ver la cabecera: es lo único que sale
+  /// a la puerta, y el CHECK la exige con la marca puesta.
+  alertPhraseCifrado String? @map("alert_phrase_cifrado")
+
+  /// ── RETIRADO POR ERROR (no borrado) ───────────────────────────────
+  ///
+  /// Las tres juntas o ninguna (CHECK
+  /// `resident_diagnoses_retirada_completa`). Deja de contar en la ficha
+  /// y en la franja, y sigue en la historia: es la misma decisión que
+  /// `clinical_photos` de clinica-4.
+  withdrawnAt           DateTime? @map("withdrawn_at") @db.Timestamptz()
+  withdrawnByUserId     String?   @map("withdrawn_by_user_id") @db.Uuid
+  withdrawReasonCifrado String?   @map("withdraw_reason_cifrado")
+
+  /// Quién lo escribió y con qué capacidad (D-31). La capacidad es
+  /// obligatoria: «lo puso la DUE» y «lo puso el médico» no son lo mismo
+  /// para un inspector.
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId               String   @map("created_by_user_id") @db.Uuid
+  createdByCareRoleAssignmentId String   @map("created_by_care_role_assignment_id") @db.Uuid
+  resolvedByUserId              String?  @map("resolved_by_user_id") @db.Uuid
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy   User               @relation("ResidentDiagnosisCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdWith CareRoleAssignment @relation("ResidentDiagnosisCreatedWith", fields: [createdByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  resolvedBy  User?              @relation("ResidentDiagnosisResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: Restrict)
+  withdrawnBy User?              @relation("ResidentDiagnosisWithdrawnBy", fields: [withdrawnByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  /// «Los activos de este residente», que es la ficha y la franja.
+  @@index([tenantId, clientId, resolvedOn])
+  @@map("resident_diagnoses")
+}
+
+/// historia-1 (D-90) · ALERGIAS E INTOLERANCIAS.
+///
+/// Bloquean en medicación (Fase 2) y alimentan la hoja de cocina
+/// (cocina-1). Las graves entran en la franja (D-91).
+///
+/// ── CORREGIR NO PISA: se retira y se escribe otra ───────────────────
+///
+/// El trigger `allergies_inmutable` deja pasar **una sola** transición
+/// —la retirada, con firma y motivo— y nada más. Una alergia escrita mal
+/// («penicilina» donde era «paracetamol») se retira y se escribe la
+/// buena, y las dos filas quedan. El `UPDATE` que cambiara el agente es
+/// el sabotaje número uno de este bloque, y lo para el motor.
+model Allergy {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// Medicamento, alimento u otra. **En claro**: de aquí cuelga el
+  /// bloqueo de medicación y el filtro de la cocina.
+  class    AllergyClass
+  severity AllergySeverity
+
+  /// A QUÉ. Cifrado: «penicilina», «frutos secos».
+  agentCifrado    String  @map("agent_cifrado")
+  /// Y QUÉ LE PASA. Cifrado: «urticaria y edema de labios».
+  reactionCifrado String? @map("reaction_cifrado")
+
+  /// ── RETIRADA (no borrada) ─────────────────────────────────────────
+  withdrawnAt           DateTime? @map("withdrawn_at") @db.Timestamptz()
+  withdrawnByUserId     String?   @map("withdrawn_by_user_id") @db.Uuid
+  withdrawReasonCifrado String?   @map("withdraw_reason_cifrado")
+
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId               String   @map("created_by_user_id") @db.Uuid
+  createdByCareRoleAssignmentId String   @map("created_by_care_role_assignment_id") @db.Uuid
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy   User               @relation("AllergyCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdWith CareRoleAssignment @relation("AllergyCreatedWith", fields: [createdByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  withdrawnBy User?              @relation("AllergyWithdrawnBy", fields: [withdrawnByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([tenantId, clientId, withdrawnAt])
+  @@map("allergies")
+}
+
+/// historia-1 (D-90) · **«SIN ALERGIAS CONOCIDAS» ES UN DATO.**
+///
+/// La mitad de la decisión que no cabe en `allergies`: *no tener filas no
+/// es lo mismo que no tener alergias.* Sin esta tabla, «a don Luis nadie
+/// le ha preguntado» y «a don Luis se le preguntó y no tiene» son el
+/// mismo `COUNT(*) = 0`, y medicación (Fase 2) va a bloquear sobre esa
+/// diferencia: una prescripción a quien no tiene las alergias revisadas
+/// no es lo mismo que una a quien las tiene revisadas y vacías.
+///
+/// **De sólo inserción** (trigger `allergy_reviews_append_only`), como
+/// `client_consents`: cada revisión es una fila con su autor, su
+/// capacidad y su fecha. La vigente es la ÚLTIMA, y el histórico cuenta
+/// cuándo se preguntó por última vez — que es lo que el ingreso guiado
+/// (D-94) marca como hecho y lo que un inspector pide.
+model AllergyReview {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// `true` = «sin alergias conocidas». `false` = se revisaron y las que
+  /// hay son las filas de `allergies`. **En claro**: es la columna sobre
+  /// la que medicación va a bloquear y el ingreso va a marcar.
+  noneKnown Boolean @map("none_known")
+
+  /// De dónde salió el dato: «lo dice la hija», «informe del alta del
+  /// hospital». Cifrado.
+  sourceCifrado String? @map("source_cifrado")
+
+  reviewedAt                     DateTime @default(now()) @map("reviewed_at") @db.Timestamptz()
+  reviewedByUserId               String   @map("reviewed_by_user_id") @db.Uuid
+  reviewedByCareRoleAssignmentId String   @map("reviewed_by_care_role_assignment_id") @db.Uuid
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client       Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  reviewedBy   User               @relation("AllergyReviewBy", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  reviewedWith CareRoleAssignment @relation("AllergyReviewWith", fields: [reviewedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([tenantId, clientId, reviewedAt])
+  @@map("allergy_reviews")
+}
+
+/// historia-1 (D-90) · DISPOSITIVOS Y AYUDAS, con vigencia.
+///
+/// Silla de ruedas, andador, grúa, sonda, oxígeno, absorbentes, audífono,
+/// prótesis dental, gafas, otro.
+///
+/// ── EL CÓDIGO ES DATO DEL PRODUCTO, no un enum del motor ────────────
+///
+/// `code` es TEXT en claro y se valida contra
+/// `DISPOSITIVOS_DE_SERIE` (`packages/residencia-plan/src/ficha.ts`), no
+/// contra un enum de Postgres. Es D-11 llevado aquí y la misma decisión
+/// que `incident_type` de residencia-4: un nebulizador o una CPAP en
+/// 2028 tienen que ser **una fila de un fichero**, no una migración con
+/// un `ALTER TYPE`. Y de ese mismo fichero sale qué dispositivos son de
+/// riesgo, que es lo que la franja de alertas mira (D-91) — una sola
+/// lista para las dos cosas.
+///
+/// Al contrario que la clase de una alergia, de aquí **no cuelga ningún
+/// bloqueo clínico**: es lo que separa los dos criterios.
+model ResidentDevice {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// `SILLA_DE_RUEDAS`, `SONDA`, `OXIGENO`, `OTRO`… Ver la cabecera.
+  code          String
+  /// El detalle, cifrado: «sonda vesical Foley 16», «gafas de cerca».
+  /// **Obligatorio con `OTRO`** (CHECK `resident_devices_otro_con_detalle`):
+  /// un «otro» sin decir qué es no sirve de nada en un parte.
+  detailCifrado String? @map("detail_cifrado")
+
+  /// Desde cuándo y hasta cuándo. `toOn` NULL = **lo lleva hoy**, y es lo
+  /// que miran la ficha y la franja. No se borra: se cierra, igual que
+  /// una línea del plan.
+  fromOn DateTime  @map("from_on") @db.Date
+  toOn   DateTime? @map("to_on") @db.Date
+
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId               String   @map("created_by_user_id") @db.Uuid
+  createdByCareRoleAssignmentId String   @map("created_by_care_role_assignment_id") @db.Uuid
+  closedByUserId                String?  @map("closed_by_user_id") @db.Uuid
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy   User               @relation("ResidentDeviceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdWith CareRoleAssignment @relation("ResidentDeviceCreatedWith", fields: [createdByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  closedBy    User?              @relation("ResidentDeviceClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([tenantId, clientId, toOn])
+  @@map("resident_devices")
+}
+
+/// historia-1 (D-90) · **LA DIETA, VERSIONADA.**
+///
+/// Textura, espesante y restricciones. Cada cambio es una **versión
+/// nueva**: la anterior se queda intacta con su `superseded_at`, igual
+/// que el catálogo de controles y la plantilla de gravedad.
+///
+/// ── Por qué versionada y no editable ───────────────────────────────
+///
+/// Porque «¿qué textura tenía doña Carmen el día que se atragantó?» es la
+/// pregunta que se hace después, y un `UPDATE` la deja sin respuesta. El
+/// trigger `diet_profiles_inmutable` sólo deja poner `superseded_at`.
+///
+/// Una sola viva por residente: índice parcial
+/// `diet_profiles_una_viva_key` (`WHERE superseded_at IS NULL`), como
+/// `care_plan_items_one_live_key` y por lo mismo — la garantía es del
+/// motor, no de la ruta.
+model DietProfile {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// Sube de uno en uno por residente. Es lo que se lee en la pantalla
+  /// («dieta v3, desde el 14 de marzo») y lo que hace que el histórico se
+  /// pueda ordenar sin mirar instantes.
+  version Int
+
+  texture        DietTexture
+  /// Espesante: si lleva y de qué nivel (1 a 3, CHECK
+  /// `diet_profiles_espesante_coherente`). Las dos columnas van juntas:
+  /// un espesante sin nivel no se puede preparar, y un nivel sin
+  /// espesante es una fila a medias.
+  thickener      Boolean     @default(false)
+  thickenerLevel Int?        @map("thickener_level")
+
+  /// Las restricciones, **en claro y como códigos**: `DIABETICA`,
+  /// `SIN_SAL`, `SIN_GLUTEN`, `OTRAS`. Un array y no columnas booleanas
+  /// porque la pregunta es «¿cuáles?» y la respuesta es una lista, igual
+  /// que `level_n2_channels`. Y en claro porque de aquí sale la hoja de
+  /// emplatado de cocina-1, que es un `GROUP BY`.
+  restrictions String[] @default([])
+  /// El detalle de las restricciones y lo que no cabe en un código:
+  /// «sin lactosa, le sienta mal el pescado azul». Cifrado.
+  notesCifrado String?  @map("notes_cifrado")
+
+  /// NULL = **la vigente**. Ver el índice parcial.
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz()
+
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId               String   @map("created_by_user_id") @db.Uuid
+  createdByCareRoleAssignmentId String   @map("created_by_care_role_assignment_id") @db.Uuid
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy   User               @relation("DietProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdWith CareRoleAssignment @relation("DietProfileCreatedWith", fields: [createdByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@unique([clientId, version])
+  @@index([tenantId])
+  @@index([tenantId, clientId, supersededAt])
+  @@map("diet_profiles")
+}
+
+/// historia-1 (D-92) · **LAS AUSENCIAS, QUE PAUSAN.**
+///
+/// Hoy viven en la cabeza del personal y en los días que alguien teclea a
+/// mano para facturar las concertadas. Lo que esta tabla cambia, por
+/// orden de importancia:
+///
+///   1. **`queToca` no genera** las ocurrencias de un residente ausente,
+///      así que no salen como «no hechas» ni entran en el denominador de
+///      ningún indicador. La regla vive DENTRO de `queToca`
+///      (`packages/residencia-plan`), no en cada consulta: así cualquier
+///      indicador nuevo la hereda solo.
+///   2. El **parte de relevo** lo dice una vez: «ausente: en el hospital
+///      desde el martes».
+///   3. La **puerta** enseña al residente como ausente, sin lo que toca.
+///   4. Los **días del mes** salen contados (D-93), que es el dato de la
+///      factura de la Junta.
+///
+/// ── UNA VIVA POR RESIDENTE ──────────────────────────────────────────
+///
+/// Índice parcial `resident_absences_una_viva_key`
+/// (`WHERE ended_at IS NULL`). Nadie está en el hospital y de vacaciones
+/// a la vez, y dos ausencias abiertas dejarían «¿desde cuándo está
+/// fuera?» sin respuesta única. Cerrar una y abrir otra es lo que se
+/// hace, igual que un cambio de cama.
+///
+/// ── NO SE BORRA ─────────────────────────────────────────────────────
+///
+/// El trigger `resident_absences_inmutable` deja pasar el cierre (poner
+/// `ended_at` y su firma), la revisión al volver y la corrección firmada
+/// de las fechas, y nada más. **Borrar una ausencia es borrar días de
+/// factura**, que es el sabotaje número dos del bloque.
+model ResidentAbsence {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  kind ResidentAbsenceKind
+
+  /// ── LOS TRES INSTANTES, y por qué son tres ────────────────────────
+  ///
+  /// `startedAt` cuándo se fue, `expectedEndAt` cuándo se espera que
+  /// vuelva (lo que la pantalla enseña y lo que nadie sabe de un ingreso
+  /// hospitalario: es nullable) y `endedAt` cuándo volvió de verdad.
+  ///
+  /// Son TIMESTAMPTZ y no fechas, al contrario que `admission_date`: la
+  /// hora importa aquí porque de ella depende qué ocurrencias se pausan.
+  /// Una señora que sale a las 15:00 tenía su higiene de la mañana, y
+  /// con una fecha sola se le perdonaría — o se le reprocharía — el turno
+  /// entero. La regla de los DÍAS (D-93) se calcula desde estos
+  /// instantes, no al contrario.
+  startedAt     DateTime  @map("started_at") @db.Timestamptz()
+  expectedEndAt DateTime? @map("expected_end_at") @db.Timestamptz()
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz()
+
+  /// Adónde va y por qué. Los dos cifrados: «Hospital Nuestra Señora del
+  /// Prado» y «caída con fractura de fémur» son salud con todas las
+  /// letras.
+  destinationCifrado String? @map("destination_cifrado")
+  reasonCifrado      String? @map("reason_cifrado")
+
+  /// ── LA REVISIÓN AL VOLVER (D-92) ──────────────────────────────────
+  ///
+  /// `reviewRequired` lo pone la ruta al CERRAR una ausencia de
+  /// `INGRESO_HOSPITALARIO` o `URGENCIAS`: quien vuelve de un hospital
+  /// trae medicación cambiada e informes que alguien tiene que leer. El
+  /// panel lo enseña como «pendiente de revisar tras el ingreso» y se
+  /// limpia cuando la DUE lo confirma, con su firma.
+  ///
+  /// Las tres de la confirmación van juntas o ninguna (CHECK
+  /// `resident_absences_revision_completa`).
+  ///
+  /// Cuando existan PAI (historia-2) y medicación, esta confirmación se
+  /// convertirá en sus tareas de revisión y conciliación. **Aquí no se
+  /// adelanta nada**: lo que hay es el aviso y su acuse.
+  reviewRequired                 Boolean   @default(false) @map("review_required")
+  reviewedAt                     DateTime? @map("reviewed_at") @db.Timestamptz()
+  reviewedByUserId               String?   @map("reviewed_by_user_id") @db.Uuid
+  reviewedByCareRoleAssignmentId String?   @map("reviewed_by_care_role_assignment_id") @db.Uuid
+
+  /// La incidencia que abrió una `SALIDA_NO_CONTROLADA` (N4). NULL en el
+  /// resto. `SetNull` no: `Restrict`, porque una incidencia del libro no
+  /// se borra nunca y esto lo dice también desde aquí.
+  incidentId String? @map("incident_id") @db.Uuid
+
+  /// ── LA CORRECCIÓN FIRMADA de las fechas ───────────────────────────
+  ///
+  /// Las tres juntas o ninguna (CHECK
+  /// `resident_absences_correccion_completa`), y son la ÚNICA forma de
+  /// que `started_at` o `ended_at` cambien. Mismo patrón que
+  /// `duty_occurrences`: un «se me fue el dedo» se arregla diciendo
+  /// quién lo arregla, porque esas dos fechas son días de factura.
+  ///
+  /// `correctionReason` va **en claro**, como la de `duty_occurrences` y
+  /// por lo mismo: «la DUE apuntó el día de antes» no es un dato de
+  /// salud, es administración de un registro. Lo clínico de una ausencia
+  /// es su motivo, y ése sí va cifrado.
+  correctedAt       DateTime? @map("corrected_at") @db.Timestamptz()
+  correctedByUserId String?   @map("corrected_by_user_id") @db.Uuid
+  correctionReason  String?   @map("correction_reason")
+
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId               String   @map("created_by_user_id") @db.Uuid
+  createdByCareRoleAssignmentId String   @map("created_by_care_role_assignment_id") @db.Uuid
+  closedByUserId                String?  @map("closed_by_user_id") @db.Uuid
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client       Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  incident     Incident?           @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  createdBy    User                @relation("ResidentAbsenceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdWith  CareRoleAssignment  @relation("ResidentAbsenceCreatedWith", fields: [createdByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  closedBy     User?               @relation("ResidentAbsenceClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy   User?               @relation("ResidentAbsenceReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  reviewedWith CareRoleAssignment? @relation("ResidentAbsenceReviewedWith", fields: [reviewedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  correctedBy  User?               @relation("ResidentAbsenceCorrectedBy", fields: [correctedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  /// «¿Quién está fuera ahora?», que es la pregunta de `queToca`, del
+  /// parte y de la puerta. El índice parcial `WHERE ended_at IS NULL`
+  /// vive en la migración.
+  @@index([tenantId, clientId, startedAt])
+  @@map("resident_absences")
+}
+
+/// historia-1 (D-94) · **EL INGRESO GUIADO, UN ELEMENTO POR FILA.**
+///
+/// Hoy el ingreso de un residente nuevo no tiene lista: lo que falta se
+/// descubre cuando lo pide un inspector (R20). Esta tabla es la lista.
+///
+/// ── NO HAY TABLA PADRE, y es una decisión ──────────────────────────
+///
+/// El concepto se llama `AdmissionChecklist` en `03` §8, pero una fila
+/// padre con sólo `client_id` no guardaría nada que `resident_profiles`
+/// no sepa ya: la lista **es el conjunto de sus filas**. Lo que sí hace
+/// falta es que las filas existan desde el ingreso, y de eso se encarga
+/// la ruta de alta del residente (los diez elementos de serie se
+/// insertan con el residente, en la misma transacción).
+///
+/// ── DOS FORMAS DE ESTAR HECHO, y la segunda es la buena ────────────
+///
+///   · **A mano**: alguien lo marca, con su firma y su fecha
+///     (`done_at`, `done_by_*`). El contrato firmado, los
+///     consentimientos.
+///   · **Solo**: el elemento se da por cumplido **cuando el dato
+///     existe** — la cama asignada, la dieta vigente, el plan de
+///     cuidados, las alergias revisadas. Esos no se marcan: se
+///     comprueban (`auto = true`), y la pantalla lo dice.
+///
+/// Pedirle a la dirección que marque «cama asignada» cuando la cama ya
+/// está en la base es pedirle que copie un dato que el sistema tiene —y
+/// entonces la lista miente el día que alguien marca sin haberlo hecho.
+///
+/// ── Y DOS ELEMENTOS SIN PANTALLA TODAVÍA ───────────────────────────
+///
+/// `ESCALAS_INICIALES` (historia-3) y `PAI_INICIAL` (historia-2) entran
+/// **con su fecha límite** aunque su pantalla no exista, porque el plazo
+/// de 30 días del PAI **corre desde el ingreso**: meterlos cuando haya
+/// pantalla sería empezar a contar tarde.
+model AdmissionChecklistItem {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// `IDENTIDAD`, `CAMA`, `CONTRATO`, `CONSENT_DATOS`, `CONSENT_IMAGEN`,
+  /// `FAMILIAR`, `ALERGIAS`, `DIETA`, `DISPOSITIVOS`, `PLAN_CUIDADOS`,
+  /// `ESCALAS_INICIALES`, `PAI_INICIAL`. **Código en claro** validado
+  /// contra el fichero de serie, por lo mismo que los dispositivos:
+  /// añadir un elemento en 2028 es una fila de un fichero.
+  code String
+
+  /// `true` = este elemento **se comprueba, no se marca**. Ver la
+  /// cabecera. Lo copia la fila al nacer desde el fichero de serie: si
+  /// mañana un elemento deja de ser automático, lo ya ingresado sigue
+  /// contándose como se contó.
+  auto Boolean @default(false)
+
+  /// La fecha límite, «YYYY-MM-DD». Sólo la tienen los dos con plazo
+  /// (`PAI_INICIAL` a 30 días del ingreso, configurable por el centro) y
+  /// `ESCALAS_INICIALES`. NULL en el resto: un contrato no vence, falta.
+  dueOn String? @map("due_on") @db.VarChar(10)
+
+  /// ── MARCADO A MANO (D-31) ─────────────────────────────────────────
+  ///
+  /// Las tres juntas o ninguna (CHECK
+  /// `admission_checklist_items_hecho_completo`), y **prohibidas en los
+  /// `auto`** (mismo CHECK): marcar a mano uno que se comprueba sería
+  /// justo la forma de que la lista mienta.
+  doneAt                     DateTime? @map("done_at") @db.Timestamptz()
+  doneByUserId               String?   @map("done_by_user_id") @db.Uuid
+  doneByCareRoleAssignmentId String?   @map("done_by_care_role_assignment_id") @db.Uuid
+  /// La nota de quien lo marcó. Cifrada: aquí cabe «la hija trae el
+  /// informe del hospital el lunes».
+  doneNoteCifrado            String?   @map("done_note_cifrado")
+
+  /// ── EL FICHERO ADJUNTO ────────────────────────────────────────────
+  ///
+  /// El contrato firmado, en PDF. Fichero del **volumen clínico** con
+  /// cabecera `MPC1` y la huella del claro, igual que los demás (la foto
+  /// del residente, la evidencia de una obligación, el PDF de un
+  /// consentimiento): no se inventa un segundo almacén.
+  ///
+  /// Las cuatro van juntas o ninguna (CHECK
+  /// `admission_checklist_items_adjunto_completo`).
+  fileName     String? @map("file_name") @db.VarChar(100)
+  fileSha256   String? @map("file_sha256") @db.Char(64)
+  fileBytes    Int?    @map("file_bytes")
+  fileMimeType String? @map("file_mime_type") @db.VarChar(80)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client   Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  doneBy   User?               @relation("AdmissionChecklistDoneBy", fields: [doneByUserId], references: [id], onDelete: Restrict)
+  doneWith CareRoleAssignment? @relation(fields: [doneByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  /// Un elemento por residente: es lo que hace **idempotente** la
+  /// inserción de la lista al ingresar y lo que impide dos «contrato
+  /// firmado» con firmas distintas.
+  @@unique([clientId, code])
+  @@index([tenantId])
+  @@index([tenantId, doneAt])
+  @@map("admission_checklist_items")
+}
+
+/// historia-1 (D-94, D-96) · **LOS DOS PLAZOS DEL CENTRO.**
+///
+/// Una fila por centro, y las dos columnas son plazos que **no se
+/// inventan de serie**:
+///
+///   · `initialCarePlanDays` · a cuántos días del ingreso vence el PAI
+///     inicial. 30 de serie, que es lo que dice `03` §7 y lo que la
+///     casa ya usaba en papel.
+///   · `dischargeNoticeDays` · a cuántos días hay que comunicar una baja
+///     a la administración cuando la plaza es concertada. **NULL de
+///     serie, a propósito**: el plazo es normativa autonómica y
+///     escribir «15 días» porque suena bien es prometer un plazo que
+///     puede no ser el de la Junta. Sin fila o con NULL, la obligación
+///     del alta nace igual —con la fecha del alta y marcada
+///     «periodicidad por verificar»—, que es lo que hace que la
+///     dirección la vea y la ajuste en vez de que no exista.
+model CenterAdmissionSetting {
+  tenantId String @id @map("tenant_id") @db.Uuid
+
+  /// CHECK 1..365: un PAI a 0 días no es un plazo y a más de un año no es
+  /// un PAI inicial.
+  initialCarePlanDays Int  @default(30) @map("initial_care_plan_days")
+  /// CHECK 1..180 cuando no es NULL. Ver la cabecera.
+  dischargeNoticeDays Int? @map("discharge_notice_days")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedBy User?  @relation(fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("center_admission_settings")
 }

@@ -28,6 +28,9 @@ export interface ResidenteFila {
   admissionDate: string;
   dischargeDate: string | null;
   dischargeReason: string | null;
+  /** historia-1 (D-96) · la clase del alta. `null` en quien se fue antes
+   *  de este bloque: no se le inventa una. */
+  dischargeKind?: string | null;
   dependencyLevel: NivelDependencia;
   dependencyGrade: "I" | "II" | "III" | null;
   placeType: TipoDePlaza;
@@ -75,6 +78,17 @@ export const PLAZA_LABEL: Record<TipoDePlaza, string> = {
   PRIVADA: "Privada",
   CONCERTADA: "Concertada",
   TEMPORAL: "Temporal",
+};
+
+/** historia-1 (D-96) · las cuatro clases de alta, en el orden en que se
+ *  ofrecen. El traslado primero porque es el caso más frecuente en una
+ *  residencia; el fallecimiento no va primero por respeto a quien lee la
+ *  lista desplegada con la familia delante. */
+export const CLASE_DE_ALTA_LABEL: Record<string, string> = {
+  TRASLADO: "Traslado a otro centro o a su casa",
+  VOLUNTARIA: "Se va por voluntad propia",
+  FALLECIMIENTO: "Fallecimiento",
+  OTRA: "Otra",
 };
 
 export const CATEGORIA_LABEL: Record<string, string> = {

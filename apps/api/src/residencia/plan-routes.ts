@@ -79,6 +79,7 @@ import {
   deColumnasDefault,
   mismaFrecuencia,
 } from "./frecuencia-columnas.js";
+import { ausenciasDelPlan } from "./ausencias.js";
 
 const PUERTAS_PLANTILLAS = [requireOwner, ensureClinicaEnabled, ensureResidenciaEnabled];
 const PUERTAS_PLAN = [requireOwnerOrCashier, ensureClinicaEnabled, ensureResidenciaEnabled];
@@ -880,6 +881,18 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
           // las 00:00 del siguiente, calculadas como fecha y no como
           // «+24 h».
           finDelDia < hasta ? finDelDia : hasta,
+          // historia-1 (D-92) · las ausencias de ESTE residente. La vista
+          // «hoy» de su plan enseña lo que le toca de verdad, y mientras
+          // está en el hospital no le toca nada — la pantalla lo dice con
+          // su banda en vez de listar veintiocho cuidados que nadie puede
+          // hacer.
+          await ausenciasDelPlan(
+            prisma,
+            tenantId,
+            desde,
+            finDelDia < hasta ? finDelDia : hasta,
+            [clientId],
+          ),
         );
 
         const aliasPorCodigo = new Map(ajustes.map((a) => [a.controlCode, a.alias]));
