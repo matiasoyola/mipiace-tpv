@@ -53,6 +53,31 @@ const OCTUBRE: DatosDelMes = {
     // Sigue abierta: cuenta como fuera de plazo.
     { horas: null },
   ],
+
+  // ── calidad-1 · lo que necesitan los siete nuevos ────────────────
+  //
+  // De los registros de atención directa tocaban 1.000 ocurrencias y se
+  // hicieron 980. Cinco caídas. Ocho incidencias de residente cerradas,
+  // seis con la familia comunicada antes de cerrar. Cuatro quejas: dos
+  // respondidas en 3 y 15 días, una en 20 y una sin responder. 48 camas
+  // × 31 días = 1.488 camas-día, de las que 1.395 ocupadas. Y de
+  // personal: una baja sobre una plantilla de 20.
+  cumplimentacion: { tocan: 1000, hechas: 980 },
+  caidas: 5,
+  incidenciasDeResidenteCerradas: 8,
+  conFamiliaComunicadaAntesDeCerrar: 6,
+  quejas: [
+    { dias: 3 },
+    // **15 días exactos está DENTRO**: el criterio es «en plazo», y el
+    // día del plazo todavía cuenta. Es el borde donde un `<` por
+    // descuido cambia el indicador que el centro enseña al inspector.
+    { dias: 15 },
+    { dias: 20 },
+    // Sin responder: cuenta fuera de plazo, igual que una avería abierta.
+    { dias: null },
+  ],
+  ocupacion: { camasDia: 1488, ocupadasDia: 1395 },
+  personal: { bajas: 1, plantilla: 20 },
 };
 
 /** Los valores de los seis, por código. */
@@ -62,8 +87,13 @@ function valores(datos: DatosDelMes = OCTUBRE, umbrales = [] as never[]) {
 }
 
 describe("los seis indicadores de octubre, calculados a mano", () => {
-  it("son seis y están en el orden del bloque C §2", () => {
-    expect(INDICADORES.map((i) => i.code)).toEqual([
+  it("los seis de residencia-5 siguen los PRIMEROS y en el orden del bloque C §2", () => {
+    // **NO REGRESIÓN** (lo pide el prompt de calidad-1): los seis de
+    // residencia-5 siguen estando, en su orden, y las aserciones de este
+    // bloque son las mismas de entonces, número por número. Los siete de
+    // calidad-1 van DETRÁS: añadir uno delante habría cambiado el orden
+    // en que la dirección los lee cada mes sin que nadie lo pidiera.
+    expect(INDICADORES.map((i) => i.code).slice(0, 6)).toEqual([
       "SIN_DEPOSICION",
       "VISITA_MEDICA",
       "GIMNASIA",
@@ -133,6 +163,13 @@ describe("sin dato NO es cero", () => {
     actividadesSocioculturales: 0,
     episodiosSinDeposicion: 0,
     averias: [],
+    cumplimentacion: undefined,
+    caidas: 0,
+    incidenciasDeResidenteCerradas: 0,
+    conFamiliaComunicadaAntesDeCerrar: 0,
+    quejas: [],
+    ocupacion: { camasDia: 0, ocupadasDia: 0 },
+    personal: { bajas: 0, plantilla: 0 },
   };
 
   it("un centro sin residentes no incumple la visita médica: no hay dato", () => {
@@ -207,10 +244,16 @@ describe("el umbral es del centro, la fórmula del producto", () => {
 // ── Y los que NO se pintan ───────────────────────────────────────────
 
 describe("los que todavía no tienen dato se NOMBRAN", () => {
-  it("son once y cada uno dice qué le falta", () => {
+  it("son trece y cada uno dice qué le falta", () => {
     // Un indicador que falta y no se nombra es un indicador que alguien
     // da por calculado. De aquí sale la lista del done.
-    expect(INDICADORES_SIN_DATO).toHaveLength(11);
+    //
+    // calidad-1 los deja en TRECE y no en once: la rotación se va de
+    // aquí (ya se calcula), pero la fila «rotación, absentismo y
+    // formación» se parte en dos —absentismo y formación tienen bloques
+    // distintos detrás— y entran la representatividad de las encuestas
+    // (obs. 05 de AENOR), que hasta ahora no se nombraba.
+    expect(INDICADORES_SIN_DATO).toHaveLength(13);
     for (const i of INDICADORES_SIN_DATO) {
       expect(i.nombre.length).toBeGreaterThan(0);
       expect(i.falta.length).toBeGreaterThan(0);
@@ -234,5 +277,164 @@ describe("los porcentajes se redondean a un decimal", () => {
   it("2 de 3 es 66,7 %", () => {
     const datos: DatosDelMes = { ...OCTUBRE, cumplimiento: { GIMNASIA: { tocan: 3, hechas: 2 } } };
     expect(valores(datos).get("GIMNASIA")!.valor).toBe(66.7);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  calidad-1 (D-72) · LOS SIETE NUEVOS, TAMBIÉN A MANO
+// ════════════════════════════════════════════════════════════════════
+
+describe("calidad-1 · los siete indicadores que añade el bloque", () => {
+  it("van los últimos, y cada uno trae su proceso de referencia", () => {
+    expect(INDICADORES.map((i) => i.code).slice(6)).toEqual([
+      "CUMPLIMENTACION_REGISTROS",
+      "CAIDAS",
+      "FAMILIA_COMUNICADA",
+      "QUEJAS",
+      "QUEJAS_EN_PLAZO",
+      "OCUPACION_MEDIA",
+      "ROTACION_PERSONAL",
+    ]);
+    // **Todos**, los trece: un indicador sin proceso es el agujero que la
+    // NC 01 de AENOR señala, y aquí es donde se nota si alguien añade el
+    // catorce sin ponérselo.
+    for (const i of INDICADORES) {
+      expect(i.procesoDeReferencia, i.code).toMatch(/^[A-Z_]+$/);
+    }
+  });
+
+  it("cumplimentación de registros: 980 de 1.000 = 98 %, umbral 98 → dentro, justo", () => {
+    // Es R9 de la inspección. 98 exacto contra un umbral de 98 al MÍNIMO
+    // está dentro: el borde es `>=`, y si fuera `>` un centro que cumple
+    // exactamente su objetivo saldría en rojo.
+    const v = valores().get("CUMPLIMENTACION_REGISTROS")!;
+    expect(v.valor).toBe(98);
+    expect(v.umbral).toBe(98);
+    expect(v.comparacion).toBe("AT_LEAST");
+    expect(v.dentro).toBe(true);
+  });
+
+  it("caídas: 5 al mes, umbral 4 al MÁXIMO → FUERA", () => {
+    const v = valores().get("CAIDAS")!;
+    expect(v.valor).toBe(5);
+    expect(v.dentro).toBe(false);
+  });
+
+  it("familia comunicada: 6 de 8 = 75 %, umbral 90 → FUERA", () => {
+    const v = valores().get("FAMILIA_COMUNICADA")!;
+    expect(v.valor).toBe(75);
+    expect(v.umbral).toBe(90);
+    expect(v.dentro).toBe(false);
+  });
+
+  it("quejas: 4 al mes, umbral 2 al MÁXIMO → FUERA", () => {
+    const v = valores().get("QUEJAS")!;
+    expect(v.valor).toBe(4);
+    expect(v.dentro).toBe(false);
+  });
+
+  it("quejas en plazo: 2 de 4 = 50 %, y los 15 días exactos CUENTAN", () => {
+    // Las dos en plazo son la de 3 días y **la de 15 exactos**. Fuera: la
+    // de 20 y la que sigue sin responder — por lo mismo que una avería
+    // sin cerrar, si no, no responder ninguna daría el mejor resultado.
+    const v = valores().get("QUEJAS_EN_PLAZO")!;
+    expect(v.valor).toBe(50);
+    expect(v.umbral).toBe(100);
+    expect(v.dentro).toBe(false);
+  });
+
+  it("ocupación media: 1.395 de 1.488 camas-día = 93,8 %, umbral 90 → dentro", () => {
+    // 1395 / 1488 = 0,93750 → 93,8 % con un decimal.
+    const v = valores().get("OCUPACION_MEDIA")!;
+    expect(v.valor).toBe(93.8);
+    expect(v.dentro).toBe(true);
+  });
+
+  it("rotación: 1 baja de 20 = 5 %, umbral 2 al MÁXIMO → FUERA", () => {
+    // Observación 04 de AENOR. Sale de `employees`, sin inventar nada.
+    const v = valores().get("ROTACION_PERSONAL")!;
+    expect(v.valor).toBe(5);
+    expect(v.comparacion).toBe("AT_MOST");
+    expect(v.dentro).toBe(false);
+  });
+});
+
+describe("calidad-1 · los nuevos también distinguen «sin dato» de cero", () => {
+  const vacio: DatosDelMes = {
+    mes: "2026-10",
+    residentes: 0,
+    cumplimiento: {},
+    residentesConVisitaMedica: 0,
+    actividadesSocioculturales: 0,
+    episodiosSinDeposicion: 0,
+    averias: [],
+    cumplimentacion: undefined,
+    caidas: 0,
+    incidenciasDeResidenteCerradas: 0,
+    conFamiliaComunicadaAntesDeCerrar: 0,
+    quejas: [],
+    ocupacion: { camasDia: 0, ocupadasDia: 0 },
+    personal: { bajas: 0, plantilla: 0 },
+  };
+
+  it("un centro sin plan de cuidados no cumplimenta el 0 % de sus registros", () => {
+    const v = calcularIndicadores(vacio, []).find(
+      (x) => x.code === "CUMPLIMENTACION_REGISTROS",
+    )!;
+    expect(v.valor).toBeNull();
+    expect(v.dentro).toBeNull();
+  });
+
+  it("un mes sin quejas no da 0 % de respuestas en plazo", () => {
+    // Y es el que más importa de los siete: «cero quejas» es un mes
+    // bueno, y pintarlo como «0 % respondidas en plazo» en rojo sería
+    // castigar al centro por no tener quejas.
+    const v = calcularIndicadores(vacio, []).find(
+      (x) => x.code === "QUEJAS_EN_PLAZO",
+    )!;
+    expect(v.valor).toBeNull();
+    expect(v.dentro).toBeNull();
+  });
+
+  it("un centro sin camas no tiene 0 % de ocupación", () => {
+    const v = calcularIndicadores(vacio, []).find(
+      (x) => x.code === "OCUPACION_MEDIA",
+    )!;
+    expect(v.valor).toBeNull();
+  });
+
+  it("un centro sin plantilla no tiene 0 % de rotación", () => {
+    const v = calcularIndicadores(vacio, []).find(
+      (x) => x.code === "ROTACION_PERSONAL",
+    )!;
+    expect(v.valor).toBeNull();
+  });
+
+  it("pero cero caídas y cero quejas SÍ son ceros", () => {
+    const r = calcularIndicadores(vacio, []);
+    expect(r.find((x) => x.code === "CAIDAS")!.valor).toBe(0);
+    expect(r.find((x) => x.code === "QUEJAS")!.valor).toBe(0);
+  });
+});
+
+describe("calidad-1 · los que NO se pintan se siguen nombrando", () => {
+  it("la rotación sale de la lista de los que faltan: ya se calcula", () => {
+    const nombres = INDICADORES_SIN_DATO.map((i) => i.nombre);
+    expect(nombres).not.toContain("Rotación, absentismo y formación en plazo");
+    // Pero el absentismo y la formación siguen, cada uno con lo suyo: la
+    // fila de los tres juntos hacía parecer que «falta RRHH» era una
+    // sola deuda, y son tres con tres bloques distintos detrás.
+    expect(nombres).toContain("Absentismo");
+    expect(nombres).toContain("Formación obligatoria en plazo");
+  });
+
+  it("y ninguno de los que se nombran está también calculado", () => {
+    // El fallo que esto caza: añadir el cálculo de uno y olvidarse de
+    // quitarlo de la lista, y entonces la pantalla lo pinta arriba con
+    // su número y abajo dice que falta.
+    const calculados = new Set(INDICADORES.map((i) => i.nombre.toLowerCase()));
+    for (const s of INDICADORES_SIN_DATO) {
+      expect(calculados.has(s.nombre.toLowerCase()), s.nombre).toBe(false);
+    }
   });
 });
