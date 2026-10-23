@@ -205,6 +205,51 @@ describe("n1-hosteleria-2 · el pliegue se recuerda en el aparato", () => {
   });
 });
 
+describe("n1-hosteleria-2 · «hace» una sola vez (pasada del N1)", () => {
+  // Lo cazó la pasada en el aparato, en la hoja de opciones del hallazgo
+  // 8 y con la mesa RECIÉN cobrada: «Se cobró hace hace menos de 1 min».
+  // `minutosDesde` ya trae el «hace» dentro, y el literal lo duplicaba.
+  //
+  // Sólo se ve con la cadena larga —«hace menos de 1 min»—, que es
+  // exactamente el caso del minuto siguiente a cobrar: el más frecuente
+  // de esa hoja y el que ningún banco miraba.
+  //
+  // La fila de la tabla de sabotajes: «el cuerpo de la hoja duplica
+  // "hace"».
+
+  /** La misma función que `TableMapScreen`, para poder atarla. */
+  const minutosDesde = (ms: number): string => {
+    if (ms < 60_000) return "hace menos de 1 min";
+    const min = Math.floor(ms / 60_000);
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    return `hace ${h} h ${min % 60} min`;
+  };
+  const cuerpo = (ms: number) =>
+    `Se cobró ${minutosDesde(ms)}. ¿Qué hacemos con ella?`;
+
+  it("recién cobrada no dice «hace hace»", () => {
+    expect(cuerpo(5_000)).toBe(
+      "Se cobró hace menos de 1 min. ¿Qué hacemos con ella?",
+    );
+    expect(cuerpo(5_000)).not.toMatch(/hace hace/);
+  });
+
+  it("ni con minutos ni con horas", () => {
+    expect(cuerpo(12 * 60_000)).toBe("Se cobró hace 12 min. ¿Qué hacemos con ella?");
+    expect(cuerpo(90 * 60_000)).toBe("Se cobró hace 1 h 30 min. ¿Qué hacemos con ella?");
+    for (const ms of [0, 5_000, 60_000, 12 * 60_000, 90 * 60_000]) {
+      expect(cuerpo(ms)).not.toMatch(/hace hace/);
+    }
+  });
+
+  it("SABOTAJE · con el «hace» del literal vuelve el tartamudeo", () => {
+    const roto = (ms: number) =>
+      `Se cobró hace ${minutosDesde(ms)}. ¿Qué hacemos con ella?`;
+    expect(roto(5_000)).toMatch(/hace hace/);
+  });
+});
+
 describe("n1-hosteleria-2 · dónde se pliega y dónde no", () => {
   it("en la mano y en «Todas», sí", () => {
     expect(zonasSePliegan({ deMano: true, filtro: "ALL" })).toBe(true);

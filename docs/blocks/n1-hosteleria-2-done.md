@@ -860,6 +860,82 @@ caza un ojo sobre una captura del aparato.
   aterriza en una MESA. El driver ahora comprueba con `elementFromPoint` que
   debajo del dedo está el objetivo **antes** de tocar, y si no, no toca.
 
+### 9.2-quinquies · LA PASADA, con la 1.29.1 (24-10, 00:00–00:30)
+
+Hecha ya con el N1 en **puerto fijo 5555** y «Pantalla siempre encendida».
+
+| paso | medido en el aparato | criterio |
+|---|---|---|
+| mapa a 360 | `innerWidth` **360**, `scrollWidth` 360, **sin desborde**, alto 720, banda 40, cabecera 120, mesa **88**, marcos fuera | 🟢 |
+| zonas plegables | las tres plegadas al abrir con sus resúmenes reales; **la sala entera en y 184…364** | 🟢 (2) |
+| un toque de verdad | `input tap` 180×680 físicos sobre la cabecera de Terraza → `plegada` **true → false**, 8 mesas | 🟢 |
+| objetivos táctiles | **ninguno < 48** en el mapa; el menor es la cabecera de zona, 48 | 🟢 (R3) |
+| fila de cantidad | **no se pinta** en ningún momento de la venta | 🟢 (5) |
+| familia «Cafe» | rejilla **no**, tira **sí**, primer producto y=279 visible, **6 enteros** | 🟢 |
+| buscar «tost» | ni rejilla, ni tira, ni fila; primer resultado **y=194**, pegado al buscador; **12 enteros** de 28 | 🟢 |
+| la hoja de la comanda | **y=0…720, a pantalla completa**, y de la capa de debajo asoman **0 px arriba y 0 abajo** | 🟢 (1, 4, R1) |
+| la X | **56×56** | 🟢 (6, R3) |
+| **el atrás** | el **primero cierra la hoja y deja EN LA MESA**; el segundo vuelve al mapa | 🟢 (6) |
+| pie de la comanda | **134 px**, total a **34 px** | 🟢 |
+| **seis líneas** | **2 enteras de 6** | 🔴 ver abajo |
+| cobro en efectivo | 19,40 €, «Pagado · cuadra», vuelve **solo** al mapa y T2 queda **POR RECOGER** | 🟢 |
+| mesa POR RECOGER | lado 88, tinta `rgb(22,32,42)` sobre `rgb(157,180,200)`, nombre 20 px y **«Por recoger» a 15 px**, SIN los minutos | 🟢 (7) |
+| hoja de opciones | **x=0, ancho 360 = todo el ancho**, título 19, cuerpo 15, **tres botones de 56 px**, orden **«Dejar libre» → «Abrir cuenta nueva» → «Volver»**; el atrás la cierra **sin decidir** | 🟢 (8) |
+| envío a cocina | la comanda sale del N1 y **NO llega al AP11** | 🔴 ver abajo |
+| hallazgo 9 en el hierro | **no se pudo probar**: hace falta un aviso «listo», y para eso la comanda tiene que llegar | ⬜ |
+
+Capturas en `docs/qa/2026-10-23-n1-hosteleria-2/`.
+
+#### El 🔴 del hallazgo 1, medido en el aparato: **2 de 6**, no 3
+
+Y la diferencia con el banco tiene causa, no ruido: esta comanda llevaba además
+un bloque **«EN COCINA»** con la línea ya enviada (Croissant plancha ×6), y entre
+su rótulo y su línea se comen **123 px** antes de que empiece la primera de las
+seis nuevas.
+
+```
+ENTERA  162.. 191  «EN COCINA · 01:26»
+ENTERA  195.. 289  «Croissant plancha  11,40 €  −6+»   ← lo ya enviado
+ENTERA  293.. 327  «SIN ENVIAR»
+ENTERA  331.. 432  «Café Americano»
+ corta  436.. 538  «Café Bombón»                        ← la lista acaba en 522
+ corta  542.. 643  «Café Solo»
+ corta  647.. 749  «Café con leche»
+ corta  753.. 854  «Café cortado»
+```
+
+El banco sólo tenía líneas sin enviar y daba 3. **Una mesa de verdad casi siempre
+tiene algo ya en cocina**, así que 2 es la cifra honesta, y refuerza lo que dice
+el §2.8: el criterio de las seis no se cumple y no se puede cumplir sin tocar
+una de las dos piezas intocables.
+
+#### El 🔴 de cocina: la comanda sale y no llega
+
+Es el mismo corte que la pasada del 23-10 (§9.2-ter de `n1-hosteleria-done`), y
+esta vez con mejores datos. Los tres hechos, que no cuadran entre sí:
+
+| | qué dice |
+|---|---|
+| `GET /kitchen/estado` | la pantalla del AP11 está **`alive: true`**, secciones `[COCINA, BARRA]` |
+| el TPV del N1 | **«Cocina no recibe · al enviar saldrá en papel»**, antes y después de enviar |
+| el KDS del AP11 | **«Sin comandas pendientes»**, `LISTAS · 0`, dos capturas idénticas byte a byte |
+
+O sea: el servidor cree que la pantalla está viva, el TPV cree que no recibe, y
+la pantalla no enseña nada. **No es de este bloque** —no se ha tocado nada del
+envío— pero bloquea el último paso del guion y, con él, la prueba del hallazgo 9
+en el aparato: sin comanda que llegue no hay nada que cocina pueda marcar
+«Lista», y sin eso no hay aviso que tocar.
+
+Queda como lo más urgente de lo que sale de esta pasada, por delante del propio
+hallazgo 1: **una comanda que sale y no llega es una mesa sin servir.**
+
+#### Y un fallo de texto que sólo sale en la hoja del hallazgo 8
+
+**«Se cobró hace hace menos de 1 min».** `minutosDesde` ya trae el «hace»
+dentro y el literal lo duplicaba. Sólo se ve con la cadena larga —el minuto
+siguiente a cobrar—, que es justamente el caso más frecuente de esa hoja y el
+que ningún banco miraba. Arreglado, con su sabotaje.
+
 ### 9.3 El guion, con el servicio encima
 
 Mecánico en cuanto haya adb. El orden importa: **el KDS se comprueba ANTES de
@@ -925,9 +1001,13 @@ Lo que **esta sesión** ha dejado en Sirope-ensayo:
 | qué | dónde | cuándo | de quién |
 |---|---|---|---|
 | **Mesa T2 abierta · 11,40 € · 1 línea** | TERRAZA | 23-10 **19:26** | un toque que aterrizó en la mesa al moverse la cabecera de zona bajo el dedo. Matías estaba usando el N1 a la vez, así que **no se puede afirmar de quién fue el toque** |
+| **Ticket cobrado · 19,40 € · 6 líneas** | T2 | 24-10 **~00:20** | el cobro del guion, con esa misma T2 y cinco cafés añadidos encima |
+| **Mesa T2 · POR RECOGER** | TERRAZA | 24-10 **~00:20** | el estado en el que el cobro deja la mesa. Se usó para probar el hallazgo 8 y **no** se tocó «Dejar libre», para dejarlo visible |
+| **Una comanda de cocina enviada** | T2 | 24-10 **~00:10** | salió del N1 y no llegó al AP11; queda en la base sin recibir |
 
-**Ningún ticket cobrado y ningún `TEST` nuevo**: no se llegó a la parte del
-cobro. Nada subió a Holded ni generó registro fiscal — el tenant está en ensayo.
+**Un ticket cobrado**, el de 19,40 €. Nada subió a Holded ni generó registro
+fiscal: el tenant está en ensayo y el propio TPV lo rotula («ENSAYO · estos
+cobros no son facturas»).
 
 Y lo que ya había de antes, que no es de esta sesión pero el reset se lleva
 igual: cuatro comandas de cocina pendientes en el KDS del AP11 (la más vieja de

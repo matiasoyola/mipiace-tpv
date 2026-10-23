@@ -1193,7 +1193,13 @@ export function TableMapScreen(props: TableMapScreenProps) {
       {porRecoger && (
         <ConfirmSheet
           title={`${porRecoger.name} · por recoger`}
-          body={`Se cobró hace ${minutosDesde(porRecoger.porRecogerDesde)}. ¿Qué hacemos con ella?`}
+          // n1-hosteleria-2 · «hace» UNA vez. `minutosDesde` ya lo trae
+          // dentro («hace menos de 1 min», «hace 12 min»), así que el
+          // literal lo duplicaba: «Se cobró hace hace menos de 1 min».
+          // Lo cazó la pasada en el N1 del 23-10, en la hoja del hallazgo
+          // 8 — con la mesa recién cobrada, que es justo el caso en el que
+          // la cadena larga aparece.
+          body={`Se cobró ${minutosDesde(porRecoger.porRecogerDesde)}. ¿Qué hacemos con ella?`}
           confirmLabel="Dejar libre"
           cancelLabel="Volver"
           altLabel="Abrir cuenta nueva"
