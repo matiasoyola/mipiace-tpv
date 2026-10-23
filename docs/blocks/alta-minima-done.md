@@ -410,7 +410,7 @@ días. Este bloque es la parte mínima que hacía falta **ya**, y está preparad
 | `packages/residencia-plan/test/datos-que-faltan.test.ts` | La tabla, los dos extremos, las dos reglas condicionales, lo cifrado y el resumen | 20 |
 | `packages/residencia-plan/test/nombres.test.ts` | La clave de duplicado (Ñ y Ü incluidas), el formato y el parser con sus sabotajes | 20 |
 | `apps/api/test/alta-minima-migracion.test.ts` | El contrato del SQL: las tres columnas, el `IS NULL` del CHECK, el `down`, que es aditiva | 15 |
-| `apps/admin/test/alta-minima-pantallas.test.tsx` | La lista, la banda y su foco, el formulario, «Añadir varios», la tarjeta del panel y el `?completar=` | 33 |
+| `apps/admin/test/alta-minima-pantallas.test.tsx` | La lista, la banda y su foco, el formulario, «Añadir varios», la tarjeta del panel y el `?completar=` | 34 |
 | `apps/api/test-e2e/alta-minima.e2e.ts` | Contra Postgres: NULL de verdad, el CHECK en sus dos mitades, los 43 con repetidos, la idempotencia, el 423, la puerta y el parte | 41 |
 
 ### Los sabotajes del bloque, uno por uno
@@ -470,6 +470,10 @@ días. Este bloque es la parte mínima que hacía falta **ya**, y está preparad
 7. **El resumen de la lista y la tarjeta del panel cuentan sólo a los que viven aquí** (§7).
 8. **La obligación del centro se marca como `LEGAL`**, no `INTERNO`: lo que falta es administrativo,
    la consecuencia de que falte no (§6).
+9. **El nombre se enseña en formato de nombre en el admin** (`nombreVisible`), y lo guardado no se
+   toca. Es la decisión 7 del bloque aplicada donde se ve: la lista, la ficha y la tarjeta del panel.
+   **No se ha tocado la puerta ni el parte**: esas pantallas son de residencia-3 y -5, y la decisión
+   4 dice que no se tocan.
 
 ---
 
@@ -527,6 +531,30 @@ verdad con Jardín de Gredos sembrado:
 | `5-anadir-varios-hecho-escritorio` | El resultado: 40 creados, 3 saltados |
 | `6-obligaciones-del-centro-*` | La obligación viva del centro, sin fecha |
 | `MEDIDO.txt` | Lo medido |
+
+### Lo medido
+
+- **Cargar 43 nombres pegados** (40 nuevos + 3 que ya estaban): **859 ms** desde el toque en «Crear
+  40 residentes». En total son **3 toques y un pegado**: Residentes → «Añadir varios» → pegar →
+  «Crear 40 residentes».
+- **Completar un dato de una ficha desde la tarjeta del panel**: **3 toques** (Completar → el dato de
+  la banda → Guardar) y 1,5 s.
+- **Pasar a la siguiente incompleta**: **1 toque**. Sin ese botón serían 3 toques más por ficha —
+  **129 en las 43**.
+
+### Y lo que el bucle encontró (los dos cambios que salieron de aquí)
+
+1. **La banda de la ficha era intocable a 390.** Con los datos enlazados dentro de una frase separada
+   por comas, «DNI» era un objetivo de **21×20 px** pegado a «tipo de plaza» y a «familiar
+   responsable». A esa altura se toca el de al lado, y el aviso que existe para llevar al campo con
+   un toque acaba llevando al campo equivocado. Ahora cada dato es una pastilla de 36 px.
+2. **Los nombres salían como se guardan** (en mayúsculas) y **la tarjeta del panel listaba los datos
+   de cada residente**: con once por persona y cinco personas, quince renglones de texto corrido que
+   nadie lee. Lo primero es la decisión 7 sin aplicar; lo segundo, una tarjeta que no se mira.
+
+Los avisos que quedan en `MEDIDO.txt` son **enlaces en línea del panel y de las obligaciones** (17-20
+px de alto) que vienen de residencia-5 y no son de este bloque, más los `input[type=checkbox]` de
+16×16, que son los de siempre en el admin.
 
 ---
 
