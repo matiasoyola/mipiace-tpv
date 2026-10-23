@@ -1520,7 +1520,7 @@ function SkuReviewPage() {
     setItems((curr) => (curr ?? []).filter((it) => it.id !== productId));
   }
 
-  if (!items) return <CenteredLoader label="Cargando bandeja…" />;
+  if (!items) return <CenteredLoader label="Cargando bandeja…" error={error} />;
   return (
     <AdminShell title="Productos pendientes de SKU">
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">

@@ -82,7 +82,7 @@ export function ControlesPage() {
     void recargar();
   }, []);
 
-  if (!datos) return <CenteredLoader label="Cargando controles…" />;
+  if (!datos) return <CenteredLoader label="Cargando controles…" error={error} />;
 
   const activos = datos.controles.filter((c) => c.ajuste?.active ?? true).length;
   // Los que el sistema tuvo que reconducir al llegar una versión nueva del
