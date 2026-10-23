@@ -73,6 +73,7 @@ import {
 import {
   fechaCorta,
   hoyISO,
+  nombreVisible,
   NIVEL_LABEL,
   PLAZA_LABEL,
   type NivelDependencia,
@@ -430,8 +431,12 @@ function Tabla({
               onClick={() => onFicha(f)}
               className="min-h-[44px] w-full min-w-0 text-left sm:w-auto sm:flex-1 sm:basis-48"
             >
+              {/* alta-minima · en formato de nombre, no como viene. El
+                  listado del primer día está en mayúsculas y cuarenta y
+                  tres nombres a gritos no se leen. Lo guardado no se
+                  toca: ver `nombreVisible`. */}
               <span className="block truncate text-[14.5px] font-medium text-mipiace-ink">
-                {f.nombre}
+                {nombreVisible(f.nombre)}
               </span>
               <span className="block text-[12.5px] text-slate-500">
                 {f.cama
@@ -783,7 +788,7 @@ function ModalFicha({
   }
 
   return (
-    <Modal title={residente.nombre} onClose={onClose}>
+    <Modal title={nombreVisible(residente.nombre)} onClose={onClose}>
       {/* alta-minima · LA BANDA, lo primero que se ve, con un enlace por
           dato. Se va sola cuando la ficha está completa. */}
       <BandaDeLoQueFalta faltan={residente.faltan} />
@@ -962,7 +967,7 @@ function ModalCama({
   }
 
   return (
-    <Modal title={`Habitación de ${residente.nombre}`} onClose={onClose}>
+    <Modal title={`Habitación de ${nombreVisible(residente.nombre)}`} onClose={onClose}>
       <p className="mb-4 text-[13.5px] text-slate-500">
         {residente.cama
           ? `Ahora está en la ${residente.cama.roomNumber}, cama ${residente.cama.bedLabel}. Cambiarla cierra esa ocupación y abre otra: queda el histórico.`
@@ -1035,7 +1040,7 @@ function ModalDarDeAlta({
   }
 
   return (
-    <Modal title={`Dar de alta a ${residente.nombre}`} onClose={onClose}>
+    <Modal title={`Dar de alta a ${nombreVisible(residente.nombre)}`} onClose={onClose}>
       {/* La frase importa: en una residencia «dar de alta» es que alguien se
           va, y la dirección tiene que leer que su ficha NO se borra. */}
       <p className="mb-4 text-[13.5px] text-slate-500">

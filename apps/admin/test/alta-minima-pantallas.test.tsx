@@ -321,7 +321,8 @@ describe("alta-minima · la lista de residentes", () => {
     expect(casilla).toBeDefined();
     expect(casilla!.checked).toBe(true);
     const texto = container.textContent ?? "";
-    expect(texto).toContain("ABEL RAMOS DOBLADO");
+    // En formato de nombre: lo guardado está en mayúsculas (decisión 7).
+    expect(texto).toContain("Abel Ramos Doblado");
     expect(texto).toContain("Carmen del Río");
     // La completa NO está: el filtro está puesto.
     expect(texto).not.toContain("Luis Prieto");
@@ -366,6 +367,18 @@ describe("alta-minima · la lista de residentes", () => {
     resumen = { total: 1, incompletas: 0, datosPendientes: 0, conImprescindibles: 0 };
     await pintar(ResidentesPage);
     expect(container.textContent).not.toContain("Falta");
+  });
+
+  it("alta-minima · los nombres EN MAYÚSCULAS se enseñan en formato de nombre", async () => {
+    // Decisión 7: se guardan como vienen —el listado del centro está en
+    // mayúsculas y el original es lo que coincide con el papel— y se
+    // enseñan legibles. Cuarenta y tres nombres a gritos no se leen.
+    await pintar(ResidentesPage);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Abel Ramos Doblado");
+    expect(texto).not.toContain("ABEL RAMOS DOBLADO");
+    // Y el que ya estaba escrito a mano NO se toca.
+    expect(texto).toContain("Carmen del Río");
   });
 
   it("un residente SIN nivel ni plaza no pinta píldoras vacías", async () => {
@@ -433,7 +446,7 @@ describe("alta-minima · «Nuevo ingreso»", () => {
 describe("alta-minima · la banda de la ficha", () => {
   async function abrirFichaDeAbel() {
     await pintar(ResidentesPage);
-    await pulsar(botonQueContiene("ABEL RAMOS DOBLADO")!);
+    await pulsar(botonQueContiene("Abel Ramos Doblado")!);
   }
 
   it("dice lo que falta, dato por dato", async () => {
@@ -517,7 +530,7 @@ describe("alta-minima · la banda de la ficha", () => {
     resumen = { total: 1, incompletas: 1, datosPendientes: 1, conImprescindibles: 1 };
     act(() => root?.unmount());
     await pintar(ResidentesPage);
-    await pulsar(botonQueContiene("ABEL RAMOS DOBLADO")!);
+    await pulsar(botonQueContiene("Abel Ramos Doblado")!);
     const boton = botonQueContiene("Cargar el plan de cuidados de «dependiente»")!;
     expect(boton).toBeDefined();
     await pulsar(boton);
@@ -537,7 +550,7 @@ describe("alta-minima · la banda de la ficha", () => {
     resumen = { total: 2, incompletas: 1, datosPendientes: 11, conImprescindibles: 1 };
     act(() => root?.unmount());
     await pintar(ResidentesPage);
-    await pulsar(botonQueContiene("ABEL RAMOS DOBLADO")!);
+    await pulsar(botonQueContiene("Abel Ramos Doblado")!);
     expect(botonQueContiene("pasar a la siguiente incompleta")).toBeUndefined();
   });
 });
@@ -647,13 +660,17 @@ describe("alta-minima · la tarjeta del panel de dirección", () => {
   it("y cada nombre abre SU ficha, con lo que le falta al lado", async () => {
     await pintar(PanelPage);
     const abel = [...container.querySelectorAll("a")].find(
-      (a) => a.textContent?.trim() === "ABEL RAMOS DOBLADO",
+      (a) => a.textContent?.trim() === "Abel Ramos Doblado",
     )!;
     expect(abel.getAttribute("href")).toBe(
       `/admin/residencia/residentes?completar=${ABEL}`,
     );
-    expect(container.textContent).toContain("fecha de ingreso, nivel de dependencia");
+    // El NÚMERO, no la lista entera: con once datos por residente la
+    // tarjeta sería un muro de texto. El detalle está en su ficha.
+    expect(container.textContent).toContain("faltan 11 datos");
+    expect(container.textContent).toContain("alguno imprescindible");
     expect(container.textContent).toContain("habitación 112");
+    expect(container.textContent).not.toContain("nº de la Seguridad Social");
   });
 
   it("sin ninguna incompleta, la tarjeta NO EXISTE", async () => {

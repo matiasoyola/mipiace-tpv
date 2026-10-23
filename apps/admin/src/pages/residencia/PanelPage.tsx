@@ -43,6 +43,8 @@ import {
   type Panel,
 } from "./relevo-lib.js";
 import { colorDelNivel } from "./incidencias-lib.js";
+// alta-minima · «ABEL RAMOS DOBLADO» → «Abel Ramos Doblado». Decisión 7.
+import { faltanEnPalabras, nombreVisible } from "./lib.js";
 
 export function PanelPage() {
   const [panel, setPanel] = useState<Panel | null>(null);
@@ -185,12 +187,22 @@ export function PanelPage() {
                     to={`/admin/residencia/residentes?completar=${r.clientId}`}
                     className="underline"
                   >
-                    {r.nombre}
+                    {nombreVisible(r.nombre)}
                   </Link>
+                  {/* alta-minima · el NÚMERO, no la lista entera. Lo
+                      encontró el bucle visual: con once datos por
+                      residente y cinco residentes, la tarjeta era un
+                      muro de texto de quince renglones que no se lee —
+                      y una tarjeta que no se lee es una tarjeta que no
+                      se mira, que es lo contrario de lo que esto existe
+                      para conseguir. El detalle está en SU ficha, a un
+                      toque. */}
                   <span className="text-slate-600">
                     {r.habitacion && ` · habitación ${r.habitacion}`}
                     {" · "}
-                    {r.faltan.map((f) => f.etiqueta).join(", ")}
+                    {faltanEnPalabras(r.faltan).toLocaleLowerCase("es-ES")}
+                    {r.faltan.some((f) => f.peso === "IMPRESCINDIBLE") &&
+                      ", alguno imprescindible"}
                   </span>
                 </li>
               ))}

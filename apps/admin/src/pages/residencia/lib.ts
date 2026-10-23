@@ -13,6 +13,7 @@
 // historia-1 añada uno a su checklist la pantalla no lo sabría. Lo que SÍ
 // vive aquí es a qué input lleva cada campo, que es cosa de la pantalla.
 
+import { enFormatoDeNombre } from "@mipiacetpv/residencia-plan";
 import type { CampoDeFicha, DatoQueFalta } from "@mipiacetpv/residencia-plan";
 
 export type {
@@ -128,6 +129,25 @@ export interface ResumenDeFichas {
  */
 export function faltanEnPalabras(faltan: DatoQueFalta[]): string {
   return faltan.length === 1 ? "Falta 1 dato" : `Faltan ${faltan.length} datos`;
+}
+
+/**
+ * alta-minima · **EL NOMBRE DE UN RESIDENTE, PARA ENSEÑARLO.**
+ *
+ * «ABEL RAMOS DOBLADO» → «Abel Ramos Doblado». Es la decisión 7 del
+ * bloque: los nombres **se guardan como vienen** —el listado del centro
+ * está en mayúsculas y el original es lo que coincide con el papel que la
+ * dirección tiene delante— y **se enseñan en formato de nombre**, porque
+ * una lista de cuarenta y tres residentes a gritos es ilegible.
+ *
+ * Un nombre escrito a mano no se toca: ver `enFormatoDeNombre`.
+ *
+ * Vive aquí, al lado de `NIVEL_LABEL`, por lo mismo: si cada pantalla lo
+ * hiciera por su cuenta, dos acabarían enseñando el mismo nombre distinto
+ * — y la lista y la ficha se miran seguidas.
+ */
+export function nombreVisible(nombre: string): string {
+  return enFormatoDeNombre(nombre);
 }
 
 export type NivelDependencia = "VALIDO" | "SEMIASISTIDO" | "DEPENDIENTE";
