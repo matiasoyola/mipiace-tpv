@@ -1479,6 +1479,51 @@ cayeron `move-to-table` y `h1-holded-mas-tarde`, y los dos pasan solos y en la
 siguiente corrida entera: es la caída bajo carga que la fase A ya anotó con
 `cashier-login`.
 
+### 14.2 · Y lo que encontró la CI: EL CHECK DE LA FASE A BLOQUEABA TODAS LAS RESIDENCIAS
+
+Este es el hallazgo más importante del final del bloque, y no lo encontró
+ningún banco de la rama: lo encontró la **CI del PR**, con el e2e.
+
+`primer-acceso.e2e.ts` —nuevo en master— activa una residencia desde cero
+para probar el recorrido del primer día de Carmen. Sus **catorce** tests se
+fueron a rojo, y los catorce en cascada del primero:
+
+```
+{"error":"ONBOARDING_NOT_READY","failing":["Catálogo clínico completo"]}
+expected 400 to be 200
+```
+
+El check es el de la **fase A** (§1.3c), y **desde dentro tenía razón**: una
+residencia no declara ni una categoría con tipo de visita y no tiene un
+servicio de podología, así que las tres preguntas del check le fallaban las
+tres.
+
+**El defecto era el ALCANCE, y era de la fase A.** El check se declaró con
+`requires: "clinica"`, o sea «se mide donde la historia clínica está
+encendida». Y `residenciaEnabled` **enciende la historia clínica por diseño**
+—residencia-1 lo dice: «un tenant de residencia tiene además la clínica y el
+CRM»—, así que el check estaba bloqueando la activación de **todas las
+residencias**. Jardín de Gredos entre ellas, y el piloto es en semanas.
+
+La pregunta que el check quiere hacer no es «¿tiene historia clínica?» sino
+**«¿es una consulta que cobra por tipo de visita?»**. Ahora es su propio
+requisito, `clinicaDePodologia` = clínica **y no** residencia, y la misma
+condición gatea la MEDIDA: si se separaran, el check podría salir «No aplica»
+con un valor medido dentro, que es un dato sin dueño.
+
+En un centro mixto —una residencia con una consulta de podología dentro— no
+se bloquea la activación. Es una decisión: su catálogo clínico se completa
+después, y lo que está en juego ahí no es el primer cobro de una paciente que
+ya se ha ido.
+
+**Lo que esto dice de la fase A:** el check se probó con los catorce comercios
+sin clínica («No aplica») y con una clínica a medias («bloquea»), y **no con
+el tercer caso que existe en producción**: el centro que tiene la historia
+clínica encendida sin ser una consulta. Dos bancos nuevos lo fijan: la
+residencia a la que no aplica, y el centro no-residencia con el catálogo
+vacío que sigue bloqueado — porque la puerta mira `residenciaEnabled`, no
+«tiene pocos servicios».
+
 ---
 
 ## 15 · El guion de la pasada en hierro

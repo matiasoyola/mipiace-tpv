@@ -23,6 +23,10 @@ const TENANT_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 interface Escenario {
   /** `false` = comercio sin historia clínica: el check no aplica. */
   clinica?: boolean;
+  /** clinica-8 (fase B) · `true` = una residencia, que tiene la historia
+   *  clínica encendida por diseño y no es una consulta que cobre por tipo
+   *  de visita. El check tampoco aplica. */
+  residencia?: boolean;
   categorias?: Array<{ slug: string; visitType: string }>;
   servicios?: Array<{
     tags: string[];
@@ -67,6 +71,9 @@ function prismaFor(e: Escenario): any {
         holdedEnabled: false,
         holdedApiKeyCiphertext: null,
         clinicalRecordsEnabled: e.clinica ?? true,
+        // clinica-8 (fase B) · una residencia tiene la historia clínica
+        // encendida por diseño y NO es una clínica. Ver el último test.
+        residenciaEnabled: e.residencia ?? false,
         fiscalProfile: {
           legalName: "Clínica de Podología Rosario SL",
           taxId: "B90000001",
@@ -178,5 +185,49 @@ describe("clinica-8 · el check «Catálogo clínico completo»", () => {
     expect(c.applies).toBe(false);
     expect(c.value).toBe("—");
     expect(ready).toBe(true);
+  });
+
+  // clinica-8 (fase B) · UNA RESIDENCIA NO ES UNA CLÍNICA.
+  //
+  // Lo encontró la CI al mergear master: `primer-acceso.e2e.ts` activa
+  // una residencia desde cero y la activación se iba a
+  // `ONBOARDING_NOT_READY · ["Catálogo clínico completo"]`. Y desde
+  // dentro del check tenía razón: una residencia no declara tipos de
+  // visita ni tiene servicios de podología, así que le faltaba TODO.
+  //
+  // El defecto era el ALCANCE del check, y era de la fase A:
+  // `residenciaEnabled` enciende la historia clínica por diseño
+  // (residencia-1), así que el check estaba bloqueando la activación de
+  // **todas** las residencias. Jardín de Gredos entre ellas.
+  it("y en una RESIDENCIA tampoco aplica, aunque tenga la historia clínica", async () => {
+    const { c, ready } = await check({
+      clinica: true,
+      residencia: true,
+      // Lo que de verdad tiene una residencia: ni una categoría con tipo
+      // de visita, ni un servicio de podología. Sin esta puerta, las tres
+      // preguntas del check fallan las tres.
+      categorias: [],
+      // Un servicio cualquiera, que es lo que el resto de los checks pide
+      // (un catálogo con algo dentro). Lo que importa aquí es que NO es
+      // de podología y no lleva marcas.
+      servicios: [{ tags: ["cuidados"] }],
+    });
+    expect(c.applies).toBe(false);
+    expect(c.value).toBe("—");
+    expect(ready).toBe(true);
+  });
+
+  it("pero un centro MIXTO que no es residencia sigue midiéndose", async () => {
+    // La puerta mira `residenciaEnabled`, no «tiene pocos servicios»: una
+    // clínica a medias sigue bloqueada, que es para lo que existe.
+    const { c, ready } = await check({
+      clinica: true,
+      residencia: false,
+      categorias: [],
+      servicios: [{ tags: ["cuidados"] }],
+    });
+    expect(c.applies).toBe(true);
+    expect(c.ok).toBe(false);
+    expect(ready).toBe(false);
   });
 });

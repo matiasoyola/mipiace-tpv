@@ -1420,6 +1420,11 @@ const NO_APLICA_MOTIVO: Record<string, string> = {
   // clínica. En los demás sale «No aplica · sin historia clínica», que es
   // distinto de cumplir y de fallar.
   clinica: "sin historia clínica",
+  // clinica-8 (fase B) · y además NO en una residencia, que tiene la
+  // historia clínica encendida por diseño y no cobra por tipo de visita.
+  // Sin esta entrada la fila sale «No aplica» a secas, que es peor que
+  // antes del bloque: el motivo es lo que evita el «¿y esto por qué?».
+  clinicaDePodologia: "no es una consulta clínica",
 };
 
 function CheckRow({ check }: { check: ReadinessCheck }) {

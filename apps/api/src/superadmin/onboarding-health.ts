@@ -68,7 +68,14 @@ const PRODUCTS_SELLABLE_THRESHOLD_PCT = 50;
 /**
  * De qué depende un check. `always` = vale para cualquier empresa.
  */
-export type CheckRequirement = "always" | "caja" | "holded" | "clinica";
+export type CheckRequirement =
+  | "always"
+  | "caja"
+  | "holded"
+  | "clinica"
+  // clinica-8 (fase B) · una CLÍNICA, no «cualquiera con la historia
+  // clínica encendida». Ver la nota de `applies`.
+  | "clinicaDePodologia";
 
 export interface ReadinessCheck {
   id:
@@ -189,6 +196,9 @@ export async function computeOnboardingHealth(
         holdedEnabled: true,
         // clinica-8 · de qué depende el check del catálogo clínico.
         clinicalRecordsEnabled: true,
+        // clinica-8 (fase B) · para distinguir una clínica de una
+        // residencia, que tiene la historia clínica encendida por diseño.
+        residenciaEnabled: true,
         fiscalProfile: true,
       },
     }),
@@ -252,9 +262,17 @@ export async function computeOnboardingHealth(
   // roto con el catálogo YA CARGADO: 17 servicios exentos y reservables,
   // y la sesión diciendo «sin servicio» con el cierre a 0,00 €. El
   // catálogo estaba, la clínica no podía cobrar.
-  const catalogoClinico = tenant.clinicalRecordsEnabled
-    ? await medirCatalogoClinico(prisma, tenantId)
-    : null;
+  //
+  // clinica-8 (fase B) · y tampoco una RESIDENCIA, que la tiene encendida
+  // por diseño y no es una consulta que cobre por tipo de visita. La
+  // condición es LA MISMA que `applies.clinicaDePodologia`: si se
+  // separaran, el check podría salir «No aplica» con un valor medido
+  // dentro, que es un dato sin dueño.
+  const catalogoClinico =
+    tenant.clinicalRecordsEnabled === true &&
+    tenant.residenciaEnabled !== true
+      ? await medirCatalogoClinico(prisma, tenantId)
+      : null;
 
   // Mensaje de error del sync extraído de los stats (si hay).
   const stats =
@@ -329,6 +347,30 @@ export async function computeOnboardingHealth(
     // clinica-8 · sólo en una clínica. En los catorce comercios sin
     // historia clínica el check sale «No aplica» y no bloquea nada.
     clinica: tenant.clinicalRecordsEnabled === true,
+    // clinica-8 (fase B) · UNA RESIDENCIA NO ES UNA CLÍNICA, aunque tenga
+    // la historia clínica encendida.
+    //
+    // Lo encontró la CI al mergear master: `primer-acceso.e2e.ts` activa
+    // una residencia desde cero y la activación se iba a
+    // `ONBOARDING_NOT_READY · ["Catálogo clínico completo"]`. Y con razón,
+    // desde dentro del check: una residencia no declara tipos de visita y
+    // no tiene servicios de podología, así que le faltaba TODO.
+    //
+    // Pero `residenciaEnabled` enciende la historia clínica por diseño
+    // (residencia-1: «un tenant de residencia tiene además la clínica y el
+    // CRM»), así que el check de la fase A estaba bloqueando la
+    // activación de **todas** las residencias. Eso es un defecto de la
+    // fase A, no del banco de master.
+    //
+    // La pregunta que el check quiere hacer no es «¿tiene historia
+    // clínica?» sino «¿es una consulta que cobra por tipo de visita?». En
+    // un centro mixto —una residencia con una consulta de podología
+    // dentro— no se bloquea la activación: su catálogo clínico se
+    // completa después, y lo que está en juego ahí no es el primer cobro
+    // de una paciente que ya se ha ido.
+    clinicaDePodologia:
+      tenant.clinicalRecordsEnabled === true &&
+      tenant.residenciaEnabled !== true,
     // La dependencia es "está previsto que use Holded", NO "lo tiene
     // conectado". Si fuera lo segundo, la empresa a mitad de onboarding
     // vería su `sync-done` como "No aplica" justo cuando es el único
@@ -448,7 +490,7 @@ export async function computeOnboardingHealth(
           : catalogoClinico.falta.length === 0
             ? "completo"
             : `falta: ${catalogoClinico.falta.join("; ")}`,
-      requires: "clinica",
+      requires: "clinicaDePodologia",
     },
     {
       id: "test-cashier-provisioned",

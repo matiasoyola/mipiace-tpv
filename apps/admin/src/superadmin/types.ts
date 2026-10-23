@@ -117,7 +117,14 @@ export type KitchenDisplayEnabled = boolean;
 // H1 (ADR-016) · de qué depende un check. `always` vale para cualquier
 // empresa; `caja` y `holded` sólo cuando el tenant los tiene.
 // clinica-8 · y `clinica`, el del catálogo clínico completo.
-export type CheckRequirement = "always" | "caja" | "holded" | "clinica";
+export type CheckRequirement =
+  | "always"
+  | "caja"
+  | "holded"
+  | "clinica"
+  // clinica-8 (fase B) · una CLÍNICA, no «cualquiera con la historia
+  // clínica encendida»: una residencia la tiene por diseño.
+  | "clinicaDePodologia";
 
 export interface ReadinessCheck {
   id: string;
