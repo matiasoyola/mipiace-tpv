@@ -1181,7 +1181,100 @@ Todo lo demás se midió contra la stack del banco, en la base desechable
 
 ---
 
-## 10 · El push y el PR
+## 10 · EL ORDEN DE SALIDA · **obligatorio, y en este orden**
+
+El hallazgo 9 parte el bloque en dos piezas que **no sirven por separado**: la
+APK 1.29.1 pinta la hoja, y la API es quien manda las líneas que la hoja enseña.
+Publicar la APK antes de desplegar deja a los camareros **un toque de más a
+cambio de ninguna información nueva** — peor que el «hecho» directo de antes
+(medido en el aparato, §9.2-septies).
+
+Así que:
+
+### 1 · Mergear el PR
+
+Trae las dos piezas dentro: el front y el cambio de `/kitchen/listas`.
+
+### 2 · Desplegar la API
+
+```bash
+infra/deploy.sh      # o el camino de despliegue de siempre
+```
+
+**La API primero y sola.** Es segura de desplegar antes que nada porque el
+cambio es **sólo aditivo**, y eso está demostrado y no afirmado (§10.1): los
+terminales que siguen con 1.27.0 / 1.28.x —el AP12 de Sole, el D8 de Sirope—
+siguen funcionando **igual** contra la API nueva, porque no leen `lines` y
+ninguna de las siete claves que sí leen ha cambiado.
+
+### 3 · Comprobar EN PRODUCCIÓN que `/kitchen/listas` trae `lines`
+
+No se da por hecho: se mira. Hace falta una comanda marcada «Lista» en una
+tienda con KDS (en Sirope-ensayo vale), y entonces, desde la consola del TPV o
+con la sesión de un cajero:
+
+```bash
+curl -s https://api.mipiacetpv.com/kitchen/listas \
+  -H "Authorization: Bearer <sesión de cajero>" \
+  -H "X-Device-Token: <token del aparato>" | jq '.ready[0] | keys'
+```
+
+Tiene que salir **`lines`** en la lista de claves. Si no sale, el despliegue no
+ha entrado y **no se publica la APK**: hoy, sin desplegar, lo que devuelve son
+estas siete y nada más —medido el 24-10 contra producción—:
+
+```
+orderId · ticketId · tableId · tableName · section · number · readyAt
+```
+
+### 4 · Y SÓLO ENTONCES publicar la 1.29.1
+
+```bash
+infra/publicar-apk.sh apps/tpv-android/build-releases/mipiacetpv-1.29.1-12901.apk
+```
+
+Antes de instalarla en el N1, avisar: una instalación reinicia la app a media
+prueba. Y detrás va un reinicio del aparato (una apertura por arranque).
+
+---
+
+### 10.1 · Por qué el paso 2 es seguro para los terminales viejos
+
+Demostrado en `test-e2e/kds-1-cocina.e2e.ts`, contra Postgres y con la ruta de
+verdad (`app.inject`), no con un doble:
+
+| banco | qué ata |
+|---|---|
+| ADITIVO · las siete claves de antes | ninguna falta, y **lo único nuevo es `lines`** |
+| ADITIVO · significan lo mismo | `orderId`, `ticketId`, `tableName`, y `readyAt` sigue siendo un ISO que `Date.parse` entiende — de eso depende el ORDEN de la banda en el front viejo |
+| UN FRONT VIEJO (1.27.0 / 1.28.x) | leyendo **sólo** esas siete no se queda sin ninguna, y **quitarle `lines` no le cambia nada** |
+| `lines` trae lo que la hoja necesita | `id`, `name`, `units`, `allergens`, sin lo anulado y con las unidades que quedan |
+
+Y los dos sabotajes, con su rojo de verdad:
+
+| sabotaje | el rojo |
+|---|---|
+| se renombra `tableName` → `mesa` | **5 bancos en rojo**, y el que importa dice «**el front viejo se queda sin tableName**» |
+| se cuela un campo nuevo sin revisarlo | `expected [ 'esperandoDesde', 'lines' ] to deeply equal [ 'lines' ]` |
+
+El segundo es el que más vale a largo plazo: **un campo nuevo en una ruta que
+consumen terminales viejos se mira dos veces**, y ahora el banco obliga a
+mirarlo.
+
+Cómo se corre (base desechable propia y Redis propio; la suite hace DROP SCHEMA):
+
+```bash
+# los DOS .env apartados, que si no tapan la configuración del e2e
+mv .env .env.apartado 2>/dev/null; mv apps/api/.env apps/api/.env.apartado
+cd apps/api && E2E_DATABASE_URL="postgresql://…/mipiacetpv_n1host2_api_e2e?schema=public" \
+  REDIS_URL="redis://127.0.0.1:6390" \
+  pnpm exec vitest run --config vitest.e2e.config.ts test-e2e/kds-1-cocina.e2e.ts
+# y devolverlos al acabar
+```
+
+---
+
+## 10.2 · El push y el PR
 
 **Los hace Matías.** `master` ha avanzado durante la sesión (hasta `178e102`:
 `primer-acceso`, un hotfix de menú y dos prompts nuevos), pero **ninguno de los
