@@ -1245,7 +1245,7 @@ primera, y es porque los bancos miran la petición que sale, no la pantalla:
 | Suite | Resultado |
 |---|---|
 | `npx vitest run` (workspace, desde la raíz) | **453 ficheros · 6.504 tests**, 10 saltados (tras el segundo merge de master, §14.1) |
-| `pnpm test:e2e` (Postgres real, base propia de esta sesión) | **48 ficheros · 1.081 tests** |
+| `pnpm test:e2e` (Postgres real, base propia de esta sesión) | **49 ficheros · 1.099 tests** (tras el segundo merge y el arreglo del §14.2) |
 | `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio |
 
 El e2e corrió sobre `mipiacetpv_clinica8_e2eb`, una base propia de esta
@@ -1522,7 +1522,13 @@ el tercer caso que existe en producción**: el centro que tiene la historia
 clínica encendida sin ser una consulta. Dos bancos nuevos lo fijan: la
 residencia a la que no aplica, y el centro no-residencia con el catálogo
 vacío que sigue bloqueado — porque la puerta mira `residenciaEnabled`, no
-«tiene pocos servicios».
+«tiene pocos servicios». Y el e2e entero vuelve a verde con
+`primer-acceso` dentro: **49 ficheros · 1.099 tests**.
+
+En la ficha del tenant, la fila sale «No aplica · **no es una consulta
+clínica**». El motivo importa tanto como la puerta: una fila «No aplica» a
+secas en un check que ayer bloqueaba es un «¿y esto por qué?» para quien
+activa.
 
 ---
 
