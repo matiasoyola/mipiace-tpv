@@ -315,6 +315,26 @@ export interface Panel {
       nombre: string;
       habitacion: string | null;
     }>;
+    /** historia-1 (D-92) · las vueltas del hospital que la DUE no ha
+     *  confirmado. Opcional por lo mismo que `porArreglar` entero. */
+    vueltasPorRevisar?: Array<{
+      clientId: string;
+      absenceId: string;
+      nombre: string;
+      habitacion: string | null;
+      deDonde: string;
+      volvioEn: string;
+      diasEsperando: number;
+    }>;
+    /** historia-1 (D-94) · los ingresos con el expediente a medias. */
+    ingresosConPendientes?: Array<{
+      clientId: string;
+      nombre: string;
+      ingreso: string;
+      pendientes: number;
+      vencidos: number;
+      queFalta: string[];
+    }>;
   };
   indicadores: ValorDeIndicador[];
   mes: string;

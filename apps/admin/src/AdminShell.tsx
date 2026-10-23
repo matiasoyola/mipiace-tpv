@@ -11,6 +11,7 @@ import {
   Building2,
   Calculator,
   CalendarCheck,
+  CalendarDays,
   CalendarClock,
   ClipboardCheck,
   ClipboardList,
@@ -304,6 +305,28 @@ const NAV_ITEMS: NavItem[] = [
     to: "/admin/residencia/indicadores",
     label: "Indicadores",
     icon: Gauge,
+    capability: "residencia",
+  },
+  // historia-1 (D-93, D-94) · las dos pantallas del CENTRO. La ficha
+  // clínica, las ausencias y el ingreso de UN residente se abren desde su
+  // ficha y no desde la barra: son de una persona, como el plan y los
+  // umbrales.
+  //
+  // «Ingresos» va aquí y no pegado a «Residentes» a propósito: lo que
+  // enseña es qué expedientes están a medias, que es trabajo de dirección
+  // —de la misma clase que las obligaciones— y no el alta de una persona.
+  {
+    to: "/admin/residencia/ingresos",
+    label: "Ingresos",
+    icon: ClipboardList,
+    capability: "residencia",
+  },
+  // Y «Días del mes» al final de las de residencia: se mira una vez al
+  // mes, cuando se factura, como los indicadores.
+  {
+    to: "/admin/residencia/dias",
+    label: "Días del mes",
+    icon: CalendarDays,
     capability: "residencia",
   },
   // B-reservas-8 · los bonos de sesiones: los ajustes del centro, por qué
