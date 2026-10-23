@@ -156,9 +156,19 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
     // el relevo no se tocan), y eso se ve con una auxiliar de verdad
     // entrando con su PIN o no se ve.
     auxiliarId = randomUUID();
+    // `is_clinician = true` y no `false`, aunque sea auxiliar: en una
+    // residencia **quien registra cuidados ES sanitario a efectos de
+    // acceso** (D-51), y lo pone así la ruta que asigna el rol de
+    // cuidado. Sembrando el rol con SQL en crudo hay que ponerlo a mano.
+    //
+    // Y cuesta un rato porque el síntoma engaña: `puedeVerHistoria`
+    // contesta `NO_SANITARIO` antes de llegar a la rama de la
+    // residencia, pero la puerta traduce cualquier negativa a
+    // `RESIDENTE_FUERA_DE_TU_ZONA` — o sea que el mensaje manda a pedirle
+    // una planta a dirección cuando la planta ya la tiene.
     await prisma.$executeRawUnsafe(
       `INSERT INTO users (id, tenant_id, email, alias, role, is_clinician, clinical_scope)
-       VALUES ('${auxiliarId}', '${tenantId}', 'ana-${auxiliarId.slice(0, 8)}@gredos.es', 'Ana', 'CASHIER', false, 'NONE')`,
+       VALUES ('${auxiliarId}', '${tenantId}', 'ana-${auxiliarId.slice(0, 8)}@gredos.es', 'Ana', 'CASHIER', true, 'SELECTION')`,
     );
     await prisma.$executeRawUnsafe(
       `INSERT INTO care_role_assignments (id, tenant_id, user_id, care_role_id, from_at, granted_by_user_id)
@@ -1100,12 +1110,28 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
         expect(r.body).toContain("PELADO");
         // Y lo que NO lleva: ni una línea de «no hecho» suya. Un
         // residente sin plan no incumple nada.
-        const lineas = (
-          r.json().parte?.lineas ?? r.json().lineas ?? []
-        ) as Array<{ clase: string; texto: string }>;
-        const suyas = lineas.filter((l) => l.texto.includes("PELADO"));
-        expect(suyas.length).toBeGreaterThan(0);
-        expect(suyas.filter((l) => l.clase === "NO_HECHO")).toEqual([]);
+        // El parte va por ZONAS y dentro de cada zona por RESIDENTE: las
+        // líneas cuelgan de la persona, que es como se lee en la sala.
+        const parte = r.json().parte as {
+          zonas: Array<{
+            residentes: Array<{
+              nombre: string;
+              lineas: Array<{ clase: string; texto: string }>;
+            }>;
+          }>;
+        };
+        const suyo = parte.zonas
+          .flatMap((z) => z.residentes)
+          .find((x) => x.nombre.includes("PELADO"));
+        // **Está en el parte** aunque no tenga nivel, ni fecha, ni plan.
+        expect(suyo, JSON.stringify(parte.zonas)).toBeDefined();
+        // Y lo que se le registró, con su línea.
+        expect(suyo!.lineas.length).toBeGreaterThan(0);
+        // Pero NI UNA de «no hecho»: un residente sin plan no incumple
+        // nada. Sin esto, el parte de un centro recién cargado saldría
+        // con cuarenta y tres líneas de cuidados que nadie le mandó —
+        // que es el ruido que residencia-6 §4 vino a quitar.
+        expect(suyo!.lineas.filter((l) => l.clase === "NO_HECHO")).toEqual([]);
       });
     });
 

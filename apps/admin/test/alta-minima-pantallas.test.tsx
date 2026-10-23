@@ -439,7 +439,8 @@ describe("alta-minima · la banda de la ficha", () => {
   it("dice lo que falta, dato por dato", async () => {
     await abrirFichaDeAbel();
     const texto = container.textContent ?? "";
-    expect(texto).toContain("A esta ficha le faltan:");
+    expect(texto).toContain("A esta ficha le faltan 11 datos");
+    expect(texto).toContain("Toca uno para ir a su campo");
     expect(texto).toContain("fecha de ingreso");
     expect(texto).toContain("DNI");
     expect(texto).toContain("familiar responsable");

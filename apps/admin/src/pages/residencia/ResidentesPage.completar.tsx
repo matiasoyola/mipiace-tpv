@@ -122,28 +122,45 @@ export function BandaDeLoQueFalta({ faltan }: { faltan: DatoQueFalta[] }) {
 
   return (
     <div
-      className={`mb-5 rounded-xl px-3.5 py-2.5 text-[13px] ${
+      className={`mb-5 rounded-xl px-3.5 py-3 text-[13px] ${
         rojo ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-900"
       }`}
     >
       <div className="flex items-start gap-2">
-        <AlertTriangle className="mt-px h-4 w-4 shrink-0" />
-        <p>
-          A esta ficha le {faltan.length === 1 ? "falta" : "faltan"}:{" "}
-          {faltan.map((f, i) => (
-            <span key={f.campo}>
-              {i > 0 && ", "}
-              <button
-                type="button"
-                onClick={() => llevarA(f.campo)}
-                className="underline underline-offset-2"
-              >
-                {f.etiqueta}
-              </button>
-            </span>
-          ))}
-          .
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <p className="font-medium">
+          A esta ficha le {faltan.length === 1 ? "falta" : "faltan"}{" "}
+          {faltan.length === 1 ? "un dato" : `${faltan.length} datos`}. Toca uno
+          para ir a su campo:
         </p>
+      </div>
+      {/* ── UNA PASTILLA POR DATO, y no una lista separada por comas ──
+          Lo encontró el bucle visual a 390, no un test: con los datos
+          enlazados dentro de una frase, «DNI» era un objetivo de 21×20
+          px pegado a «tipo de plaza» y a «familiar responsable». A esa
+          altura, en un pasillo o con el móvil en la mano, se toca el de
+          al lado — y el aviso que existe para llevar al campo con un
+          toque acaba llevando al campo equivocado.
+
+          Cada pastilla mide 36 px de alto y las de abajo llevan su
+          separación, así que a 390 se aciertan. Y de paso se leen mejor:
+          once datos en una frase con comas son dos renglones que hay que
+          releer para saber dónde acaba uno y empieza el otro. */}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {faltan.map((f) => (
+          <button
+            key={f.campo}
+            type="button"
+            onClick={() => llevarA(f.campo)}
+            className={`inline-flex min-h-[36px] items-center rounded-lg px-2.5 text-[13px] underline underline-offset-2 ${
+              f.peso === "IMPRESCINDIBLE"
+                ? "bg-white/70 font-medium"
+                : "bg-white/40"
+            }`}
+          >
+            {f.etiqueta}
+          </button>
+        ))}
       </div>
     </div>
   );
