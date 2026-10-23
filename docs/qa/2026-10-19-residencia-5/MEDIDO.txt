@@ -1,0 +1,16 @@
+residencia-5 · lo medido en el bucle visual, en el producto de verdad y
+con Jardín de Gredos sembrado. La sala a 1280×800; el admin a 1280×800
+y a 390.
+
+Los TOQUES son exactos: son los clics que hay que dar. Los SEGUNDOS son
+de máquina —del primer toque a que la pantalla lo diga— y es lo que el
+software cuesta. Lo que NO está medido es el tiempo de la persona: eso
+se mide con el turno delante, no con un navegador.
+
+El presupuesto de lectura del bloque C §1 es ≤ 3 toques y ≤ 10 s a
+cualquier dato.
+
+  ¿qué pasó en el turno anterior? (sala: Leer + PIN): 5 toques · ~521 ms
+  confirmar el relevo (desde el parte abierto): 1 toque · ~55 ms
+  ¿qué hay abierto hoy? (el panel es la pantalla de inicio): 1 toque · ~847 ms desde «Entrar»
+  ¿qué toca hoy? (desde el panel, «Obligaciones»): 1 toque · ~314 ms

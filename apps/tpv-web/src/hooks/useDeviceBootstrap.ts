@@ -13,6 +13,12 @@ import {
 // residencia-4 · y la guardia del móvil, por lo mismo: un aparato
 // desemparejado no se queda «de guardia».
 import { olvidarGuardia } from "../residencia/guardia-cache.js";
+// residencia-5 · y la de la sala: dentro hay el parte de un turno entero.
+import {
+  olvidarLaSala,
+  olvidarSesionDeSala,
+} from "../residencia/sala-cache.js";
+import type { SalaReposo } from "../residencia/sala-tipos.js";
 
 export interface DeviceMeResponse {
   device: { id: string; name: string | null; pairedAt: string };
@@ -72,6 +78,11 @@ export type BootstrapState =
   // GUARD_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
   // error.
   | { kind: "guard"; data: GuardiaMeResponse }
+  // residencia-5 (D-67) · esta tablet es LA DE LA SALA. La misma APK, otra
+  // pantalla. Se llega aquí porque `/devices/me` devolvió 403
+  // HANDOVER_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
+  // error.
+  | { kind: "sala"; data: SalaReposo }
   | { kind: "paired"; data: DeviceMeResponse };
 
 /**
@@ -322,6 +333,19 @@ export function useDeviceBootstrap(): {
         }
         return;
       }
+      // residencia-5 · «modo relevo». Mismo criterio exacto que los tres
+      // de arriba: si `/residencia/sala/me` también falla —el módulo se
+      // apagó con la tablet emparejada— se cae a `retry`.
+      if (decision === "sala") {
+        try {
+          const s = await apiWithDevice<SalaReposo>("/residencia/sala/me");
+          setState({ kind: "sala", data: s });
+        } catch {
+          setState({ kind: "loading" });
+          setTimeout(refresh, 3000);
+        }
+        return;
+      }
       if (decision === "purge") {
         // Sólo borramos cuando el backend confirma que el dispositivo
         // está revocado o el JWT ha caducado — un 401 sin código (o con
@@ -338,6 +362,9 @@ export function useDeviceBootstrap(): {
         // `localStorage` sincrónico y esto es IndexedDB; mezclarlos
         // obligaría a hacer asíncrona una función que llaman seis sitios.
         void olvidarLaPuerta();
+        // residencia-5 · y la de la sala, por lo mismo: dentro hay el
+        // parte de un turno entero y el roster del centro.
+        void olvidarLaSala();
         olvidarSesion();
         olvidarGuardia();
         setState({ kind: "unpaired" });
@@ -418,6 +445,8 @@ export function useDeviceBootstrap(): {
       void olvidarLaPuerta();
       olvidarSesion();
       olvidarGuardia();
+      void olvidarLaSala();
+      olvidarSesionDeSala();
       setState({ kind: "unpaired" });
     },
   };

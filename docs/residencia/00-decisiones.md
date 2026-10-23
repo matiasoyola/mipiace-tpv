@@ -106,6 +106,13 @@ Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` de
 | D-66 | **El aviso inmediato suena en un móvil de guardia**: la misma APK en «modo guardia», canal enfermería o responsable. Quien lo coge entra con su PIN al empezar el turno. N2 → enfermería; **si no hay enfermera de guardia o nadie acusa en 5 min, suena en el teléfono de la dirección o del responsable de guardia**; N3-N4 → los dos a la vez. **Al servicio sanitario de guardia, como recomendación**: el móvil muestra a quién llamar y la llamada la hace la persona (D-33). Sin red, la puerta dice que el aviso no ha salido. | Respuesta de Matías (18-10). Una tablet fija o las puertas no encuentran a la enfermera si está en otra planta; un aviso que parece salir y no sale es peor que no tenerlo. |
 | D-67 | **El relevo se lee y se confirma en una tablet fija en la sala donde ya se reúne el turno**: `DeviceKind` nuevo, la misma APK en «modo relevo», emparejada al centro. Con PIN, cada uno ve el parte dentro de su alcance (D-51) y lo confirma; el parte está confirmado cuando cada zona con contenido tiene una confirmación de quien la cubre o una de alcance total. | Respuesta de Matías (18-10). El sistema alimenta la reunión de cambio de turno que ya existe en vez de inventar otra (rama de controles §7). |
 
+### Antes del piloto (18-10-2026)
+
+| # | Decisión | Por qué |
+|---|---|---|
+| D-68 | **PIN de cuidado por alcance**: **4 cifras** para quien tiene alcance por zona (auxiliares) y **6 cifras** para quien tiene alcance total (DUE, médico, calidad, dirección). Quien tenga los dos tipos de rol, 6. Vale para puerta, sala y móvil de guardia. La auxiliar no gana ni un toque. | Respuesta de Matías (18-10). Una tablet robada permite probar las combinaciones contra el roster cacheado: con 6 cifras, sacar el PIN de quien lo ve todo cuesta cien veces más. Quien entra cuarenta veces por turno sigue con 4. |
+| D-69 | **`care_plan_items.control_code` se queda en claro**, como ya estaba en D-63, y deja de anotarse como deuda. | Respuesta de Matías (18-10). Quien tiene acceso a la base ya ve en claro fechas, turnos y residentes; cifrarlo exige índices ciegos y sacar los indicadores de SQL sin ganar protección real. |
+
 ### Lo que NO se decide por criterio (son hechos que aporta el cliente, no bloquean)
 
 - H-01 · ordenador origen de los `.lnk` (fichas de 2025).

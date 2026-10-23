@@ -10,9 +10,19 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- n1-vertical · AQUÍ NO HAY android:screenOrientation A PROPÓSITO.
+             La orientación la fija MainActivity.onCreate() según el TAMAÑO del
+             aparato (OrientacionPorTamano): sw<600dp = móvil = vertical;
+             sw>=600dp = tablet = horizontal, que es lo que han hecho siempre
+             los AP11/AP12/AP13/D8. Con el atributo puesto habría DOS fuentes
+             de verdad: el manifiesto gana al arrancar y el código corrige
+             después, y eso se ve como un giro en la cara del cajero.
+
+             `configChanges` se queda tal cual: el WebView NO se recrea al
+             girar, que es lo que evita que la pantalla de venta se reinicie
+             con líneas dentro. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-            android:screenOrientation="sensorLandscape"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"

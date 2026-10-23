@@ -80,6 +80,19 @@ export class CriptoClinicaError extends Error {}
  *  el script de verificación cuenta la fila como fallida. */
 export class NoSeDescifra extends CriptoClinicaError {}
 
+/**
+ * residencia-6 · **el caso «este centro no tiene clave»**, aparte.
+ *
+ * Es un `NoSeDescifra` —quien llama hace lo mismo con los dos: el hueco
+ * marcado— y a la vez es otra cosa cuando alguien mira el log: «la clave
+ * de este centro no está» se arregla en el entorno (la KEK, la fila de
+ * `clinical_keys`) y «este valor no se descifra con su clave» se arregla
+ * mirando esa fila. Una subclase y no un texto de mensaje porque el
+ * **mensaje no se registra nunca** (ver `aviso-de-ilegible.ts`): lo que
+ * clasifica el motivo tiene que ser el TIPO.
+ */
+export class SinClaveDeLaClinica extends NoSeDescifra {}
+
 // ── El AAD ────────────────────────────────────────────────────────────
 
 /** De dónde es un valor cifrado. Los cuatro, siempre. */

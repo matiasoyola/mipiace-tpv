@@ -64,3 +64,6 @@ apps/e2e-ui/playwright-report/
 # se versiona ni viaja.
 .clinical-files/
 .clinical-files-e2e/
+
+# Ficheros clínicos cifrados (fotos, notas de voz, adjuntos): nunca al repo, aunque sean de prueba
+.ficheros-clinicos/

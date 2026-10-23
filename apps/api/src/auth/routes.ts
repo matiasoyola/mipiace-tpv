@@ -377,6 +377,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           // sin caja entre a "Control horario" en vez de a su cuenta
           // (`landingSinCaja` en App.tsx). Sólo lectura, como `cajaEnabled`.
           fichajeEnabled: tenant.fichajeEnabled,
+          // residencia-5 (decisión de producto 5) · el quinto módulo. Es
+          // lo que hace que una residencia entre al **panel de dirección**
+          // en vez de a su cuenta (`landingSinCaja` en App.tsx), que es la
+          // pantalla donde está la métrica de éxito del producto.
+          //
+          // Sólo lectura, como los otros cuatro: el interruptor lo mueve
+          // el super-admin (D-48).
+          residenciaEnabled: tenant.residenciaEnabled,
         },
       };
     },

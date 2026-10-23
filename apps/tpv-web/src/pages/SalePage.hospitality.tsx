@@ -114,6 +114,7 @@ import {
   type AnulacionPendiente,
 } from "../kitchen/tpv/DeshacerToast.js";
 import { ListoBanner, type AvisoListo } from "../kitchen/tpv/ListoBanner.js";
+import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 
 /**
  * La fila «Cantidad» va de 1 a 6 (decisión 3c).
@@ -186,6 +187,13 @@ export interface ChromeAction {
 }
 
 export interface HospitalityWorkspaceProps {
+  /**
+   * n1-vertical · hay algo pintado ENCIMA de esta pantalla (la agenda,
+   * «Cerrar el día», el arqueo X). Mismo caso que en el TPV claro: la
+   * barra inferior es `fixed` en z-40 y se pinta sobre el pie del
+   * overlay. Ver la nota de `overlayEncima` en `SalePage.tsx`.
+   */
+  overlayEncima: boolean;
   /** Productos ya filtrados por la búsqueda. */
   products: CatalogProduct[];
   searchQuery: string;
@@ -313,6 +321,12 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // Handheld: la comanda vive en un bottom-sheet. Cerrarlo no toca nada
   // —las líneas viven en `SalePage`—, así que es sólo abierto/cerrado.
   const [sheetOpen, setSheetOpen] = useState(false);
+  // n1-vertical · la barra inferior de handheld sólo mientras se marca.
+  // Misma decisión y mismos motivos que en el TPV claro (ver la nota de
+  // `barraTicketVisible` en SalePage.tsx): con un overlay encima tapa su
+  // pie, y con el teclado abierto ocupa el hueco de los resultados.
+  const tecladoAbierto = useTecladoDelSistema();
+  const barraVisible = !props.overlayEncima && !tecladoAbierto;
 
   // Decisión 3c · la cantidad se elige ANTES del producto y **vuelve a 1
   // tras cada producto**. Que vuelva sola es el requisito: un «3» pegado
@@ -657,6 +671,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
           el árbol: o como columna o como hoja, nunca las dos. */}
       {handheld && (
         <>
+          {barraVisible && (
           <div
             data-testid="handheld-bar"
             className="fixed inset-x-0 z-40 px-3 py-2 flex items-center gap-2 border-t"
@@ -714,7 +729,12 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               </span>
             </button>
           </div>
-          {/* Hueco para que la barra fija no tape la última fila. */}
+          )}
+          {/* Hueco para que la barra fija no tape la última fila. Se
+              queda puesto aunque la barra esté oculta: con el teclado
+              abierto el hueco no molesta (está bajo el teclado) y
+              quitarlo haría saltar la rejilla cada vez que el cajero
+              toca el buscador. */}
           <div className="h-20 shrink-0" aria-hidden />
           {sheetOpen && (
             <div className="fixed inset-0 z-40">
@@ -824,6 +844,15 @@ function FamilyButton({
       // «Croissantysandwich» se salía del botón: no había ni relleno
       // lateral ni `overflow`, así que la palabra se pintaba por encima
       // del borde y encima del botón de al lado.
+      //
+      // Medido en el N1 con la carta de Sirope (azulejos de 104 px):
+      // «Croissantysandwich» mide 206 px, «Suplemento» 122 y «Desayunos»
+      // 111. De ahí los DOS renglones y el peldaño de letra del `<span>`:
+      // el nombre entra ENTERO. `n1-vertical` había llegado antes a este
+      // mismo botón con `truncate` (una línea y puntos suspensivos), pero
+      // auditoria-sirope (#6) es posterior y es el que se queda: además,
+      // `truncate` lleva dentro `white-space: nowrap`, que hereda al
+      // `<span>` y anularía su `line-clamp: 2`.
       className={`border-0 rounded-[14px] font-semibold cursor-pointer overflow-hidden flex items-center justify-center px-2.5 ${PRESS_FEEDBACK_CLASS}`}
       style={{
         height: FAMILY_BUTTON_PX,

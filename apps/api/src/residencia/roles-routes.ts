@@ -19,6 +19,11 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import {
+  largoDePinRequerido,
+  pinPorRenovar,
+} from "@mipiacetpv/residencia-plan";
+
 import { getPrisma } from "../context.js";
 import {
   requireOwner,
@@ -308,7 +313,10 @@ export async function registerResidenciaRolesRoutes(
         // la dirección necesita para decidir si ponerlo o quitarlo.
         prisma.carePin.findFirst({
           where: { userId, tenantId: auth.tenantId },
-          select: { setAt: true },
+          // residencia-6 (D-68) · y CUÁNTAS CIFRAS tiene. Eso sí sale: es
+          // lo que la dirección necesita para saber a quién le falta
+          // renovarlo, y quien ve esta pantalla es quien pone los PIN.
+          select: { setAt: true, pinLength: true },
         }),
       ]);
 
@@ -356,7 +364,29 @@ export async function registerResidenciaRolesRoutes(
             ? "CENTRO"
             : "ZONA",
         // residencia-3 · con qué entra en la tablet de una habitación.
-        pinDePuerta: pin ? { desde: pin.setAt.toISOString() } : null,
+        //
+        // residencia-6 (D-68) · con el LARGO y el `porRenovar`. El PIN
+        // sigue sin salir —ni entero, ni parcial, ni su hash, ni su
+        // huella—; lo que sale es cuántas cifras tiene, que es lo que
+        // deja a la dirección arreglar lo que hay que arreglar.
+        pinDePuerta: pin
+          ? {
+              desde: pin.setAt.toISOString(),
+              largo: pin.pinLength,
+              porRenovar: pinPorRenovar({
+                largoDelPin: pin.pinLength,
+                roles: vigentes.map((v) => ({
+                  alcanceTotal: v.careRole.fullScope,
+                })),
+              }),
+            }
+          : null,
+        // Y cuántas le tocan por su alcance de AHORA, para que la
+        // pantalla pinte el hueco con el número bueno sin volver a
+        // escribir la regla.
+        largoDePinRequerido: largoDePinRequerido(
+          vigentes.map((v) => ({ alcanceTotal: v.careRole.fullScope })),
+        ),
       };
     },
   );

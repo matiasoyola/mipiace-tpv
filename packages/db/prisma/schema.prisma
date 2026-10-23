@@ -277,6 +277,27 @@ enum DeviceKind {
   // puerta releva a la de su habitación: un centro puede tener tres
   // móviles de enfermería a la vez y los tres tienen que sonar.
   GUARD
+  // residencia-5 (D-67) · LA TABLET DE LA SALA. La MISMA APK en «modo
+  // relevo», emparejada **al centro** y no a una habitación ni a un
+  // canal: está donde el turno ya se reúne, y lo que enseña es el parte
+  // del turno que sale.
+  //
+  // Es el tercer `DeviceKind` que no cuelga de una caja y el segundo que
+  // no cuelga de nada físico (`register_id` y `room_id` los dos NULL, por
+  // el CHECK `devices_register_o_habitacion`). La diferencia con el móvil
+  // de guardia es de qué es: el móvil es de quien lo lleve ese turno; la
+  // tablet de la sala es del CENTRO, y el centro es el tenant — así que
+  // no hace falta ninguna columna que lo diga.
+  //
+  // **No vende, no abre turno, no factura y no releva a nadie**, igual
+  // que `KITCHEN`, `ROOM` y `GUARD`: lo corta `requireDeviceToken` con un
+  // 403 antes del PIN, y el trigger `devices_revoke_previous` y el índice
+  // `devices_one_active_per_register_key` filtran `kind = 'TERMINAL'`.
+  //
+  // Y **un centro puede tener más de una**: una sala por planta es un
+  // caso real y las dos enseñan el mismo parte. No hay índice de
+  // unicidad, al revés que la puerta de una habitación.
+  HANDOVER
 }
 
 // V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
@@ -1075,6 +1096,118 @@ enum FamilyCommunicationChannel {
 
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
+// ══ residencia-5 · el relevo, el panel y las obligaciones ══════════════
+//
+// Tres cosas que hoy no existen en papel, y la razón de cada una:
+//
+//   1. **El parte de relevo** (D-18, D-58, D-67). Hoy el cambio de turno
+//      se hace de palabra; lo que no se dice se pierde y nadie puede
+//      demostrar que se dijo. El parte lo genera el sistema con lo que ya
+//      está registrado —nadie lo escribe—, se CONGELA al acabar el turno
+//      y el turno que entra lo confirma con su PIN en la tablet de la
+//      sala. La confirmación es la evidencia de que la información pasó.
+//   2. **Las obligaciones de dirección** (D-42). Las nóminas, los
+//      extintores y el certificado de PCI que falta desde 2026 viven en
+//      la cabeza de Carmen. Aquí son filas con periodicidad, y sus
+//      ocurrencias se generan solas.
+//   3. **El umbral objetivo de cada indicador** (rama de controles §10).
+//      La fórmula es del producto; el umbral, del centro.
+//
+// Los tipos de aquí; las tablas, al final del fichero.
+
+/// residencia-5 (D-42, bloque C §3) · LAS CINCO FAMILIAS de obligación.
+///
+/// Son las del catálogo del bloque C y no una invención: personal,
+/// dinero, compras, cumplimiento y calidad. Es un enum y no un catálogo
+/// de datos —al revés que `CareRole` o `ControlType`— porque de la
+/// familia no cuelga ningún comportamiento: es cómo se agrupa la lista en
+/// la pantalla. Una familia nueva sería un cambio de producto, no un
+/// ajuste de centro.
+enum DutyFamily {
+  PERSONAL
+  DINERO
+  COMPRAS
+  CUMPLIMIENTO
+  CALIDAD
+}
+
+/// residencia-5 (D-42) · CADA CUÁNTO TOCA una obligación.
+///
+/// Las siete del prompt, y cada una dice qué columnas de
+/// `management_duties` tiene que llevar (CHECK
+/// `management_duties_periodicidad_coherente`): una periodicidad mensual
+/// sin día del mes no sabe cuándo toca, y una semanal CON día del mes es
+/// una fila que alguien rellenó a medias.
+///
+/// ── Por qué `VALIDITY` no es una periodicidad más ─────────────────
+///
+/// Las seis primeras se repiten solas para siempre: el 25 de cada mes, el
+/// primer lunes, el 20 de julio. `VALIDITY` no se repite: **caduca**. El
+/// certificado del mantenedor de PCI vence el 5 de noviembre de 2029 y lo
+/// que hay que hacer es renovarlo antes, no «hacerlo otra vez el año que
+/// viene». De ahí que su ocurrencia sea UNA —la de su caducidad— y que
+/// el panel la avise con 60 días de antelación (bloque C §2).
+enum DutyPeriodicity {
+  /// Diaria. El registro de jornada, los registros APPCC.
+  DAILY
+  /// Semanal, con día de la semana (1 = lunes, 7 = domingo).
+  WEEKLY
+  /// Mensual, con día del mes. **31 significa «el último del mes»**: ver
+  /// la cabecera de `monthDay`.
+  MONTHLY
+  /// Trimestral, con mes de anclaje (1–3) y día. Los informes de
+  /// extintores.
+  QUARTERLY
+  /// Anual, con mes y día. El certificado del mantenedor, la revisión por
+  /// la dirección, la auditoría interna.
+  ANNUAL
+  /// Quinquenal, con mes, día y año de anclaje. La inspección OCA de baja
+  /// tensión, vigente hasta el 05-11-2029.
+  FIVE_YEARLY
+  /// Por vigencia: una fecha de caducidad y nada más. La formación
+  /// obligatoria de cada trabajador, el certificado de un equipo.
+  VALIDITY
+}
+
+/// residencia-5 (D-42, bloque C §3) · QUÉ PASA SI NO SE HACE.
+///
+/// `LEGAL` es una sanción o un incumplimiento normativo; `ISO`, una no
+/// conformidad en la auditoría de AENOR; `INTERNO`, coste o desorden.
+/// Ordena el panel: lo legal vencido va arriba.
+enum DutyConsequence {
+  LEGAL
+  ISO
+  INTERNO
+}
+
+/// residencia-5 · CÓMO SE MIDE un indicador contra su umbral.
+///
+/// La fórmula es del producto y el umbral del centro (rama de controles
+/// §10), pero falta una tercera cosa para decir «dentro» o «fuera»: para
+/// qué lado. El 73,5 % de la gimnasia es un MÍNIMO y el 10 % de averías
+/// que pasan de 24 h es un MÁXIMO, y sin esto el panel pintaría en verde
+/// justo la mitad de los indicadores al revés.
+enum IndicatorComparison {
+  /// El valor tiene que ser **mayor o igual** que el umbral.
+  AT_LEAST
+  /// El valor tiene que ser **menor o igual** que el umbral.
+  AT_MOST
+}
+
+/// residencia-5 (decisión de producto 2) · QUÉ LLEGÓ DESPUÉS DEL RELEVO.
+///
+/// Lo que sube una puerta sin red a las 15:20 de algo que pasó a las
+/// 14:50, cuando el parte de la mañana ya está congelado. No se reescribe
+/// lo congelado: se añade a la vista, con su hora y diciendo de qué es.
+enum HandoverLateKind {
+  /// Un registro de cuidados que llegó tarde.
+  CARE_RECORD
+  /// Una incidencia que se declaró o se derivó después.
+  INCIDENT
+  /// Un aviso que no salió a tiempo.
+  GUARD_ALERT
+}
+
 model Tenant {
   id                             String            @id @default(uuid()) @db.Uuid
   name                           String
@@ -1554,6 +1687,22 @@ model Tenant {
   guardShiftSessions            GuardShiftSession[]
   guardSetting                  CenterGuardSetting?
   thresholdOverrides            ResidentThresholdOverride[]
+  // residencia-5 · el parte de relevo de cada turno con sus zonas, sus
+  // confirmaciones y lo que llegó tarde; las obligaciones de dirección
+  // con sus ocurrencias; y los umbrales objetivo de los indicadores.
+  //
+  // El relevo cuelga con `Restrict` por lo mismo que el libro: es la
+  // evidencia de que la información pasó de un turno a otro, y se
+  // conserva. Las obligaciones, con `Cascade`: son la agenda de la
+  // dirección del centro, no un dato de salud, y se van con el centro.
+  handovers                     Handover[]
+  handoverZones                 HandoverZone[]
+  handoverAcks                  HandoverAck[]
+  handoverAckZones              HandoverAckZone[]
+  handoverLateAdditions         HandoverLateAddition[]
+  managementDuties              ManagementDuty[]
+  dutyOccurrences               DutyOccurrence[]
+  indicatorTargets              IndicatorTarget[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1891,6 +2040,20 @@ model User {
   guardShiftSessionsEnded   GuardShiftSession[]         @relation("GuardShiftSessionEndedBy")
   thresholdOverridesSigned  ResidentThresholdOverride[] @relation("ThresholdOverrideSignedBy")
   thresholdOverridesRevoked ResidentThresholdOverride[] @relation("ThresholdOverrideRevokedBy")
+
+  // residencia-5 · lo que esta persona confirmó del relevo y lo que marcó
+  // hecho de las obligaciones. `Restrict` en las dos firmas, por lo mismo
+  // que las de arriba: «lo recibió Ana Isabel, como auxiliar» es la
+  // evidencia del bloque y no se queda huérfana.
+  //
+  // Y ser RESPONSABLE de una obligación es `Restrict` también, no
+  // `SetNull`: ver la razón en `ManagementDuty.responsibleUser`.
+  handoverAcks             HandoverAck[]     @relation("HandoverAckUser")
+  dutyOccurrencesDone      DutyOccurrence[]  @relation("DutyOccurrenceDoneBy")
+  dutyOccurrencesCorrected DutyOccurrence[]  @relation("DutyOccurrenceCorrectedBy")
+  managementDutiesOwned    ManagementDuty[]  @relation("ManagementDutyResponsible")
+  managementDutiesCreated  ManagementDuty[]  @relation("ManagementDutyCreatedBy")
+  indicatorTargets         IndicatorTarget[]
 
   @@index([tenantId])
   @@map("users")
@@ -2261,6 +2424,11 @@ model Device {
   incidents           Incident[]                   @relation("IncidentDevice")
   guardShiftSessions  GuardShiftSession[]
   guardAlertsAcked    GuardAlert[]                 @relation("GuardAlertAckedByDevice")
+  // residencia-5 (D-67) · las confirmaciones de relevo dadas en esta
+  // tablet de sala. `Restrict`, por lo mismo que los registros de la
+  // puerta: la confirmación es evidencia y un aparato se revoca, no se
+  // borra.
+  handoverAcks        HandoverAck[]                @relation("HandoverAckDevice")
 
   @@index([tenantId])
   @@index([registerId])
@@ -3639,38 +3807,38 @@ model Client {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant              Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant                Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // clinica-4 · `consents` pasó a RESTRICT (S3, condición 1): un paciente
   // con un consentimiento firmado NO se borra, y ya no es «lo que se
   // puede perder con la ficha». `technicalNotes` sigue en Cascade: es
   // ficha técnica, no historia.
-  consents            ClientConsent[]
-  technicalNotes      ClientTechnicalNote[]
-  appointments        Appointment[]
+  consents              ClientConsent[]
+  technicalNotes        ClientTechnicalNote[]
+  appointments          Appointment[]
   // B-reservas-8 · sus bonos de sesiones. `Restrict` al otro lado: una
   // ficha con un bono vivo NO se borra. El bono es una deuda del centro
   // con ESA persona (el bono es de una ficha, S6) y borrar la ficha sería
   // perder a quién se le deben las sesiones.
-  vouchers            Voucher[]
+  vouchers              Voucher[]
   // B-reservas-8 · las ventas a nombre de esta ficha. `SetNull` al otro
   // lado: borrar la ficha no borra la venta.
-  tickets             Ticket[]
+  tickets               Ticket[]
   // clinica-1 · la historia del paciente, sus accesos y el registro de
   // quién la ha abierto. Las tres con RESTRICT al otro lado (y no Cascade
   // como `technicalNotes`): **un cliente con historia no se borra.** Esa
   // es la diferencia de fondo entre una ficha de peluquería y una
   // historia clínica.
-  clinicalAccesses    ClinicalAccess[]
-  clinicalAccessLogs  ClinicalAccessLog[]
-  clinicalEntries     ClinicalEntry[]
+  clinicalAccesses      ClinicalAccess[]
+  clinicalAccessLogs    ClinicalAccessLog[]
+  clinicalEntries       ClinicalEntry[]
   // clinica-2 · sus valoraciones iniciales. Puede haber varias: la
   // valoración se repasa creando una NUEVA, sin sobrescribir la anterior
   // (decisión de producto 7).
-  clinicalAssessments ClinicalAssessment[]
+  clinicalAssessments   ClinicalAssessment[]
   // clinica-4 · sus fotos clínicas y las entregas de sus informes. Las
   // dos con RESTRICT, por lo mismo: son historia.
-  clinicalPhotos      ClinicalPhoto[]
-  reportDeliveries    ClinicalReportDelivery[]
+  clinicalPhotos        ClinicalPhoto[]
+  reportDeliveries      ClinicalReportDelivery[]
   // residencia-1 (D-49) · EL RESIDENTE ES UN `Client` con un perfil 1:1,
   // igual que `StaffProfile` amplía a `User`. De ahí hereda gratis la
   // historia, los accesos, el registro de accesos, los consentimientos,
@@ -3679,19 +3847,22 @@ model Client {
   // Las dos con RESTRICT al otro lado: **un residente no se borra, se le
   // da de alta** (`ResidentProfile.dischargeDate`). Es la misma decisión
   // que lo clínico y por la misma ley.
-  residentProfile     ResidentProfile?
-  bedAssignments      BedAssignment[]
+  residentProfile       ResidentProfile?
+  bedAssignments        BedAssignment[]
   // residencia-2 · su plan de cuidados. `Restrict`: un residente con plan
   // no se borra.
-  carePlanItems       CarePlanItem[]
+  carePlanItems         CarePlanItem[]
   /// residencia-3 · lo que se le ha registrado en la puerta. `Restrict`
   /// al otro lado: un residente con registros de cuidado no se borra.
-  careRecords         CareRecord[]
+  careRecords           CareRecord[]
   /// residencia-4 · sus incidencias y las excepciones de umbral que le
   /// pautó la médica. `Restrict` a los dos lados, por lo mismo: son
   /// historia clínica suya.
-  incidents           Incident[]
-  thresholdOverrides  ResidentThresholdOverride[]
+  incidents             Incident[]
+  thresholdOverrides    ResidentThresholdOverride[]
+  /// residencia-5 · lo suyo que llegó después de un relevo congelado.
+  /// `Restrict`, por lo mismo.
+  handoverLateAdditions HandoverLateAddition[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -6131,9 +6302,16 @@ model Floor {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  rooms  Room[]
-  zones  CareZoneAssignment[]
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rooms                 Room[]
+  zones                 CareZoneAssignment[]
+  /// residencia-5 · esta planta nombrada en un parte de relevo: como zona
+  /// con contenido, como zona que una confirmación abarcaba y como sitio
+  /// de un añadido tardío. `Restrict` en las tres: una planta que sale en
+  /// un parte congelado es vocabulario del histórico firmado.
+  handoverZones         HandoverZone[]
+  handoverAckZones      HandoverAckZone[]
+  handoverLateAdditions HandoverLateAddition[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -6309,12 +6487,17 @@ model CareRole {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// `Restrict` al otro lado: un rol con asignaciones —aunque estén
   /// revocadas— no se borra. La asignación revocada es el histórico de
   /// quién firmó qué y con qué capacidad (D-31), y un histórico que nombra
   /// un rol que ya no existe no se puede leer.
-  assignments CareRoleAssignment[]
+  assignments      CareRoleAssignment[]
+  /// residencia-5 (D-42) · las obligaciones de dirección de las que este
+  /// rol es responsable. `Restrict`: un rol con obligaciones a su nombre
+  /// es vocabulario vivo del centro — primero se le cambia el
+  /// responsable, después se retira el rol.
+  managementDuties ManagementDuty[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -6379,6 +6562,11 @@ model CareRoleAssignment {
   guardAlertsAcked         GuardAlert[]                @relation("GuardAlertAckedWith")
   guardShiftSessions       GuardShiftSession[]
   thresholdOverridesSigned ResidentThresholdOverride[]
+  /// residencia-5 · la CAPACIDAD con la que se confirmó un relevo y con
+  /// la que se marcó hecha una obligación (D-31). `Restrict`, como todo lo
+  /// demás de esta lista.
+  handoverAcks             HandoverAck[]
+  dutyOccurrencesDone      DutyOccurrence[]
 
   @@index([tenantId])
   @@index([tenantId, userId])
@@ -6463,6 +6651,9 @@ model CenterShift {
   /// `Restrict` por lo mismo.
   incidents          Incident[]
   guardShiftSessions GuardShiftSession[]
+  /// residencia-5 · y el parte de relevo de este turno. `Restrict` por lo
+  /// mismo: el turno es la unidad del relevo (D-54, D-58).
+  handovers          Handover[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -7186,27 +7377,31 @@ model CareRecord {
 
   /// `Restrict` en todo lo que dice QUÉ se registró y QUIÉN lo firmó: es
   /// la evidencia, y se conserva cinco años (Ley 41/2002, D-45).
-  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  client             Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  controlType        ControlType        @relation(fields: [controlTypeId], references: [id], onDelete: Restrict)
-  planItem           CarePlanItem?      @relation(fields: [planItemId], references: [id], onDelete: Restrict)
-  recordedBy         User               @relation("CareRecordRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
-  careRoleAssignment CareRoleAssignment @relation(fields: [careRoleAssignmentId], references: [id], onDelete: Restrict)
-  device             Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client             Client                 @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  controlType        ControlType            @relation(fields: [controlTypeId], references: [id], onDelete: Restrict)
+  planItem           CarePlanItem?          @relation(fields: [planItemId], references: [id], onDelete: Restrict)
+  recordedBy         User                   @relation("CareRecordRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  careRoleAssignment CareRoleAssignment     @relation(fields: [careRoleAssignmentId], references: [id], onDelete: Restrict)
+  device             Device                 @relation(fields: [deviceId], references: [id], onDelete: Restrict)
   /// residencia-1 (decisión 8 de su done) dejó dicho que el `CareRecord`
   /// pondría su FK `Restrict` al turno. Aquí está: un turno con registros
   /// adscritos ya no se puede borrar, porque es el vocabulario con el que
   /// está firmado el histórico.
-  centerShift        CenterShift?       @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
-  corrige            CareRecord?        @relation("CareRecordCorrige", fields: [correctsRecordId], references: [id], onDelete: Restrict)
-  corregidaPor       CareRecord[]       @relation("CareRecordCorrige")
-  voidedBy           User?              @relation("CareRecordVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  centerShift        CenterShift?           @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+  corrige            CareRecord?            @relation("CareRecordCorrige", fields: [correctsRecordId], references: [id], onDelete: Restrict)
+  corregidaPor       CareRecord[]           @relation("CareRecordCorrige")
+  voidedBy           User?                  @relation("CareRecordVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
   /// residencia-4 · la incidencia que esta medida ABRIÓ (si cruzó umbral)
   /// y las veces que se adjuntó como EVIDENCIA a una que ya estaba
   /// abierta. `Restrict` a los dos lados: la medida es la prueba de por
   /// qué se abrió, y sin ella la incidencia no se puede leer.
-  incidentsOpened    Incident[]         @relation("IncidentSourceRecord")
+  incidentsOpened    Incident[]             @relation("IncidentSourceRecord")
   incidentActions    IncidentAction[]
+  /// residencia-5 (decisión de producto 2) · las veces que este registro
+  /// se añadió a un parte ya congelado porque llegó tarde. `Restrict`: el
+  /// añadido es la prueba de que llegó después.
+  lateAdditions      HandoverLateAddition[]
 
   @@unique([correctsRecordId])
   @@index([tenantId])
@@ -7268,6 +7463,24 @@ model CarePin {
   /// el paquete de arranque, que es lo que le permite resolver el PIN SIN
   /// RED (igual que el roster de `offlineAuth` en el TPV).
   pinLookup String @map("pin_lookup")
+
+  /// residencia-6 (D-68) · **CUÁNTAS CIFRAS TIENE.** 4 para alcance por
+  /// zona, 6 para quien tiene algún rol de alcance total.
+  ///
+  /// Es lo ÚNICO que se guarda del largo, y es lo que permite saber que
+  /// un PIN «se quedó corto» cuando a su dueña le dan un rol que lo ve
+  /// todo — sin poder leer el PIN, que es el punto.
+  ///
+  /// **No es un dato que acerque a nadie al PIN**: quien tiene la base ya
+  /// ve en claro los roles de cada persona, y la regla rol → largo está
+  /// escrita en `packages/residencia-plan/src/pin-por-alcance.ts`, a la
+  /// vista. Lo que NO hay —y es la mitad de D-68— es nada derivado de los
+  /// cuatro PRIMEROS dígitos de un PIN de seis: con una huella de prefijo,
+  /// el ataque bajaría a 10 000 + 100 combinaciones.
+  ///
+  /// Las filas de antes de este bloque se quedan en 4, que es con lo que
+  /// se pusieron.
+  pinLength Int @default(4) @map("pin_length")
 
   setAt       DateTime @default(now()) @map("set_at") @db.Timestamptz()
   /// Quién se lo puso. `SetNull`: dar de baja a la dirección no borra el
@@ -7672,8 +7885,11 @@ model Incident {
   /// Los enlaces, en los dos sentidos. Ver `IncidentLink`: el par se
   /// guarda UNA vez y las dos relaciones son la misma fila leída desde
   /// cada lado.
-  linksFrom            IncidentLink[]        @relation("IncidentLinkFrom")
-  linksTo              IncidentLink[]        @relation("IncidentLinkTo")
+  linksFrom            IncidentLink[]         @relation("IncidentLinkFrom")
+  linksTo              IncidentLink[]         @relation("IncidentLinkTo")
+  /// residencia-5 · las veces que esta incidencia se añadió a un parte ya
+  /// congelado.
+  lateAdditions        HandoverLateAddition[]
 
   @@index([tenantId])
   /// **«Qué hay abierto hoy»**, que es literalmente la métrica de éxito
@@ -7922,6 +8138,11 @@ model GuardAlert {
   ackedWith     CareRoleAssignment? @relation("GuardAlertAckedWith", fields: [ackedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
   ackedByDevice Device?             @relation("GuardAlertAckedByDevice", fields: [ackedByDeviceId], references: [id], onDelete: Restrict)
 
+  /// residencia-5 · las veces que este aviso se añadió a un parte ya
+  /// congelado porque **no salió a tiempo**. Es una de las seis cosas que
+  /// el parte tiene que contar (decisión de producto 1).
+  lateAdditions HandoverLateAddition[]
+
   /// Un aviso por (incidencia, canal). Reenviar el mismo lote o derivar
   /// dos veces la misma medida **no hace sonar dos veces** — es la
   /// idempotencia del aviso, y vive en el motor y no en un `if`.
@@ -8048,4 +8269,559 @@ model CenterGuardSetting {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("center_guard_settings")
+}
+
+// ══ residencia-5 · EL PARTE DE RELEVO (D-18, D-19, D-58, D-67) ═════════
+//
+// Hoy el cambio de turno se hace de palabra y con una hoja en la sala. Lo
+// que estas cuatro tablas guardan es **que la información pasó de un
+// turno a otro**, que es una evidencia que en papel no existe.
+//
+// ── LA DECISIÓN DE FONDO: SÓLO EXISTE LA FILA CONGELADA ─────────────
+//
+// `handovers` no tiene estado «en vivo». Mientras el turno está en curso
+// el parte **se calcula** (`residencia/relevo.ts`, la misma función) y no
+// hay fila; la fila nace al cerrar el turno, con `frozen_at` NOT NULL, y
+// a partir de ahí no se edita ni se borra (trigger `handovers_inmutable`).
+//
+// La alternativa era una fila que naciera al abrirse el turno y se fuera
+// rellenando. Se descartó por una razón concre: lo que esta tabla es es
+// **la evidencia de lo que se supo**, y una fila que se edita durante
+// ocho horas no se puede distinguir de una que alguien editó después. Con
+// el cálculo en vivo, lo que se ve antes de congelar es una consulta —que
+// no miente porque no guarda nada— y lo que queda escrito es el parte.
+//
+// Lo que llega tarde no reescribe lo congelado: va a
+// `handover_late_additions`, a la vista y con su hora (decisión 2).
+
+/// residencia-5 (D-18, D-58) · **EL PARTE DE UN TURNO, CONGELADO.**
+///
+/// Uno por centro y turno (D-58). Lo genera el sistema con lo que ya está
+/// registrado en las puertas: **nadie lo escribe**. Un turno sin nada que
+/// contar dice «Turno sin novedades» y se confirma igual, porque el
+/// denominador cuenta tanto como lo que pasa — la misma lógica del «como
+/// siempre» (D-16).
+///
+/// ── QUÉ VA CIFRADO Y QUÉ EN CLARO (D-63) ─────────────────────────────
+///
+/// El contenido lleva salud con todas las letras —qué le pasó a quién, el
+/// texto de «algo no va bien», las constantes fuera de rango— y va en
+/// `content_cifrado`, una columna y no un fichero: ver la decisión en la
+/// cabecera de la migración.
+///
+/// **En claro, declarado**: el centro, el turno, el `care_day`, el
+/// instante de congelado, los recuentos por zona (`handover_zones`) y las
+/// confirmaciones con su firma y sus zonas. Es lo que sostiene el panel
+/// («¿está confirmado el relevo de esta mañana?») sin descifrar nada, y
+/// es lo mismo que una hoja de firmas en la pared dice ya hoy.
+model Handover {
+  /// **Generado en la aplicación**, no por la base: el AAD de
+  /// `content_cifrado` ata el valor a `tenant|handovers|content|<id>`, y
+  /// el id de una fila que todavía no existe no se puede leer (ver la
+  /// cabecera de `clinica/cripto-campos.ts`). Misma razón exacta por la
+  /// que `care_records.id` no tiene `DEFAULT`, y un `DEFAULT` aquí sería
+  /// un valor que nadie usa y que taparía un olvido.
+  id       String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// El turno del que es el parte. `Restrict`: un turno con parte
+  /// congelado es vocabulario del histórico firmado, igual que en
+  /// `CareRecord`.
+  centerShiftId String @map("center_shift_id") @db.Uuid
+  /// El día del CENTRO, «YYYY-MM-DD», calculado con `diaDelTurno` y no
+  /// con la fecha del reloj: la noche del lunes acaba a las 08:00 del
+  /// martes y su parte es **del lunes**.
+  careDay       String @map("care_day") @db.VarChar(10)
+
+  /// Cuándo se calculó y cuándo se congeló. Los dos NOT NULL: una fila de
+  /// esta tabla **es** un parte congelado (ver la cabecera del bloque).
+  /// Se separan porque la tarea programada puede correr unos segundos
+  /// después del final del turno y «a las 15:00:04» es la verdad.
+  generatedAt DateTime @map("generated_at") @db.Timestamptz()
+  frozenAt    DateTime @map("frozen_at") @db.Timestamptz()
+
+  /// **EL CONTENIDO, CIFRADO.** El JSON entero del parte: por planta y
+  /// residente, las incidencias abiertas y las nuevas, «algo no va bien»,
+  /// las constantes fuera de rango, lo que no se hizo, los cambios de
+  /// plan, las excepciones nuevas, los registros sin turno y los avisos
+  /// que no salieron a tiempo. Su CHECK de formato sólo admite `c1:…`: el
+  /// claro NO CABE.
+  contentCifrado String @map("content_cifrado")
+
+  /// Cuántas líneas lleva en total y si es un parte **sin novedades**.
+  /// Las dos en claro y a propósito: son lo que la tablet en reposo pinta
+  /// («Relevo de la mañana · 3 por confirmar») y lo que el panel cuenta,
+  /// y ninguna de las dos dice nada de nadie.
+  lineas       Int     @default(0)
+  sinNovedades Boolean @default(false) @map("sin_novedades")
+
+  /// Cuándo quedó **confirmado**: cuando cada zona con contenido tiene al
+  /// menos una confirmación de alguien del turno entrante que la cubre, o
+  /// una de alcance total (decisión de producto 3). Columna y no derivada
+  /// porque es lo que el panel filtra («los no confirmados de la
+  /// semana») y porque el instante en que se completó es la evidencia.
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  centerShift CenterShift @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+
+  zones         HandoverZone[]
+  acks          HandoverAck[]
+  lateAdditions HandoverLateAddition[]
+
+  /// Uno por centro, turno y día (D-58). Es lo que hace idempotente la
+  /// tarea programada: correrla dos veces no congela dos partes.
+  @@unique([tenantId, centerShiftId, careDay])
+  @@index([tenantId])
+  /// «El del último cambio de turno» y «los no confirmados de la semana»,
+  /// que son las dos preguntas del panel.
+  @@index([tenantId, careDay])
+  @@map("handovers")
+}
+
+/// residencia-5 (decisión de producto 3) · **UNA ZONA CON CONTENIDO.**
+///
+/// Una fila por planta que tiene algo que contar en este parte, con
+/// cuántas líneas. `floor_id` NULL es **la zona del centro**: lo que no
+/// es de ninguna planta (una avería del office, una queja sin residente),
+/// y sólo la cubre una confirmación de alcance total.
+///
+/// ── POR QUÉ ES UNA TABLA Y NO UN JSON ───────────────────────────────
+///
+/// Porque «¿está confirmado este parte?» es una consulta que compara
+/// zonas con contenido contra zonas confirmadas, y el panel la hace para
+/// toda una semana de partes. Con el recuento dentro del JSON cifrado
+/// habría que descifrar los veintiún partes de la semana para pintar una
+/// cifra — y de paso dejar un acceso a datos de salud por cada carga del
+/// panel.
+///
+/// **Sólo se escriben las zonas CON contenido.** Una planta sin nada que
+/// contar no tiene fila, y por tanto no necesita confirmación: exigirla
+/// sería dejar un parte «sin confirmar» por una planta vacía.
+model HandoverZone {
+  id         String  @id @default(uuid()) @db.Uuid
+  tenantId   String  @map("tenant_id") @db.Uuid
+  handoverId String  @map("handover_id") @db.Uuid
+  /// La planta, o NULL = «del centro». `Restrict`: una planta nombrada en
+  /// un parte congelado no se borra.
+  floorId    String? @map("floor_id") @db.Uuid
+
+  lineas Int @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  handover Handover @relation(fields: [handoverId], references: [id], onDelete: Restrict)
+  floor    Floor?   @relation(fields: [floorId], references: [id], onDelete: Restrict)
+
+  /// La unicidad por zona necesita DOS índices parciales en la migración,
+  /// que Prisma no sabe declarar: en Postgres los NULL son distintos
+  /// entre sí, así que un único `@@unique([handoverId, floorId])` dejaría
+  /// entrar dos filas «del centro» en el mismo parte. **Quinta vez** que
+  /// esta lección se paga en este repo (`ticket_allergies_mesa_key`,
+  /// `care_zone_assignments_one_live_centro_key`,
+  /// `control_types_una_vigente_*`, `care_records_una_por_ocurrencia_key`).
+  @@index([tenantId])
+  @@index([handoverId])
+  @@index([floorId])
+  @@map("handover_zones")
+}
+
+/// residencia-5 (D-19, D-67) · **«LEÍDO Y RECIBIDO».**
+///
+/// Quien recoge el turno confirma el parte con su PIN en la tablet de la
+/// sala. Cierra el bucle de «la información debe fluir entre roles»: no
+/// *debería* fluir — **queda demostrado que fluyó** (rama de controles
+/// §7).
+///
+/// Firma **persona + capacidad + hora** (D-31): «lo recibió Ana Isabel»
+/// no es evidencia; «lo recibió Ana Isabel, como auxiliar, a las 15:04 y
+/// abarcaba la primera planta» sí lo es. De ahí `careRoleAssignmentId` y
+/// `HandoverAckZone`.
+///
+/// ── APPEND-ONLY, y una sola por persona y parte ─────────────────────
+///
+/// El trigger `handover_acks_append_only` no deja `UPDATE` ni `DELETE`:
+/// una confirmación que se puede borrar no demuestra nada. Y el índice
+/// único `(handover_id, user_id)` es lo que hace que **confirmar dos
+/// veces no duplique** — la ruta lo detecta antes y contesta la que ya
+/// había, pero quien lo garantiza es el motor.
+model HandoverAck {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  handoverId String @map("handover_id") @db.Uuid
+
+  /// Quién, y **con qué capacidad** (D-31).
+  userId               String @map("user_id") @db.Uuid
+  careRoleAssignmentId String @map("care_role_assignment_id") @db.Uuid
+  /// Y desde qué tablet de sala. NOT NULL: en este bloque una
+  /// confirmación entra siempre por una sala. El admin las **enseña**; no
+  /// las da (ver la decisión en el done).
+  deviceId             String @map("device_id") @db.Uuid
+
+  /// Cuándo se tecleó, y cuándo llegó al servidor. Dos instantes por lo
+  /// mismo que en `CareRecord`: sin red la confirmación se encola y los
+  /// dos se separan. **El que manda es `at`**, que es cuando la persona
+  /// dijo que lo había leído.
+  at         DateTime @db.Timestamptz()
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz()
+
+  /// `true` si quien confirma ve el centro entero (DUE, médico, calidad,
+  /// dirección — D-51). Una confirmación de alcance total cubre **todas**
+  /// las zonas del parte, incluida la del centro.
+  alcanceTotal Boolean @default(false) @map("alcance_total")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  handover           Handover           @relation(fields: [handoverId], references: [id], onDelete: Restrict)
+  user               User               @relation("HandoverAckUser", fields: [userId], references: [id], onDelete: Restrict)
+  careRoleAssignment CareRoleAssignment @relation(fields: [careRoleAssignmentId], references: [id], onDelete: Restrict)
+  device             Device             @relation("HandoverAckDevice", fields: [deviceId], references: [id], onDelete: Restrict)
+
+  zones HandoverAckZone[]
+
+  @@unique([handoverId, userId])
+  @@index([tenantId])
+  @@index([handoverId])
+  @@map("handover_acks")
+}
+
+/// residencia-5 · **QUÉ ZONAS ABARCABA LO QUE VIO.**
+///
+/// Una fila por planta que la confirmación cubre. Vacío cuando
+/// `alcanceTotal` es `true`: enumerar las ocho plantas de un centro en
+/// cada confirmación de la DUE sería guardar ocho veces lo que una
+/// columna booleana ya dice, y el día que el centro añada una novena
+/// planta las confirmaciones viejas dirían que cubrían ocho de nueve.
+model HandoverAckZone {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  ackId    String @map("ack_id") @db.Uuid
+  floorId  String @map("floor_id") @db.Uuid
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  ack    HandoverAck @relation(fields: [ackId], references: [id], onDelete: Restrict)
+  floor  Floor       @relation(fields: [floorId], references: [id], onDelete: Restrict)
+
+  @@unique([ackId, floorId])
+  @@index([tenantId])
+  @@index([floorId])
+  @@map("handover_ack_zones")
+}
+
+/// residencia-5 (decisión de producto 2) · **«LLEGÓ DESPUÉS DEL RELEVO».**
+///
+/// Una puerta sin red sube a las 15:20 algo que pasó a las 14:50, y el
+/// parte de la mañana ya está congelado. No se reescribe lo congelado
+/// —eso es la evidencia de lo que se supo— y tampoco se esconde: se añade
+/// aquí, y la tablet y el panel lo pintan aparte, con su hora.
+///
+/// Es lo que hace que un registro tardío **deshaga el «no hecho»** sin
+/// tocar el parte: el cálculo de «no hecho» mira los registros de ahora
+/// (decisión de producto 4), y en el parte congelado la línea sigue
+/// diciendo «no se hizo» con un añadido debajo que dice que llegó a las
+/// 15:20. Las dos cosas son verdad y las dos hacen falta.
+///
+/// Append-only (`handover_late_additions_append_only`), igual que las
+/// confirmaciones.
+model HandoverLateAddition {
+  /// Generado en la aplicación, por lo mismo que el del parte: el AAD de
+  /// `resumen_cifrado` lo necesita antes de insertar.
+  id         String @id @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  handoverId String @map("handover_id") @db.Uuid
+
+  kind HandoverLateKind
+
+  /// De qué es. Exactamente UNA de las tres, según `kind` (CHECK
+  /// `handover_late_additions_fuente_coherente`): un añadido que no
+  /// apunta a nada no se puede abrir, y uno que apunta a dos no se sabe
+  /// qué es.
+  careRecordId String? @map("care_record_id") @db.Uuid
+  incidentId   String? @map("incident_id") @db.Uuid
+  guardAlertId String? @map("guard_alert_id") @db.Uuid
+
+  /// El residente y la planta, para pintarlo en su sitio sin descifrar
+  /// nada. Los dos nullable: una avería del office no es de nadie ni de
+  /// ninguna planta.
+  clientId String? @map("client_id") @db.Uuid
+  floorId  String? @map("floor_id") @db.Uuid
+
+  /// **Cuándo PASÓ y cuándo LLEGÓ.** Los dos, y es el bloque entero en
+  /// dos columnas: «pasó a las 14:50, lo supimos a las 15:20» es
+  /// exactamente lo que el turno entrante tiene que leer.
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz()
+  arrivedAt  DateTime @map("arrived_at") @db.Timestamptz()
+
+  /// Una línea de resumen, **cifrada**: lleva salud igual que el parte.
+  resumenCifrado String @map("resumen_cifrado")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  handover   Handover    @relation(fields: [handoverId], references: [id], onDelete: Restrict)
+  careRecord CareRecord? @relation(fields: [careRecordId], references: [id], onDelete: Restrict)
+  incident   Incident?   @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  guardAlert GuardAlert? @relation(fields: [guardAlertId], references: [id], onDelete: Restrict)
+  client     Client?     @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  floor      Floor?      @relation(fields: [floorId], references: [id], onDelete: Restrict)
+
+  /// Un registro tardío se añade UNA vez a UN parte. Es la idempotencia
+  /// de la pasada que los detecta: correrla dos veces no duplica el
+  /// añadido. Los tres índices son parciales en la migración, por lo
+  /// mismo que los de `handover_zones`.
+  @@index([tenantId])
+  @@index([handoverId])
+  @@map("handover_late_additions")
+}
+
+// ══ residencia-5 · LAS OBLIGACIONES DE DIRECCIÓN (D-42) ════════════════
+//
+// «¿Qué toca este día del mes?» es la mitad de la métrica de éxito de
+// dirección (bloque C §2), y hoy la respuesta vive en la cabeza de
+// Carmen: las nóminas el 25, los extintores cada trimestre, el
+// certificado del mantenedor de PCI que falta desde 2026.
+//
+// ── LAS OBLIGACIONES SON DEL CENTRO, NO DEL PRODUCTO ───────────────
+//
+// Al revés que la plantilla de gravedad (D-65) y que el catálogo de
+// controles de serie (D-21): `management_duties` **tiene `tenant_id`** y
+// cada centro ajusta las suyas. El catálogo del bloque C §3 es una
+// PLANTILLA que el centro carga de una vez y luego toca; no baja a todos
+// los centros cuando el producto la cambie, porque las nóminas de un
+// centro no son asunto de otro.
+//
+// ── Y NO ABREN INCIDENCIA ──────────────────────────────────────────
+//
+// Una ocurrencia vencida sale **en rojo en el panel** y nada más. El
+// libro de incidencias tiene tres sujetos (residente, queja, avería,
+// D-38) y el sujeto «proceso» es de calidad-1: meter aquí una incidencia
+// de proceso sería adelantar un bloque entero por la puerta de atrás.
+
+/// residencia-5 (D-42) · **UNA OBLIGACIÓN DE DIRECCIÓN.**
+///
+/// Nombre, familia, periodicidad, responsable, consecuencia y la marca
+/// «periodicidad por verificar». Sus ocurrencias las genera la pasada
+/// programada (`DutyOccurrence`).
+///
+/// ── EL RESPONSABLE: UNA DE TRES, Y NO DOS ─────────────────────────
+///
+/// Un **rol de cuidado** («Dirección», «Calidad»), una **persona** o una
+/// **etiqueta libre**. Las tres existen porque el catálogo del bloque C
+/// las usa las tres: «Dirección» es un rol, «Carmen» puede ser una
+/// persona concreta, y «Gestoría» y «Mi Piace» no son ni lo uno ni lo
+/// otro — son de fuera del centro y no tienen usuario.
+///
+/// El CHECK `management_duties_responsable` exige **exactamente una**. Con
+/// dos, «¿a quién le toca?» tendría dos respuestas y la pantalla elegiría
+/// una; con ninguna, la obligación no es de nadie y nadie la hace.
+model ManagementDuty {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// Como lo llama el centro. Único por centro entre las vivas (índice
+  /// parcial `management_duties_nombre_key`): dos «Nóminas» en la lista
+  /// son dos sitios donde marcarlo hecho y uno se queda sin marcar.
+  name   String
+  family DutyFamily
+  /// Una nota del centro. **En claro**: una obligación de dirección no es
+  /// un dato de salud (D-63), y de aquí sale «falta el de 2026 (obs. 02)».
+  notes  String?
+
+  periodicity DutyPeriodicity
+
+  /// ── LAS COLUMNAS DE LA PERIODICIDAD ───────────────────────────────
+  ///
+  /// Cada periodicidad lleva las suyas y **ninguna más** (CHECK
+  /// `management_duties_periodicidad_coherente`). Son enteros y no una
+  /// fecha porque lo que se repite es «el 25» o «el primer lunes», no un
+  /// instante: igual que `CenterShift.startsAt` es «HH:MM» y no un
+  /// timestamp.
+  ///
+  /// `weekday` 1–7 ISO (1 = lunes). Sólo en `WEEKLY`.
+  weekday    Int?
+  /// `monthDay` 1–31. En `MONTHLY`, `QUARTERLY`, `ANNUAL` y
+  /// `FIVE_YEARLY`.
+  ///
+  /// **31 significa «el último día del mes»**, y es una decisión: un
+  /// centro que paga las nóminas el último día de cada mes no puede tener
+  /// una obligación que en febrero no exista. Lo resuelve el generador
+  /// (`packages/residencia-plan`, con su tabla de verdad para febrero de
+  /// 2027 y el 29 de febrero de 2028), no la base.
+  monthDay   Int?    @map("month_day")
+  /// `month` 1–12. En `ANNUAL` y `FIVE_YEARLY` es el mes; en `QUARTERLY`
+  /// es el **primer mes del ciclo** (1–3), y de ahí salen los otros tres
+  /// sumando.
+  month      Int?
+  /// El año de anclaje de una quinquenal: desde él se cuentan los cinco.
+  anchorYear Int?    @map("anchor_year")
+  /// La fecha de caducidad de una `VALIDITY`, «YYYY-MM-DD». Es su única
+  /// ocurrencia, y el panel la avisa a 60 días (bloque C §2).
+  validUntil String? @map("valid_until") @db.VarChar(10)
+
+  /// **«Periodicidad por verificar»** (D-42). Lo marcado *(verificar)* en
+  /// el catálogo del bloque C entra con esta marca puesta: la
+  /// periodicidad es la que alguien supuso en agosto y nadie ha
+  /// confirmado. El panel lo pinta y la pantalla deja quitarlo; lo que no
+  /// hace es **bloquear** la obligación, porque una obligación sin
+  /// periodicidad confirmada sigue tocando.
+  periodicityToVerify Boolean @default(false) @map("periodicity_to_verify")
+
+  consequence DutyConsequence
+
+  /// El responsable: una de las tres (ver la cabecera). **`Restrict` en
+  /// las dos**, y la segunda tiene su razón: un `SetNull` en la persona
+  /// dejaría la fila sin ningún responsable y el CHECK
+  /// `management_duties_responsable` —que exige exactamente uno— lo
+  /// rechazaría al ejecutarse. Es la clase de promesa que un `SetNull` no
+  /// puede cumplir cuando hay un CHECK encima (lección de
+  /// `clinical_processor_agreements` en clinica-7). La pantalla obliga a
+  /// reasignar antes de dar de baja a nadie.
+  responsibleCareRoleId String? @map("responsible_care_role_id") @db.Uuid
+  responsibleUserId     String? @map("responsible_user_id") @db.Uuid
+  responsibleLabel      String? @map("responsible_label")
+
+  /// Desde cuándo se generan ocurrencias. No es `createdAt`: cargar la
+  /// plantilla en octubre no debe inventar las nóminas de enero.
+  startsOn String  @map("starts_on") @db.VarChar(10)
+  /// Y hasta cuándo, si el centro la retira. `active = false` deja de
+  /// generar ocurrencias **sin borrar las que hay**: lo hecho se
+  /// conserva.
+  active   Boolean @default(true)
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  responsibleCareRole CareRole? @relation(fields: [responsibleCareRoleId], references: [id], onDelete: Restrict)
+  responsibleUser     User?     @relation("ManagementDutyResponsible", fields: [responsibleUserId], references: [id], onDelete: Restrict)
+  createdBy           User?     @relation("ManagementDutyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  occurrences DutyOccurrence[]
+
+  @@index([tenantId])
+  @@index([tenantId, family])
+  @@map("management_duties")
+}
+
+/// residencia-5 (D-42) · **UNA VEZ QUE TOCA.**
+///
+/// Las genera la pasada programada desde la periodicidad de su
+/// obligación, con una ventana por delante: el panel enseña «lo que vence
+/// en 60 días» y para eso las ocurrencias tienen que existir antes de
+/// vencer.
+///
+/// Se marca **hecha** con persona + capacidad + hora (D-31) y, si se
+/// quiere, una evidencia adjunta: el certificado, el informe. Una
+/// vencida sale en rojo en el panel y **no abre incidencia** (ver la
+/// cabecera del bloque).
+///
+/// ── UNA HECHA NO VUELVE A PENDIENTE, SALVO CORRECCIÓN FIRMADA ──────
+///
+/// El trigger `duty_occurrences_hecha_no_vuelve` deja poner `done_at` a
+/// NULL **sólo** si la fila trae a la vez la corrección firmada:
+/// `corrected_at`, quién y por qué. Un «se me fue el dedo» se arregla
+/// diciendo quién lo arregla, que es la misma regla que la anulación de
+/// un `CareRecord`.
+model DutyOccurrence {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  dutyId   String @map("duty_id") @db.Uuid
+
+  /// Qué día toca, «YYYY-MM-DD». Única por obligación (índice
+  /// `duty_occurrences_una_por_dia_key`): es lo que hace **idempotente**
+  /// la pasada que las genera.
+  dueOn String @map("due_on") @db.VarChar(10)
+
+  /// ── HECHA, con firma (D-31) ───────────────────────────────────────
+  ///
+  /// Las tres juntas o ninguna (CHECK `duty_occurrences_hecha_completa`):
+  /// una ocurrencia hecha sin saber quién la hizo es media evidencia, y
+  /// la evidencia es el punto entero.
+  doneAt                     DateTime? @map("done_at") @db.Timestamptz()
+  doneByUserId               String?   @map("done_by_user_id") @db.Uuid
+  doneByCareRoleAssignmentId String?   @map("done_by_care_role_assignment_id") @db.Uuid
+  /// Una nota del que la marcó. **En claro**: no es salud.
+  doneNote                   String?   @map("done_note")
+
+  /// ── LA EVIDENCIA ADJUNTA ──────────────────────────────────────────
+  ///
+  /// El certificado del mantenedor, el informe de extintores. Fichero del
+  /// volumen clínico con cabecera `MPC1` y la huella del claro, **igual
+  /// que los demás ficheros** (clinica-4, clinica-7, la nota de voz de
+  /// residencia-3): no se inventa un segundo almacén para esto.
+  ///
+  /// Las cuatro van juntas o ninguna (CHECK
+  /// `duty_occurrences_evidencia_completa`): media evidencia es una fila
+  /// que dice que hay un PDF que no se puede servir.
+  evidenceFileName String? @map("evidence_file_name") @db.VarChar(100)
+  evidenceSha256   String? @map("evidence_sha256") @db.Char(64)
+  evidenceBytes    Int?    @map("evidence_bytes")
+  evidenceMimeType String? @map("evidence_mime_type") @db.VarChar(80)
+
+  /// ── LA CORRECCIÓN FIRMADA (ver la cabecera) ───────────────────────
+  ///
+  /// Las tres juntas o ninguna (CHECK
+  /// `duty_occurrences_correccion_completa`), y son la ÚNICA forma de que
+  /// una hecha vuelva a pendiente.
+  correctedAt       DateTime? @map("corrected_at") @db.Timestamptz()
+  correctedByUserId String?   @map("corrected_by_user_id") @db.Uuid
+  correctionReason  String?   @map("correction_reason")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  duty        ManagementDuty      @relation(fields: [dutyId], references: [id], onDelete: Cascade)
+  doneBy      User?               @relation("DutyOccurrenceDoneBy", fields: [doneByUserId], references: [id], onDelete: Restrict)
+  doneWith    CareRoleAssignment? @relation(fields: [doneByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  correctedBy User?               @relation("DutyOccurrenceCorrectedBy", fields: [correctedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([dutyId, dueOn])
+  @@index([tenantId])
+  /// «¿Qué toca hoy y qué está vencido?», que es la pregunta del panel.
+  /// El índice parcial `WHERE done_at IS NULL` vive en la migración.
+  @@index([tenantId, dueOn])
+  @@map("duty_occurrences")
+}
+
+/// residencia-5 (rama de controles §10) · **EL UMBRAL OBJETIVO DE UN
+/// INDICADOR, que es del CENTRO.**
+///
+/// La frontera estándar/centro, escrita en una tabla: la **fórmula** de
+/// cada indicador es del producto y vive en
+/// `packages/residencia-plan/src/indicadores.ts`; el **umbral** es del
+/// centro y vive aquí. El 73,5 % de la gimnasia es el objetivo 2026 de
+/// Jardín de Gredos, no una constante del producto.
+///
+/// Sin fila, el panel usa el umbral de serie del fichero y lo dice. No se
+/// siembra una fila por centro: un umbral sembrado y nunca revisado es
+/// indistinguible de uno que la dirección eligió.
+model IndicatorTarget {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// El código del indicador, **en claro y sin FK**: los indicadores son
+  /// un fichero de datos del producto (la misma decisión que
+  /// `incident_type`, D-11 llevado al panel), y un indicador nuevo en
+  /// 2028 es una fila del fichero, no una migración.
+  code String
+
+  /// El valor objetivo y para qué lado se mide.
+  target     Float
+  comparison IndicatorComparison
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedBy User?  @relation(fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("indicator_targets")
 }

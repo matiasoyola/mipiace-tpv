@@ -46,6 +46,7 @@ import {
   nuevoIdDeFila,
   sitioAnotacion,
   sitioContenidoAFamilia,
+  sitioContenidoDeRelevo,
   sitioCorreccion,
   sitioDescripcionDeIncidencia,
   sitioDniDeResidente,
@@ -60,6 +61,7 @@ import {
   sitioNotaDeCita,
   sitioNotaDeFicha,
   sitioNotaTecnica,
+  sitioResumenTardio,
   sitioNotaDeRegistro,
   sitioNssDeResidente,
   sitioRespuestaDeFamilia,
@@ -120,6 +122,12 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     ["lo que se le dijo a la familia", sitioContenidoAFamilia, "family_communications", "content"],
     ["lo que contestó la familia", sitioRespuestaDeFamilia, "family_communications", "response"],
     ["motivo de la excepción", sitioMotivoDeExcepcion, "resident_threshold_overrides", "reason"],
+    // residencia-5 (D-63) · el parte de relevo congelado y el resumen de
+    // lo que llegó después. **Dos columnas lógicas en dos tablas**, y por
+    // lo mismo: con el mismo nombre lógico, el resumen de un añadido se
+    // podría copiar al contenido de un parte y descifraría.
+    ["contenido del parte", sitioContenidoDeRelevo, "handovers", "content"],
+    ["resumen del añadido tardío", sitioResumenTardio, "handover_late_additions", "resumen"],
   ];
 
   it.each(SITIOS)("%s → tenant|%s|%s|fila", (_, sitioDe, tabla, columna) => {
@@ -128,7 +136,7 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     );
   });
 
-  it("son VEINTIDÓS, y no se añade una columna cifrada sin su sitio", () => {
+  it("son VEINTICUATRO, y no se añade una columna cifrada sin su sitio", () => {
     // El CHECK de formato (`~ '^c[0-9]+:…'`) es la marca de una columna
     // cifrada con una DEK: se cuentan los de TODAS las migraciones y se
     // comparan con los sitios de este inventario.

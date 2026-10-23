@@ -112,6 +112,15 @@ export interface EnElRoster {
     name: string;
     alcanceTotal: boolean;
   }>;
+  /** residencia-6 (D-68) · `true` = su PIN tiene cuatro cifras y ha pasado
+   *  a tener un rol que ve todo el centro, así que **no abre nada** hasta
+   *  que dirección se lo ponga de seis. Lo calcula el servidor; lo que
+   *  NO viaja es cuántas cifras tiene (ver el arranque en la API).
+   *
+   *  Opcional como todo lo demás de este fichero: una caché de antes de
+   *  este bloque no lo trae, y entonces la puerta deja entrar sin red
+   *  como hacía ayer y el servidor lo corrige en cuanto haya red. */
+  porRenovar?: boolean;
 }
 
 /** `GET /residencia/puerta/arranque`. */
@@ -183,6 +192,13 @@ export interface RegistroDeLaPuerta {
   /** `true` = es el valor de ahora de su ocurrencia. Lo que la pantalla
    *  pinta en verde o en gris discontinuo. */
   vigente: boolean;
+  /** residencia-6 · `true` = esto lo apuntó ESTA tablet y puede no haber
+   *  subido todavía. La pantalla lo dice («· en la tablet»), porque es
+   *  distinto de «consta en el servidor»: lo que está sólo aquí no lo ve
+   *  el relevo ni la DUE hasta que vuelva la red.
+   *
+   *  Nunca viene de la API: lo pone la caché al leer lo propio. */
+  enLaTablet?: boolean;
 }
 
 /** Una ocurrencia de `queToca`, como la pinta la pantalla 3. */

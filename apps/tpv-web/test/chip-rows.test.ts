@@ -16,8 +16,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ANCHO_FILA_ESTRECHA,
   CHIP_FALLBACK_ROW_WIDTH,
   CHIP_MAX_ROWS,
+  CHIP_MAX_ROWS_ESTRECHO,
+  filasDeChips,
   estimateChipWidth,
   layoutChips,
 } from "../src/lib/chipRows.js";
@@ -195,3 +198,96 @@ function rowsNeeded(widths: number[], rowWidth: number): number {
   }
   return rows;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// n1-vertical · el aparato de mano, donde una sola fila deja las
+// familias INALCANZABLES.
+// ─────────────────────────────────────────────────────────────────────
+
+/** La fila de chips del N1 en vertical, medida en el aparato. */
+const N1_FILA = 328;
+
+/** Las ocho familias de la carta de Sirope, las mismas de arriba. */
+const OCHO_DE_SIROPE = [
+  "Cafés",
+  "Bollería",
+  "Refrescos",
+  "Cervezas",
+  "Vinos",
+  "Tostadas",
+  "Bocadillos",
+  "Postres",
+];
+
+/** Los chips fijos de un catálogo de servicios. */
+const FIJOS = ["Todos", "Servicios", "Productos"];
+
+describe("n1-vertical · dos filas SÓLO en estrecho", () => {
+  it("el terminal sigue en UNA fila", () => {
+    expect(filasDeChips(AP11_CATALOG_COLUMN)).toBe(CHIP_MAX_ROWS);
+    expect(filasDeChips(840)).toBe(1);
+    // Y sin medida (primer render, jsdom) se defiende el terminal.
+    expect(filasDeChips(0)).toBe(1);
+  });
+
+  it("el N1 pasa a DOS filas", () => {
+    expect(filasDeChips(N1_FILA)).toBe(CHIP_MAX_ROWS_ESTRECHO);
+    expect(CHIP_MAX_ROWS_ESTRECHO).toBe(2);
+  });
+
+  it("el umbral está donde deja de caber lo fijo más «Más (N)»", () => {
+    expect(filasDeChips(ANCHO_FILA_ESTRECHA)).toBe(1);
+    expect(filasDeChips(ANCHO_FILA_ESTRECHA - 1)).toBe(2);
+    // Lo medido en el N1: los fijos más el chip del resto suman 437, así
+    // que el umbral tiene que estar por encima de eso.
+    const fijos = FIJOS.map(estimateChipWidth).reduce((a, b) => a + b, 0);
+    const conMas = fijos + estimateChipWidth("Más (8)") + 8 * 3;
+    expect(conMas).toBeGreaterThan(N1_FILA);
+    expect(ANCHO_FILA_ESTRECHA).toBeGreaterThan(conMas - 50);
+  });
+
+  it("en el N1 el chip que abre las ocho CABE, que antes era lo que fallaba", () => {
+    // Con UNA fila el reparto daba 0 visibles y aun así no cabía: el
+    // «Más (8)» se salía hasta x=453 en una fila de 328 y, con
+    // `overflow-hidden`, no había forma de tocarlo. Las ocho familias
+    // eran inalcanzables.
+    const unaFila = layoutChips(OCHO_DE_SIROPE, N1_FILA, FIJOS, 1);
+    expect(unaFila.visibleCount).toBe(0);
+    const anchoFijos = FIJOS.map(estimateChipWidth).reduce((a, b) => a + b, 0);
+    const conMas = anchoFijos + 8 * 3 + estimateChipWidth("Más (8)");
+    expect(conMas).toBeGreaterThan(N1_FILA); // 437 > 328: no cabe. Medido.
+
+    // Con DOS filas sí entra, que es lo que arregla el bloque: la puerta
+    // al sheet con las ocho está en pantalla y se puede tocar.
+    const dosFilas = layoutChips(OCHO_DE_SIROPE, N1_FILA, FIJOS);
+    expect(dosFilas.overflowCount).toBeGreaterThan(0);
+    expect(dosFilas.visibleCount + dosFilas.overflowCount).toBe(
+      OCHO_DE_SIROPE.length,
+    );
+    // Y lo pintado cabe de verdad en dos filas, contando el «Más (N)».
+    const anchos = [
+      ...FIJOS.map(estimateChipWidth),
+      ...OCHO_DE_SIROPE.slice(0, dosFilas.visibleCount).map(estimateChipWidth),
+      estimateChipWidth(`Más (${dosFilas.overflowCount})`),
+    ];
+    let filas = 1;
+    let usado = 0;
+    for (const w of anchos) {
+      const necesita = usado === 0 ? w : usado + 8 + w;
+      if (necesita <= N1_FILA) {
+        usado = necesita;
+      } else {
+        filas += 1;
+        usado = w;
+      }
+    }
+    expect(filas).toBeLessThanOrEqual(2);
+  });
+
+  it("ninguna familia se pierde por el camino, quepa lo que quepa", () => {
+    for (const ancho of [300, 328, 360, 420, 519, 520, 700, 840]) {
+      const l = layoutChips(OCHO_DE_SIROPE, ancho, FIJOS);
+      expect(l.visibleCount + l.overflowCount).toBe(OCHO_DE_SIROPE.length);
+    }
+  });
+});

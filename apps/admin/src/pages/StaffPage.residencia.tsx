@@ -60,9 +60,18 @@ interface CuidadoDelProfesional {
   zonas: ZonaAsignada[];
   alcance: "SIN_ROL" | "CENTRO" | "ZONA";
   /** residencia-3 · `null` = no tiene PIN de puerta. **El PIN no llega
-   *  aquí**: ni entero, ni parcial, ni su hash. Sólo si hay uno y desde
-   *  cuándo. */
-  pinDePuerta?: { desde: string } | null;
+   *  aquí**: ni entero, ni parcial, ni su hash. Sólo si hay uno, desde
+   *  cuándo, cuántas cifras tiene y si se quedó corto (residencia-6,
+   *  D-68). */
+  pinDePuerta?: {
+    desde: string;
+    largo?: number;
+    porRenovar?: boolean;
+  } | null;
+  /** residencia-6 (D-68) · cuántas cifras le tocan por su alcance de
+   *  ahora: 4 por zona, 6 si tiene algún rol que ve todo el centro. Lo
+   *  calcula la API para que la pantalla no vuelva a escribir la regla. */
+  largoDePinRequerido?: number;
 }
 
 const ALCANCE_FRASE: Record<CuidadoDelProfesional["alcance"], string> = {
@@ -358,6 +367,7 @@ export function CuidadoEditor({
         canEdit={canEdit}
         tienePin={cuidado.pinDePuerta ?? null}
         puedeTenerlo={vigentes.some((v) => v.rol.recordsCare)}
+        largoRequerido={cuidado.largoDePinRequerido ?? 4}
         onError={onError}
         onCambio={() => void recargar()}
       />
@@ -390,15 +400,18 @@ function PinDePuerta({
   canEdit,
   tienePin,
   puedeTenerlo,
+  largoRequerido,
   onError,
   onCambio,
 }: {
   userId: string;
   canEdit: boolean;
-  tienePin: { desde: string } | null;
+  tienePin: { desde: string; largo?: number; porRenovar?: boolean } | null;
   /** `false` = no tiene ningún rol de cuidado que REGISTRE, así que su PIN
    *  no abriría ninguna puerta. Se dice aquí, donde se arregla. */
   puedeTenerlo: boolean;
+  /** residencia-6 (D-68) · 4 o 6, según su alcance. */
+  largoRequerido: number;
   onError: (m: string | null) => void;
   onCambio: () => void;
 }) {
@@ -444,8 +457,30 @@ function PinDePuerta({
       <p className="mb-1.5 text-[13px] text-slate-500">PIN de la puerta</p>
       <p className="mb-2 text-[12.5px] text-slate-500">
         Con esto entra en la tablet de una habitación y firma lo que
-        registra. Es otro que el PIN del TPV.
+        registra. Es otro que el PIN del TPV.{" "}
+        {/* residencia-6 (D-68) · cuántas cifras le tocan, dicho ANTES de
+            que teclee. Decírselo después, con un 409, es hacerle teclear
+            dos veces. */}
+        {puedeTenerlo &&
+          (largoRequerido === 6
+            ? "Su rol ve todo el centro: el PIN tiene que ser de 6 cifras."
+            : "Son 4 cifras.")}
       </p>
+      {/* Y el aviso de lo que está mal AHORA MISMO: tiene PIN de 4 y un
+          rol que lo ve todo, así que ese PIN no le abre la puerta, ni la
+          sala, ni el móvil de guardia. En ámbar y no en rojo porque no es
+          un fallo del sistema: es una configuración a medio terminar, y
+          se arregla aquí mismo. */}
+      {tienePin?.porRenovar && (
+        <p
+          role="alert"
+          className="mb-2 rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800"
+        >
+          Su PIN es de {tienePin.largo ?? 4} cifras y su rol ve todo el
+          centro: <strong>está por renovar y ahora no entra en ningún
+          sitio</strong>. Ponle uno de 6 cifras.
+        </p>
+      )}
       {!puedeTenerlo ? (
         <p className="text-[13px] text-slate-400">
           Dale primero un rol de cuidado que registre: sin él, su PIN no
@@ -454,7 +489,7 @@ function PinDePuerta({
       ) : tienePin && !abierto ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13.5px] text-mipiace-ink">
-            Tiene PIN desde el{" "}
+            Tiene PIN de {tienePin.largo ?? 4} cifras desde el{" "}
             {new Date(tienePin.desde).toLocaleDateString("es-ES")}
           </span>
           {canEdit && (
@@ -478,13 +513,13 @@ function PinDePuerta({
             inputMode="numeric"
             autoComplete="off"
             maxLength={8}
-            placeholder="4 cifras"
+            placeholder={`${largoRequerido} cifras`}
             aria-label="PIN de la puerta"
             className="h-11 w-28 rounded-xl border border-slate-200 px-3 text-[13.5px] tabular-nums"
           />
           <OutlineButton
             onClick={() => void guardar()}
-            disabled={busy || pin.length < 4}
+            disabled={busy || pin.length < largoRequerido}
           >
             Guardar
           </OutlineButton>

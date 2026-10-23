@@ -1,8 +1,10 @@
 package es.mipiace.tpv;
 
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -32,6 +34,13 @@ public class MainActivity extends BridgeActivity {
         // no vale.
         rescatarWebViewSiCambioLaVersion();
 
+        // n1-vertical · la orientación. VA DESPUÉS del rescate de A4 (que no
+        // se toca) y ANTES de super.onCreate(), que es donde el bridge crea
+        // el WebView: si se pidiera después, el WebView mediría la pantalla
+        // en horizontal, el CSS repartiría con 360 px de alto y el giro
+        // posterior sería un reflow a la vista del cajero.
+        fijarOrientacionPorTamano();
+
         registerPlugin(UsbPrinterPlugin.class);
         // A2-Android · Frente 1 · permiso nativo de cámara para el escáner.
         registerPlugin(CameraPermissionPlugin.class);
@@ -51,6 +60,41 @@ public class MainActivity extends BridgeActivity {
         // `KitchenLanPlugin`, que tampoco abre un puerto al registrarse.
         registerPlugin(GuardiaAlarmPlugin.class);
         super.onCreate(savedInstanceState);
+    }
+
+    /**
+     * n1-vertical · única fuente de verdad de la orientación.
+     *
+     * <p>El atributo {@code android:screenOrientation} salió del manifiesto en
+     * este bloque: con los dos sitios, el manifiesto gana al arrancar y el
+     * código corrige después, lo que se ve como un giro en la cara del
+     * cajero — y además deja dos números que pueden separarse sin que nada se
+     * ponga rojo. La decisión vive en {@link OrientacionPorTamano}, que es lo
+     * que se prueba.
+     *
+     * <p>Envuelto en try/catch entero por el mismo motivo que el rescate de
+     * A4: esto corre en el camino crítico del arranque de una caja. Si algo
+     * falla se pide horizontal, que es como han funcionado los quince
+     * terminales de producción hasta hoy. Y si eso también falla, el arranque
+     * sigue: una caja sin TPV es peor que una caja torcida.
+     */
+    private void fijarOrientacionPorTamano() {
+        int orientacion = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+        try {
+            Configuration config = getResources().getConfiguration();
+            orientacion =
+                    OrientacionPorTamano.paraSmallestScreenWidthDp(config.smallestScreenWidthDp);
+            Log.i(TAG, "n1-vertical: "
+                    + OrientacionPorTamano.describir(config.smallestScreenWidthDp)
+                    + " -> orientacion " + orientacion);
+        } catch (Throwable t) {
+            Log.e(TAG, "n1-vertical: no pude medir la pantalla; me quedo en horizontal", t);
+        }
+        try {
+            setRequestedOrientation(orientacion);
+        } catch (Throwable t) {
+            Log.e(TAG, "n1-vertical: setRequestedOrientation falló; el arranque sigue", t);
+        }
     }
 
     /**

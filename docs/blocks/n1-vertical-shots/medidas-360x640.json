@@ -1,0 +1,322 @@
+{
+  "pin.360.desborde": {
+    "ventanaW": 360,
+    "scrollW": 360,
+    "clientW": 360,
+    "desbordaX": false,
+    "peores": []
+  },
+  "pin.360.teclado": {
+    "x": 20,
+    "y": 92,
+    "w": 320,
+    "h": 547,
+    "top": 92,
+    "bottom": 639,
+    "right": 340,
+    "ventana": {
+      "w": 360,
+      "h": 640
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "visible",
+    "scrollH": 545,
+    "clientH": 545,
+    "desplaza": false
+  },
+  "pin.360.tecla0": {
+    "y": 478,
+    "h": 56,
+    "bottom": 534,
+    "ventanaH": 640,
+    "dentroSinScroll": true
+  },
+  "pin.360.entrar": {
+    "y": 558,
+    "h": 56,
+    "bottom": 614,
+    "ventanaH": 640,
+    "dentroSinScroll": true
+  },
+  "pin.360.aviso": {
+    "x": 45,
+    "y": 280,
+    "w": 270,
+    "h": 59,
+    "top": 280,
+    "bottom": 339,
+    "right": 315,
+    "ventana": {
+      "w": 360,
+      "h": 640
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "visible",
+    "scrollH": 59,
+    "clientH": 59,
+    "desplaza": false
+  },
+  "pin.720x360.teclado": {
+    "x": 8,
+    "y": 92,
+    "w": 704,
+    "h": 220,
+    "top": 92,
+    "bottom": 312,
+    "right": 712,
+    "ventana": {
+      "w": 720,
+      "h": 360
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "visible",
+    "scrollH": 218,
+    "clientH": 218,
+    "desplaza": false
+  },
+  "pin.720x360.tecla0": {
+    "y": 255,
+    "bottom": 299,
+    "ventanaH": 360,
+    "dentroSinScroll": true
+  },
+  "pin.720x360.entrar": {
+    "y": 251,
+    "bottom": 299,
+    "ventanaH": 360,
+    "dentroSinScroll": true
+  },
+  "pin.720x360.aviso": {
+    "x": 241,
+    "y": 220,
+    "w": 458,
+    "h": 40,
+    "top": 220,
+    "bottom": 259,
+    "right": 699,
+    "ventana": {
+      "w": 720,
+      "h": 360
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "visible",
+    "scrollH": 40,
+    "clientH": 40,
+    "desplaza": false
+  },
+  "venta.barra": {
+    "x": 0,
+    "y": 575,
+    "w": 360,
+    "h": 65,
+    "top": 575,
+    "bottom": 640,
+    "right": 360,
+    "ventana": {
+      "w": 360,
+      "h": 640
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "visible",
+    "scrollH": 64,
+    "clientH": 64,
+    "desplaza": false
+  },
+  "venta.desborde": {
+    "ventanaW": 360,
+    "scrollW": 360,
+    "clientW": 360,
+    "desbordaX": false,
+    "peores": []
+  },
+  "venta.barra.conLinea": {
+    "x": 0,
+    "y": 575,
+    "w": 360,
+    "h": 65,
+    "top": 575,
+    "bottom": 640,
+    "right": 360,
+    "ventana": {
+      "w": 360,
+      "h": 640
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "visible",
+    "scrollH": 64,
+    "clientH": 64,
+    "desplaza": false
+  },
+  "ticket.dialogo": {
+    "x": 0,
+    "y": 253,
+    "w": 360,
+    "h": 387,
+    "top": 253,
+    "bottom": 640,
+    "right": 360,
+    "ventana": {
+      "w": 360,
+      "h": 640
+    },
+    "dentroSinScroll": true,
+    "visible": true,
+    "overflowY": "hidden",
+    "scrollH": 387,
+    "clientH": 387,
+    "desplaza": false
+  },
+  "cobro.desborde": {
+    "ventanaW": 360,
+    "scrollW": 360,
+    "clientW": 360,
+    "desbordaX": false,
+    "peores": []
+  },
+  "cobro.confirmar": {
+    "y": 560,
+    "bottom": 624,
+    "ventanaH": 640,
+    "dentroSinScroll": true,
+    "texto": "Cerrar servicio"
+  },
+  "menu.declaracion": {
+    "y": 354,
+    "bottom": 402,
+    "ventanaH": 640,
+    "dentroSinScroll": true,
+    "scroller": {
+      "overflowY": "auto",
+      "overscroll": "contain",
+      "scrollH": 506,
+      "clientH": 506,
+      "desplaza": false
+    }
+  },
+  "menu.declaracion.trasDesplazar": {
+    "y": 354,
+    "bottom": 402,
+    "ventanaH": 640,
+    "dentroSinScroll": true,
+    "loTapaOtro": false
+  },
+  "cerrarDia.desborde": {
+    "ventanaW": 360,
+    "scrollW": 360,
+    "clientW": 360,
+    "desbordaX": false,
+    "peores": []
+  },
+  "cerrarDia.boton": {
+    "falta": true
+  },
+  "tickets.desborde": {
+    "ventanaW": 360,
+    "scrollW": 360,
+    "clientW": 360,
+    "desbordaX": false,
+    "peores": [
+      {
+        "sel": "div.flex.items-center.gap-1.5",
+        "right": 818
+      },
+      {
+        "sel": "input.h-10.px-2.5.rounded-xl",
+        "right": 818
+      },
+      {
+        "sel": "label.text-[12.5px].text-slate-500.ml-1",
+        "right": 666
+      },
+      {
+        "sel": "input.h-10.px-2.5.rounded-xl",
+        "right": 623
+      },
+      {
+        "sel": "label.text-[12.5px].text-slate-500",
+        "right": 471
+      }
+    ]
+  },
+  "tickets.filaDesplaza": {
+    "overflowX": "auto",
+    "scrollW": 838,
+    "clientW": 360,
+    "desplazaX": true
+  },
+  "tickets.hasta": {
+    "x": 633,
+    "right": 666,
+    "ventanaW": 360,
+    "dentroSinScroll": false
+  },
+  "agenda.barraTicket": {
+    "falta": true
+  },
+  "agenda.desborde": {
+    "ventanaW": 360,
+    "scrollW": 360,
+    "clientW": 360,
+    "desbordaX": false,
+    "peores": [
+      {
+        "sel": "button.shrink-0.h-9.px-3",
+        "right": 456
+      },
+      {
+        "sel": "div.flex.min-w-max",
+        "right": 408
+      },
+      {
+        "sel": "div.w-44.md:w-52.shrink-0",
+        "right": 408
+      },
+      {
+        "sel": "div.sticky.top-0.z-10",
+        "right": 408
+      },
+      {
+        "sel": "div.relative",
+        "right": 408
+      }
+    ]
+  },
+  "nuevaCita.barraTicket": {
+    "falta": true
+  },
+  "nuevaCita.reservar": {
+    "y": 524,
+    "bottom": 572,
+    "ventanaH": 640,
+    "dentroSinScroll": true,
+    "loTapaOtro": false,
+    "tapadoPor": "button"
+  },
+  "menu.720x360": {
+    "antes": {
+      "y": 354,
+      "bottom": 402,
+      "dentroSinScroll": false
+    },
+    "scroller": {
+      "overflowY": "auto",
+      "overscroll": "contain",
+      "scrollH": 318,
+      "clientH": 226,
+      "desplaza": true
+    },
+    "despues": {
+      "y": 262,
+      "bottom": 310,
+      "ventanaH": 360,
+      "dentroSinScroll": true,
+      "loTapaOtro": false
+    }
+  }
+}
