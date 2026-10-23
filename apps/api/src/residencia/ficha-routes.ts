@@ -30,7 +30,13 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { diaDelTurno, turnoDe, utcToWallDate } from "@mipiacetpv/residencia-plan";
+import {
+  diaDelTurno,
+  largoDePinRequerido,
+  problemaDelPinNuevo,
+  turnoDe,
+  utcToWallDate,
+} from "@mipiacetpv/residencia-plan";
 
 import { getPrisma } from "../context.js";
 import {
@@ -720,13 +726,23 @@ export async function registerResidenciaFichaRoutes(
       const { pin } = request.body as { pin: string };
       const prisma = getPrisma();
 
+      const ahora = new Date();
       const persona = await prisma.user.findFirst({
         where: { id: userId, tenantId: auth.tenantId },
         select: {
           id: true,
           careRoleAssignments: {
             where: { revokedAt: null, careRole: { recordsCare: true } },
-            select: { id: true },
+            // residencia-6 (D-68) · la vigencia y el alcance, porque de
+            // ellos sale cuántas cifras le tocan. `fullScope` y no el
+            // `code` del rol: la regla es del ALCANCE, no de una lista de
+            // nombres de rol que un centro puede ampliar (D-50).
+            select: {
+              id: true,
+              fromAt: true,
+              toAt: true,
+              careRole: { select: { fullScope: true } },
+            },
           },
         },
       });
@@ -745,6 +761,26 @@ export async function registerResidenciaFichaRoutes(
           error: "SIN_ROL_DE_CUIDADO",
           message:
             "Dale primero un rol de cuidado que registre: sin él, su PIN no abriría ninguna puerta.",
+        });
+      }
+
+      // ── residencia-6 (D-68) · ¿LE TOCAN CUATRO CIFRAS O SEIS? ──────
+      //
+      // Se valida **al dar o cambiar el PIN**, que es donde se arregla:
+      // quien lo está poniendo tiene el teclado delante. Y se mira sobre
+      // los roles VIGENTES de ahora, no sobre todos: un rol de DUE
+      // revocado en junio no le obliga a seis cifras en octubre.
+      const rolesVivos = persona.careRoleAssignments
+        .filter((a) => a.fromAt <= ahora && (a.toAt == null || a.toAt > ahora))
+        .map((a) => ({ alcanceTotal: a.careRole.fullScope }));
+      const problema = problemaDelPinNuevo(pin, rolesVivos);
+      if (problema) {
+        return reply.code(409).send({
+          error: "PIN_DEMASIADO_CORTO",
+          message: problema,
+          // Lo que la pantalla necesita para pintar el hueco del largo
+          // bueno sin volver a deducir la regla.
+          largoRequerido: largoDePinRequerido(rolesVivos),
         });
       }
 
@@ -785,16 +821,20 @@ export async function registerResidenciaFichaRoutes(
           tenantId: auth.tenantId,
           pinHash: await hashPassword(pin),
           pinLookup: lookup,
+          // residencia-6 · el LARGO, que es lo único que se guarda de la
+          // forma del PIN. Ver la cabecera de `care_pins` en el esquema.
+          pinLength: pin.length,
           setByUserId: auth.userId,
         },
         update: {
           pinHash: await hashPassword(pin),
           pinLookup: lookup,
+          pinLength: pin.length,
           setByUserId: auth.userId,
           setAt: new Date(),
         },
       });
-      return reply.code(200).send({ tienePin: true });
+      return reply.code(200).send({ tienePin: true, largo: pin.length });
     },
   );
 

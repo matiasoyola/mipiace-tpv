@@ -110,6 +110,7 @@ export const NOMBRE_DE_LA_CLASE: Record<string, string> = {
   EXCEPCION_NUEVA: "Umbral propio nuevo",
   REGISTRO_SIN_TURNO: "Registro sin turno",
   AVISO_QUE_NO_SALIO: "Aviso que no salió a tiempo",
+  SIN_PLAN_DE_CUIDADOS: "Sin plan de cuidados",
 };
 
 /** Y de qué es un añadido tardío. En castellano, no el enum: la lección
@@ -296,6 +297,22 @@ export interface Panel {
       hechas: number;
     }>;
     noHechoDeTurnosCerrados: number;
+  };
+  /** residencia-6 · lo que está mal puesto y se arregla configurando:
+   *  PIN que se quedaron cortos (D-68) y residentes sin plan de cuidados
+   *  vigente (punto 4 del bloque). Opcional porque el panel de una API
+   *  anterior a este bloque no lo trae. */
+  porArreglar?: {
+    pinesPorRenovar: Array<{
+      userId: string;
+      nombre: string;
+      roles: string[];
+    }>;
+    residentesSinPlan: Array<{
+      clientId: string;
+      nombre: string;
+      habitacion: string | null;
+    }>;
   };
   indicadores: ValorDeIndicador[];
   mes: string;

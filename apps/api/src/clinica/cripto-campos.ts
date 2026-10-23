@@ -51,6 +51,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   NoSeDescifra,
+  SinClaveDeLaClinica,
   cifrarValor,
   descifrarValor,
   esCifrado,
@@ -470,7 +471,7 @@ export function leerTexto(
 ): string | null {
   if (fila.cifrado == null || !esCifrado(fila.cifrado)) return fila.claro;
   if (dek == null) {
-    avisar(sitio, new NoSeDescifra("sin clave para esta clínica"));
+    avisar(sitio, new SinClaveDeLaClinica("sin clave para esta clínica"));
     return TEXTO_ILEGIBLE;
   }
   try {
@@ -496,7 +497,7 @@ export function leerJson(
 ): unknown {
   if (fila.cifrado == null || !esCifrado(fila.cifrado)) return fila.claro;
   if (dek == null) {
-    avisar(sitio, new NoSeDescifra("sin clave para esta clínica"));
+    avisar(sitio, new SinClaveDeLaClinica("sin clave para esta clínica"));
     return CUERPO_ILEGIBLE;
   }
   try {
@@ -645,7 +646,7 @@ export function leerCorreccion(
     return { preguntaId: fila.questionId, valor: fila.value };
   }
   if (dek == null) {
-    avisar(sitio, new NoSeDescifra("sin clave para esta clínica"));
+    avisar(sitio, new SinClaveDeLaClinica("sin clave para esta clínica"));
     return null;
   }
   try {

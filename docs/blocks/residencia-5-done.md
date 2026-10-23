@@ -772,6 +772,12 @@ nueve que entran marcadas «por verificar».
 La v1 está completa (D-39): la habitación y el panel de dirección. Esto es **todo lo que los cinco
 bloques dejaron pendiente**, en una sola lista y en el orden en que hay que atacarlo.
 
+> **Actualizado el 19-10-2026, tras residencia-6.** Ese bloque cerró los puntos **11, 13, 14, 15, 18
+> y 20**; el **12** lo cerró D-69 (`control_code` se queda en claro y deja de ser deuda). Lo cerrado
+> se marca ✅ con una línea de qué se hizo, y lo que ese bloque dejó abierto detrás está en
+> `residencia-6-done.md` §11. **Lo que sigue pendiente es todo A y todo B** —lo que hay que ver con
+> el hierro y con el turno delante— más los puntos 16, 17, 19 y 21 de C.
+
 ### A · Lo que hay que comprobar con el hierro delante, antes de encender un centro
 
 1. **¿SUENA de verdad el móvil de guardia?** Pantalla apagada, app en segundo plano, se lanza un N2 y
@@ -807,29 +813,47 @@ bloques dejaron pendiente**, en una sola lista y en el orden en que hay que atac
 
 ### C · Deudas de código anotadas, por orden de lo que cuesta que pasen
 
-11. **`configurarAvisoDeIlegible` no lo llama nadie.** Un valor cifrado que no se descifra sale como
-    hueco en pantalla y **no deja rastro en el log**. Deuda de clinica-7 que residencia-1b y
-    residencia-3 ya anotaron; ahora hay **veinticuatro** columnas que pueden salir así. Cada bloque
-    que pasa la hace más cara.
-12. **`control_code` sigue en claro** y dice qué se le controla a un residente (residencia-1b §2). Es
-    la decisión con más peso que la residencia NO ha tomado.
-13. **El PIN de cuatro cifras.** Una tablet robada permite aprender los PIN de la plantilla probando
-    diez mil combinaciones contra el roster cacheado. Es la misma exposición que el TPV acepta y
-    documenta, y lo que lo cerraría de verdad es que el PIN dejara de ser de cuatro cifras — decisión
-    de producto que el mockup no toma (residencia-3 §15.2).
-14. **Sin red, «lo que toca» sale todo como por hacer** en la puerta: la tablet no sabe qué registró
-    otra pantalla (residencia-3 §15.3).
-15. **Ficheros huérfanos en el volumen**: las fotos de residente al cambiarlas (residencia-3 §15.5) y
-    ahora las evidencias de una obligación corregida (§16.5). Hace falta un script de barrido.
+11. ✅ **CERRADO en residencia-6 §2.** `configurarAvisoDeIlegible` está cableado: cada valor que no
+    se descifra escribe UNA línea por fila y por cuarto de hora con tenant, tabla, columna, id de
+    fila, la ruta desde la que se leía y el motivo —de un vocabulario cerrado de cuatro—. Nunca el
+    valor, el ciphertext, la clave ni el mensaje del error: el `SyntaxError` de un `JSON.parse`
+    fallido **cita los diez primeros caracteres del claro**, y ése era el único camino por el que un
+    dato de salud llegaba al log. Un test recorre las veinticuatro columnas.
+12. ✅ **DECIDIDO: D-69.** `care_plan_items.control_code` se queda en claro y deja de anotarse como
+    deuda. Quien tiene acceso a la base ya ve en claro fechas, turnos y residentes; cifrarlo exige
+    índices ciegos y sacar los indicadores de SQL sin ganar protección real.
+13. ✅ **CERRADO en residencia-6 §1 (D-68).** Cuatro cifras para quien tiene alcance por zona, seis
+    para quien tiene algún rol de alcance total. Se valida al darlo, y a quien pasa a verlo todo con
+    un PIN de cuatro le queda **por renovar**: no entra en la puerta, ni en la sala, ni en el móvil
+    de guardia. Al roster de la tablet viaja un booleano, no el número de cifras. **Lo que no se
+    puede cerrar y queda dicho**: un `UPDATE care_pins SET pin_length = 6` a mano deja entrar con
+    cuatro — el PIN es irreversible, así que lo sostiene la ruta. Y queda una duda abierta: una
+    auxiliar con zona «todo el centro» (sin rol de alcance total) sigue con cuatro cifras
+    (residencia-6 §11.1).
+14. ✅ **CERRADO A MEDIAS, y la mitad que queda es la que no se puede resolver.** residencia-6 §3: lo
+    que la propia tablet apuntó se pinta hecho, con su marca «· en la tablet», y sobrevive a cerrar
+    la sesión y a reabrir la app (almacén propio, podado a dos días del centro). **Lo registrado
+    desde OTRA tablet sin red sigue sin poderse saber, y ahora la pantalla lo dice** en vez de
+    callárselo — callárselo es afirmar que no se hizo.
+15. ✅ **CERRADO en residencia-6 §5.** `pnpm --filter api barrer-huerfanos`: recorre las seis clases
+    de fichero y las cruza con sus seis columnas sobre todos los tenants. Por defecto **sólo lista**;
+    con `--borrar` borra, y nunca toca un fichero referenciado ni uno más reciente que el margen (60
+    min, por el hueco entre escribir el binario y escribir la fila). El resumen del log lleva
+    recuentos, nunca rutas. **Sigue siendo manual**: no hay tarea programada (residencia-6 §11.5).
 16. **Dos móviles en el mismo canal de guardia**: el modelo lo permite, los dos suenan y el acuse es
     uno (residencia-4 §16.2).
 17. **El N0 en el libro**: una avería sin riesgo nace cerrada y aparece en «Cerradas». Si el libro se
     llena de N0 habrá que decidir si siguen siendo incidencias (residencia-4 §16.6).
-18. **El parte de un turno sin plan sale enorme de «no hecho»** (§16.4 de este bloque).
+18. ✅ **CERRADO en residencia-6 §4.** Un residente sin plan vigente no genera ni una línea de «no
+    hecho» —no hay nada que incumplir— y por eso era invisible: salía perfecto en los indicadores.
+    Ahora el parte lo dice **una vez por zona**, con sus nombres y con la consecuencia («no sale nada
+    en su puerta»), y el panel lo enseña en «Lo que hay que arreglar». Lo que §16.4 describe de
+    verdad —un turno CON plan en que no se registró nada da cincuenta líneas rojas— **sigue
+    abierto**: eso es agrupar («14 de 18 cuidados sin registrar») y se decide viendo un parte real
+    en el piloto.
 19. **Un control o un rol de serie nuevo no se distribuye solo** a los centros ya encendidos: hace
     falta un script el día que haya cinco centros (residencia-1 §11.4, residencia-2 §12.2).
-20. **El enlace «Declaración responsable» del pie del admin mide 34 px.** Viene de otro bloque y lo
-    arrastran residencia-4 y éste.
+20. ✅ **CERRADO en residencia-6 §6.** `min-h-touch` (48 px), el peldaño que ya existía.
 21. **El coste de la pasada del relevo con muchos centros** (§16.7).
 
 ### D · Lo que NO es deuda: está decidido que no entra en la v1

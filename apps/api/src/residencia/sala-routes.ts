@@ -44,9 +44,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
+  FRASE_PIN_POR_RENOVAR,
   alcanceDe,
   diaDelTurno,
   estaConfirmado,
+  pinPorRenovar,
   recortarAlAlcance,
   turnoDe,
   zonasSinConfirmar,
@@ -357,6 +359,9 @@ export async function registerResidenciaSalaRoutes(
           select: {
             userId: true,
             pinLookup: true,
+            // residencia-6 (D-68) · para el `porRenovar` que viaja. El
+            // largo no sale de aquí, igual que en la puerta.
+            pinLength: true,
             user: {
               select: {
                 id: true,
@@ -425,22 +430,31 @@ export async function registerResidenciaSalaRoutes(
         centro: { id: ctx.tenantId, nombre: tenant.name },
         device: { id: ctx.deviceId, name: ctx.deviceName },
         turnos,
-        roster: pins.map((p) => ({
-          userId: p.userId,
-          nombre: nombreCorto(p.user),
-          pinLookup: p.pinLookup,
-          roles: p.user.careRoleAssignments
-            .filter((a) => a.fromAt <= ahora && (a.toAt == null || a.toAt > ahora))
-            .map((a) => ({
+        roster: pins.map((p) => {
+          const vivos = p.user.careRoleAssignments.filter(
+            (a) => a.fromAt <= ahora && (a.toAt == null || a.toAt > ahora),
+          );
+          return {
+            userId: p.userId,
+            nombre: nombreCorto(p.user),
+            pinLookup: p.pinLookup,
+            // residencia-6 (D-68) · lo mismo que en la puerta y por lo
+            // mismo: el booleano viaja, el número de cifras no.
+            porRenovar: pinPorRenovar({
+              largoDelPin: p.pinLength,
+              roles: vivos.map((a) => ({ alcanceTotal: a.careRole.fullScope })),
+            }),
+            roles: vivos.map((a) => ({
               assignmentId: a.id,
               code: a.careRole.code,
               name: a.careRole.name,
               alcanceTotal: a.careRole.fullScope,
             })),
-          // Las zonas vigentes. `null` dentro de la lista = «todo el
-          // centro», que es la segunda forma de tener alcance total.
-          zonas: p.user.careZoneAssignments.map((z) => z.floorId),
-        })),
+            // Las zonas vigentes. `null` dentro de la lista = «todo el
+            // centro», que es la segunda forma de tener alcance total.
+            zonas: p.user.careZoneAssignments.map((z) => z.floorId),
+          };
+        }),
         pinSubclave: subclave,
         relevo,
         minutosSinTocar: MINUTOS_SIN_TOCAR_EN_LA_SALA,
@@ -515,6 +529,18 @@ export async function registerResidenciaSalaRoutes(
           error: "PIN_INCORRECTO",
           message: "Ese PIN no es correcto.",
           attemptsRemaining: estado.attemptsRemaining,
+        });
+      }
+      // residencia-6 (D-68) · el PIN es bueno y **se quedó corto**: tiene
+      // cuatro cifras y esta persona ha pasado a tener un rol que ve todo
+      // el centro. No cuenta como intento fallido —el PIN es el suyo— y
+      // la frase es la MISMA que en la puerta y en la sala, porque quien
+      // la lee está de pie y tiene que saber a dónde ir.
+      if (!res.ok && res.motivo === "POR_RENOVAR") {
+        await reset(limite);
+        return reply.code(403).send({
+          error: "PIN_POR_RENOVAR",
+          message: FRASE_PIN_POR_RENOVAR,
         });
       }
       if (!res.ok) {

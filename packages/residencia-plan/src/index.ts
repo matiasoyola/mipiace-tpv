@@ -27,6 +27,10 @@
 //     dirección, con el fin de mes y el 29 de febrero dentro.
 //   · `indicadores.ts` — residencia-5: la FÓRMULA de cada indicador de
 //     AENOR (el umbral es del centro, rama de controles §10).
+//   · `pin-por-alcance.ts` — residencia-6 (D-68): cuántas cifras tiene
+//     que tener un PIN de cuidado según el alcance de sus roles, y
+//     cuándo el que tiene puesto se quedó corto. La ejecutan la puerta
+//     SIN RED, la sala, el móvil de guardia y el admin.
 //   · `gravedad.ts`   — residencia-4: `gravedadDe`, la función que
 //     convierte una constante o un evento en un nivel N0-N4. La ejecutan
 //     la tablet (al instante y sin red) y el servidor (que es el que
@@ -128,3 +132,14 @@ export {
   type AlcanceDeUnAcuse,
   type ZonaDelAcuse,
 } from "./relevo-confirmacion.js";
+
+export {
+  FRASE_PIN_POR_RENOVAR,
+  LARGO_DE_ALCANCE_TOTAL,
+  LARGO_MAXIMO,
+  LARGO_POR_ZONA,
+  largoDePinRequerido,
+  pinPorRenovar,
+  problemaDelPinNuevo,
+  type RolParaElPin,
+} from "./pin-por-alcance.js";

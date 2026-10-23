@@ -659,12 +659,26 @@ function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
 // así que la ve el OWNER y el MANAGER de cualquier comercio, use Holded o
 // no. Es también la razón de que NO esté en NAV_ITEMS: allí toda entrada
 // pasa por el filtro de capabilities.
+//
+// ── residencia-6 · Y MIDE 48 px DE ALTO, NO 34 ──────────────────────
+//
+// `py-2` sobre un texto de 12 px daban **34 px**: por debajo del mínimo
+// táctil de la casa y de los 44 px de la WCAG. Lo arrastraban tres
+// bloques (lo anotaron residencia-4 y residencia-5 §19.20) porque en el
+// escritorio se pulsa con el ratón y nadie lo notaba; en la tablet de
+// 1280×800 con la que se configura un centro, sí.
+//
+// `min-h-touch` (48 px, el primer peldaño de la escala de
+// `docs/design/tokens.md` §4) y no un `py-3` a ojo: el peldaño ya existe
+// y un número suelto aquí sería un cuarto tamaño táctil en la casa. El
+// `py-2` se queda porque con `min-h` ya no decide la altura — centra el
+// contenido cuando el texto parte en dos líneas a 320 px.
 function DeclaracionFooterLink({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <Link
       to="/admin/declaracion-responsable"
       onClick={onNavigate}
-      className="flex items-center gap-2 px-4 py-2 text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium"
+      className="flex min-h-touch items-center gap-2 px-4 py-2 text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium"
     >
       <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={2.1} />
       <span>Declaración responsable</span>

@@ -100,7 +100,21 @@ const PARTE: ParteDeRelevo = {
           ],
         },
       ],
-      sueltas: [],
+      // residencia-6 · la línea de «sin plan de cuidados» va en las
+      // SUELTAS de la zona del residente, no colgando de él: colgada de
+      // cada uno serían N líneas, que es lo que se viene a quitar.
+      sueltas: [
+        {
+          clase: "SIN_PLAN_DE_CUIDADOS",
+          texto:
+            "1 residente sin plan de cuidados: Luis Núñez (112). No les toca nada, así que no sale nada en su puerta.",
+          hora: null,
+          nivel: null,
+          incidentId: null,
+          careRecordId: null,
+          aviso: null,
+        },
+      ],
     },
     {
       floorId: null,
@@ -348,6 +362,29 @@ describe("el parte en la sala", () => {
     expect(texto).toContain(NOMBRE_DE_LA_CLASE.NO_HECHO);
     expect(texto).not.toContain("INCIDENCIA_NUEVA");
     expect(texto).not.toContain("NO_HECHO");
+  });
+
+  it("residencia-6 · los residentes SIN PLAN salen una vez, en su zona", async () => {
+    await pintar(
+      <SalaParte
+        parte={PARTE}
+        tardios={[]}
+        acuses={[]}
+        confirmado={false}
+        yaConfirmado={false}
+        quien={QUIEN}
+        onConfirmar={() => {}}
+        onTerminar={() => {}}
+      />,
+    );
+    const texto = container.textContent ?? "";
+    expect(texto).toContain(NOMBRE_DE_LA_CLASE.SIN_PLAN_DE_CUIDADOS);
+    expect(texto).toContain("1 residente sin plan de cuidados: Luis Núñez (112)");
+    // Y el rótulo de lo suelto depende de la ZONA: «Del centro, sin
+    // residente» es verdad abajo y mentira en una planta. Lo encontró el
+    // bucle visual al fotografiar el parte.
+    expect(texto).toContain("De la planta, sin residente concreto");
+    expect(texto).toContain("Del centro, sin residente");
   });
 
   it("dice quién cogió el aviso, y cuando nadie lo cogió lo dice también", async () => {

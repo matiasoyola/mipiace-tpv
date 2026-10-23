@@ -98,6 +98,11 @@ export interface PersonaDelRoster {
   }>;
   /** Las plantas vigentes. `null` dentro de la lista = «todo el centro». */
   zonas: Array<string | null>;
+  /** residencia-6 (D-68) · `true` = su PIN se quedó corto para lo que ve
+   *  y no abre nada hasta que dirección se lo renueve. Lo calcula el
+   *  servidor; el número de cifras no viaja. Opcional: una caché de antes
+   *  del bloque no lo trae. */
+  porRenovar?: boolean;
 }
 
 export interface SalaArranque {
