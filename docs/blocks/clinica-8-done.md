@@ -781,9 +781,25 @@ Va **DESPUÉS** de las preguntas de los pendientes y no antes, porque esas
 respuestas también se firman: un resumen anterior a las preguntas sería el
 resumen de otra cosa.
 
-### 9.13 · La sesión: diabetes, primera visita y el «10»
+### 9.13 · La sesión: el tipo de la cita, diabetes, primera visita y el «10»
 
-**a) Con diabetes se RECOMIENDA «Pie de riesgo», no se marca.** Un pie
+**a) El tipo de visita de la cita viene marcado — y ya venía.** «La sesión no
+preselecciona el tipo de visita de la cita» (punto 14 de la auditoría), y sin
+embargo el mecanismo existe desde clinica-5: `tiposSugeridos` son los tipos de
+los servicios reservados y la pantalla abre con ellos marcados.
+
+Lo que estaba roto era **el dato**: el catálogo de la «Clínica demo» no tenía
+las marcas de clínica, así que los servicios de la cita no tenían tipo,
+`tiposSugeridos` llegaba **vacío** y no había nada que preseleccionar. Eso lo
+arregló la **fase A** (§1.3, las cuatro columnas del CSV).
+
+Así que en la fase B lo que hacía falta no era código: era **fijarlo en la
+pantalla**. La API ya tenía su test (`clinica-sesion-rutas`); ahora hay cuatro
+más que dicen que la pantalla abre con uno marcado, con dos marcados, que lo
+marcado viaja en el cierre sin tocar nada, y que **con los servicios sin tipo
+no se inventa ninguno** — que es la decisión de clinica-5 y sigue en pie.
+
+**b) Con diabetes se RECOMIENDA «Pie de riesgo», no se marca.** Un pie
 diabético se explora distinto —monofilamento, pulsos, sensibilidad— y la
 tarjeta que hace esas tres preguntas es la de «Pie de riesgo». La
 recomendación sale de la MISMA alerta que la franja roja de arriba
@@ -797,14 +813,14 @@ exactamente lo que `tiposSugeridos` se negó a hacer en clinica-5 («sugerir
 uno por defecto sería escribir el tipo que no se eligió»). Así que se dice,
 se dice **por qué**, y se marca de un toque.
 
-**b) En la primera visita no se pregunta «Desde la última visita».** No es
+**c) En la primera visita no se pregunta «Desde la última visita».** No es
 cosmética: las opciones son «mejor / igual / peor» y en una primera visita las
 tres son falsas. Contestada, quedaría escrita en el cuerpo y mañana la
 historia viva pintaría una evolución respecto de una visita que no existe. El
 criterio es el mismo que ya usaba «↺ Igual que la última vez»: `hayAnterior`.
 Un solo dato, dos controles, y no pueden contradecirse.
 
-**c) El «10» del dolor, en la misma fila.** Era `flex-wrap` con `min-w-touch`
+**d) El «10» del dolor, en la misma fila.** Era `flex-wrap` con `min-w-touch`
 (48 px) y `gap-1` (4): once teclas necesitan **11×48 + 10×4 = 568 px** de
 ancho de contenido para caber en una fila. Esa tarjeta vive en la columna
 derecha de la rejilla de dos columnas, que a 1024 mide 424 px menos los 40 de
@@ -1488,6 +1504,30 @@ cayeron `move-to-table` y `h1-holded-mas-tarde`, y los dos pasan solos y en la
 siguiente corrida entera: es la caída bajo carga que la fase A ya anotó con
 `cashier-login`.
 
+### 14.1.b · Dos sesiones en un mismo worktree
+
+Mientras se cerraba el bloque, **otra sesión estaba escribiendo en este mismo
+árbol**. Sus cambios —el motivo «no es una consulta clínica» de la ficha del
+tenant y el tipado del mapa— se los llevó mi `git add -A` repartidos entre dos
+commits, y **el `import type { CheckRequirement }` se quedó fuera**.
+
+Resultado: `tsc` pasaba en el portátil (el import estaba en el árbol, sin
+commitear) y la CI del PR se puso roja con
+`TenantDetailPage.tsx(1420,40): error TS2304: Cannot find name
+'CheckRequirement'`. Es la misma familia que «el .env de la raíz tapa la CI»:
+**lo que compila no es tu árbol, es tu commit**.
+
+Lo avisó la otra sesión antes de que yo lo viera en la CI, y su cambio se
+queda porque es mejor que el mío: `Record<Exclude<CheckRequirement,
+"always">, string>` en vez de `Record<string, string>` hace que **un requisito
+nuevo sin motivo no compile**. Con el tipo abierto, `clinicaDePodologia`
+habría salido «No aplica» a secas y nada habría avisado.
+
+La regla de la casa —un árbol, un escritor— sigue valiendo; lo que esto añade
+es qué hacer cuando ya ha pasado: mirar el árbol ANTES de dar por buena una
+pasada de `tsc`, y comprobar el typecheck contra **HEAD** y no contra lo que
+hay delante.
+
 ### 14.2 · Y lo que encontró la CI: EL CHECK DE LA FASE A BLOQUEABA TODAS LAS RESIDENCIAS
 
 Este es el hallazgo más importante del final del bloque, y no lo encontró
@@ -1676,7 +1716,7 @@ Entre paréntesis, el punto del bloque que cada paso prueba.
   de producción.
 - **El bucle visual.** No lo pide el prompt y no se ha corrido. Las dos
   afirmaciones de layout del bloque —la rejilla del dolor y las tres líneas de
-  la tarjeta— están sostenidas por **aritmética escrita** (§9.13c y §9.19b) y
+  la tarjeta— están sostenidas por **aritmética escrita** (§9.13d y §9.19b) y
   por test de las clases, no por una captura. El banco visual del TPV existe
   (`apps/tpv-web/visual/`) y añadir estas dos pantallas cuesta minutos si
   Dirección lo quiere antes de la pasada en hierro.
