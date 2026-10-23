@@ -1,0 +1,107 @@
+{
+  "comanda-6-lineas-n1": {
+    "innerWidth": 360,
+    "hojaAbierta": true,
+    "totalLineas": 12,
+    "chipsEspera": 6,
+    "filaDeAcciones": {
+      "top": -385,
+      "alto": 68
+    },
+    "nombres": [
+      {
+        "texto": "Café Americano",
+        "cabeALoAncho": true,
+        "anchoCaja": 217,
+        "anchoTexto": 217,
+        "renglones": 1
+      },
+      {
+        "texto": "Café Solo",
+        "cabeALoAncho": true,
+        "anchoCaja": 218,
+        "anchoTexto": 218,
+        "renglones": 1
+      },
+      {
+        "texto": "Café con leche",
+        "cabeALoAncho": true,
+        "anchoCaja": 217,
+        "anchoTexto": 217,
+        "renglones": 1
+      },
+      {
+        "texto": "Cortado",
+        "cabeALoAncho": true,
+        "anchoCaja": 210,
+        "anchoTexto": 210,
+        "renglones": 1
+      },
+      {
+        "texto": "Café bombón",
+        "cabeALoAncho": true,
+        "anchoCaja": 209,
+        "anchoTexto": 209,
+        "renglones": 1
+      },
+      {
+        "texto": "Carajillo",
+        "cabeALoAncho": true,
+        "anchoCaja": 211,
+        "anchoTexto": 211,
+        "renglones": 1
+      },
+      {
+        "texto": "Café Americano",
+        "cabeALoAncho": false,
+        "anchoCaja": 76,
+        "anchoTexto": 121,
+        "renglones": 2
+      },
+      {
+        "texto": "Café Solo",
+        "cabeALoAncho": true,
+        "anchoCaja": 76,
+        "anchoTexto": 76,
+        "renglones": 2
+      },
+      {
+        "texto": "Café con leche",
+        "cabeALoAncho": true,
+        "anchoCaja": 76,
+        "anchoTexto": 76,
+        "renglones": 2
+      },
+      {
+        "texto": "Cortado",
+        "cabeALoAncho": false,
+        "anchoCaja": 76,
+        "anchoTexto": 92,
+        "renglones": 1
+      },
+      {
+        "texto": "Café bombón",
+        "cabeALoAncho": false,
+        "anchoCaja": 76,
+        "anchoTexto": 93,
+        "renglones": 2
+      },
+      {
+        "texto": "Carajillo",
+        "cabeALoAncho": false,
+        "anchoCaja": 76,
+        "anchoTexto": 90,
+        "renglones": 1
+      }
+    ],
+    "esperaDeLaUltima": {
+      "rect": {
+        "top": 432,
+        "bottom": 472
+      },
+      "dentroDeLaVentana": true,
+      "devuelve": "EL PROPIO ESPERA"
+    }
+  },
+  "error": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /tickets/i }).first()\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" title=\"Tickets pasados\" aria-label=\"Tickets pasados\" data-chrome-action=\"tickets\" class=\"shrink-0 rounded-[14px] flex flex"
+}

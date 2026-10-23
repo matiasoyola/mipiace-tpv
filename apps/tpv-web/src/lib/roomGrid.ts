@@ -187,19 +187,28 @@ export const ROOM_SIDE_PADDING_DARK = 20;
  * de 80 px. Esos 108 px recuperados son los que permiten que la mesa
  * crezca de 19.824 a 20.736 px² sin que la sala empiece a desplazar.
  */
-export function roomAvailableHeightDark(viewportHeight: number): number {
+export function roomAvailableHeightDark(
+  viewportHeight: number,
+  // n1-hosteleria · en la mano la cabecera son DOS filas (112 px, no
+  // 80). El reparto por defecto es el del terminal, así que los quince
+  // terminales en producción no notan este parámetro.
+  reparto: RepartoDeSala = REPARTO_TERMINAL,
+): number {
   return Math.max(
     0,
     viewportHeight -
-      ROOM_HEADER_DARK -
-      ROOM_TOP_PADDING_DARK -
-      ROOM_LEGEND_DARK,
+      reparto.headerHeight -
+      reparto.topPadding -
+      reparto.legendHeight,
   );
 }
 
 /** Ancho disponible para el lienzo en la sala oscura. */
-export function roomAvailableWidthDark(viewportWidth: number): number {
-  return Math.max(0, viewportWidth - 2 * ROOM_SIDE_PADDING_DARK);
+export function roomAvailableWidthDark(
+  viewportWidth: number,
+  reparto: RepartoDeSala = REPARTO_TERMINAL,
+): number {
+  return Math.max(0, viewportWidth - 2 * reparto.sidePadding);
 }
 
 /**
@@ -216,14 +225,16 @@ export function roomFitsWithoutScrollDark(
   viewportWidth: number,
   viewportHeight: number,
   cardSize: number = TABLE_SHAPE_SIZE,
+  reparto: RepartoDeSala = REPARTO_TERMINAL,
 ): boolean {
   return (
     roomCanvasHeight(
       zones,
-      roomAvailableWidthDark(viewportWidth),
+      roomAvailableWidthDark(viewportWidth, reparto),
       cardSize,
       cardSize,
-    ) <= roomAvailableHeightDark(viewportHeight)
+      reparto.zonePadding,
+    ) <= roomAvailableHeightDark(viewportHeight, reparto)
   );
 }
 
@@ -304,9 +315,13 @@ export function zoneOuterWidth(
   columns: number,
   cardWidth: number = TABLE_SHAPE_SIZE,
   gap: number = ROOM_GRID_GAP,
+  // n1-hosteleria · el relleno del marco entra por parámetro porque en
+  // un aparato de mano vale 12 y no 18 (`ZONE_PADDING_MANO`). El valor
+  // por defecto es el de siempre, así que el terminal no se mueve.
+  zonePadding: number = ZONE_PADDING,
 ): number {
-  if (columns <= 0) return 2 * ZONE_PADDING;
-  return columns * cardWidth + (columns - 1) * gap + 2 * ZONE_PADDING;
+  if (columns <= 0) return 2 * zonePadding;
+  return columns * cardWidth + (columns - 1) * gap + 2 * zonePadding;
 }
 
 export interface RoomZone {
@@ -331,9 +346,11 @@ export function roomCanvasHeight(
   availableWidth: number,
   cardWidth: number = TABLE_SHAPE_SIZE,
   cardHeight: number = TABLE_SHAPE_SIZE,
+  // n1-hosteleria · ver la nota de `zoneOuterWidth`.
+  zonePadding: number = ZONE_PADDING,
 ): number {
   const maxColumns = roomColumnsFor(
-    availableWidth - 2 * ZONE_PADDING,
+    availableWidth - 2 * zonePadding,
     cardWidth,
   );
   let total = 0;
@@ -351,10 +368,10 @@ export function roomCanvasHeight(
 
   for (const zone of zones) {
     const columns = Math.max(1, Math.min(zone.tables, maxColumns));
-    const width = zoneOuterWidth(columns, cardWidth);
+    const width = zoneOuterWidth(columns, cardWidth, ROOM_GRID_GAP, zonePadding);
     const rows = Math.max(1, Math.ceil(zone.tables / columns));
     const height =
-      2 * ZONE_PADDING +
+      2 * zonePadding +
       ZONE_BORDER +
       rows * cardHeight +
       (rows - 1) * ROOM_GRID_GAP +
@@ -481,14 +498,24 @@ export function tamanoDeMesaPara(
   zones: RoomZone[],
   viewportWidth: number,
   viewportHeight: number,
+  // n1-hosteleria · el suelo y el techo salen del reparto: en la mano
+  // son 88 y 144 (ver `TABLE_SHAPE_MIN_MANO`), en el terminal los 120 y
+  // 200 de auditoria-sirope (#13), que es el valor por defecto.
+  reparto: RepartoDeSala = REPARTO_TERMINAL,
 ): number {
   if (zones.length === 0) return TABLE_SHAPE_SIZE;
-  for (let s = TABLE_SHAPE_MAX; s >= TABLE_SHAPE_MIN; s -= PASO_TAMANO) {
-    if (roomFitsWithoutScrollDark(zones, viewportWidth, viewportHeight, s)) {
+  for (
+    let s = reparto.tableMax;
+    s >= reparto.tableMin;
+    s -= PASO_TAMANO
+  ) {
+    if (
+      roomFitsWithoutScrollDark(zones, viewportWidth, viewportHeight, s, reparto)
+    ) {
       return s;
     }
   }
-  return TABLE_SHAPE_MIN;
+  return reparto.tableMin;
 }
 
 /**
@@ -516,4 +543,193 @@ export function huecoALaDerecha(
     masAncho = Math.max(masAncho, zoneOuterWidth(columnas, cardSize));
   }
   return Math.max(0, disponible - masAncho);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// n1-hosteleria · EL REPARTO DE LA SALA, EN DOS JUEGOS Y NI UNO MÁS
+//
+// Todo lo que cambia en un aparato de mano vive aquí, junto, y se elige
+// con UN booleano que sale de `useAparatoDeMano` (umbral único,
+// `lib/aparatoDeMano.ts`). Antes de esto las pantallas mezclaban
+// constantes del módulo con `sm:` del CSS; cualquier número nuevo era
+// una tercera forma de decidir lo mismo.
+//
+// La restricción del bloque se cumple por construcción: `REPARTO_MANO`
+// sólo se usa por debajo del umbral, y `REPARTO_TERMINAL` toma sus
+// valores de las constantes de siempre, así que el AP11, el AP13 y el D8
+// no pueden moverse ni un píxel sin cambiar aquellas.
+// ──────────────────────────────────────────────────────────────────────
+
+export interface RepartoDeSala {
+  /** `px-5` / `px-4` del lienzo, a cada lado. */
+  sidePadding: number;
+  /** `pt-6` del lienzo. */
+  topPadding: number;
+  /** Alto de la cabecera (una fila en el terminal, DOS en la mano). */
+  headerHeight: number;
+  /** La leyenda al pie más su separación. */
+  legendHeight: number;
+  /** El `p-[18px]` del marco de zona, a cada lado. */
+  zonePadding: number;
+  /** Suelo y techo del lado de mesa que elige `tamanoDeMesaPara`. */
+  tableMin: number;
+  tableMax: number;
+  /** Tamaño y posición del importe dentro de la forma. */
+  amountFontPx: number;
+  amountOffsetPx: number;
+}
+
+/** Lo de siempre: los quince terminales en producción. */
+export const REPARTO_TERMINAL: RepartoDeSala = {
+  sidePadding: ROOM_SIDE_PADDING_DARK,
+  topPadding: ROOM_TOP_PADDING_DARK,
+  headerHeight: ROOM_HEADER_DARK,
+  legendHeight: ROOM_LEGEND_DARK,
+  zonePadding: ZONE_PADDING,
+  tableMin: TABLE_SHAPE_MIN,
+  tableMax: TABLE_SHAPE_MAX,
+  amountFontPx: TABLE_AMOUNT_FONT_PX_DARK,
+  amountOffsetPx: TABLE_AMOUNT_OFFSET_DARK,
+};
+
+/**
+ * La cabecera de mano, en DOS filas de 56 px.
+ *
+ * La de una fila es la causa medida del hallazgo 1 de la pasada del
+ * 18-10: con todos sus hijos en `shrink-0` su ancho de contenido mínimo
+ * era ~845 px, y el WebView de Android ensancha el viewport de
+ * maquetación hasta ese mínimo —`innerWidth` 845 con
+ * `documentElement.clientWidth` 360—, dejando 485 px fuera y los chips
+ * «Salón» y «Terraza» inalcanzables. Dos filas, y que la de los chips
+ * desplace sola, es lo que devuelve `innerWidth` a 360.
+ *
+ * 60 por fila: el suelo táctil de estas pantallas es
+ * `MIN_TOUCH_PX` = **56** —no 44; `hospitalityTheme.ts` lo fija así para
+ * la venta y la sala, y hay test de tamaño sobre `getComputedStyle`— más
+ * 2 px arriba y 2 abajo para que el botón no toque el borde de la fila.
+ */
+export const ROOM_HEADER_MANO = 2 * 60;
+
+/**
+ * El suelo del lado de mesa en la mano: **88 px**.
+ *
+ * El suelo del terminal son 120 y su razón es «por debajo se falla con
+ * el dedo» (auditoria-sirope #13) — medida pensada para una pantalla de
+ * 10–15" **vista desde el mostrador**. El N1 va EN LA MANO, a 30–40 cm,
+ * y 88 px siguen siendo el DOBLE del mínimo táctil de la casa (44).
+ *
+ * Y 88 es el número que hace falta, no uno cualquiera: el objetivo del
+ * bloque es **tres mesas por fila a 360**. Con `sidePadding` 16 el
+ * lienzo dispone de 328 y el marco de zona se come 2 × 12, así que
+ * quedan 304 para las mesas:
+ *
+ *   roomColumnsFor(304, 88, 14) = ⌊(304 + 14) / (88 + 14)⌋ = 3
+ *
+ * y la fila mide 3 × 88 + 2 × 14 = 292, con **12 px de holgura** sobre
+ * los 304. Doce y no cinco a propósito: `roomCanvasHeight` *reproduce*
+ * la regla de corte de flexbox en vez de medirla, y v2-H1 ya dejó
+ * escrito que cinco píxeles caen dentro del error de esa reproducción.
+ *
+ * Con 92 habría 3 columnas pero 4 px de holgura; con 94 harían falta
+ * marcos de 8 px, y el marco de zona lleva borde discontinuo y rótulo
+ * flotante: a 8 px las mesas se le meten debajo.
+ */
+export const TABLE_SHAPE_MIN_MANO = 88;
+
+/**
+ * El techo en la mano. Con 23 mesas nunca se alcanza —la sala no cabe
+ * sin desplazar a ningún tamaño, así que `tamanoDeMesaPara` cae al
+ * suelo—, pero una sala de tres mesas no debe pintar tres pantallas
+ * táctiles. 144 es el lado del terminal: en la mano es ya el máximo
+ * razonable, no el caso normal.
+ */
+export const TABLE_SHAPE_MAX_MANO = 144;
+
+/**
+ * El importe de la mesa en la mano: **14 px a 10 px del centro**.
+ *
+ * El importe no se corta NUNCA (la lección de v1.22), y en un círculo lo
+ * que limita es la cuerda, no el lado. Para el peor importe
+ * (`LONGEST_TABLE_AMOUNT`, 9 caracteres) y una mesa de 88:
+ *
+ *   cuerda a 10 px del centro = 2·√(44² − 10²) = 85,7 px
+ *   lo que pide a 14 px        = 9 · 11,5 · 14/19 = 76,3 px
+ *   margen                     = 9,4 px
+ *
+ * A 15 px el margen baja a 3,9 y a 16 ya no entra. Los 22 px del
+ * terminal piden 119,8: más que el diámetro entero de la mesa pequeña,
+ * así que aquí no era cuestión de gusto.
+ *
+ * Catorce píxeles leídos a 30–40 cm, que es donde se tiene el aparato,
+ * es lo que en el terminal serían ~26 a un metro. El espíritu de
+ * `principio-venta-bajo-estres` se mantiene; su cifra no se copia.
+ */
+export const TABLE_AMOUNT_FONT_PX_MANO = 14;
+export const TABLE_AMOUNT_OFFSET_MANO = 10;
+
+/** El relleno del marco de zona en la mano. Ver `TABLE_SHAPE_MIN_MANO`. */
+export const ZONE_PADDING_MANO = 12;
+
+/** El `px-4` del lienzo en la mano: los 328 px útiles de la pasada. */
+export const ROOM_SIDE_PADDING_MANO = 16;
+
+/** El reparto de un aparato de mano (N1 en vertical, 360 px). */
+export const REPARTO_MANO: RepartoDeSala = {
+  sidePadding: ROOM_SIDE_PADDING_MANO,
+  topPadding: ROOM_TOP_PADDING_DARK,
+  headerHeight: ROOM_HEADER_MANO,
+  legendHeight: ROOM_LEGEND_DARK,
+  zonePadding: ZONE_PADDING_MANO,
+  tableMin: TABLE_SHAPE_MIN_MANO,
+  tableMax: TABLE_SHAPE_MAX_MANO,
+  amountFontPx: TABLE_AMOUNT_FONT_PX_MANO,
+  amountOffsetPx: TABLE_AMOUNT_OFFSET_MANO,
+};
+
+/** El reparto que toca. `deMano` sale de `useAparatoDeMano`. */
+export function repartoDeSala(deMano: boolean): RepartoDeSala {
+  return deMano ? REPARTO_MANO : REPARTO_TERMINAL;
+}
+
+/**
+ * Cuántas mesas se ven SIN DESPLAZAR en un aparato de mano.
+ *
+ * Es el criterio de cierre del §1 del bloque —«con "Todas" y las 23
+ * mesas de Sirope, al menos 9 a la vista»— escrito como aritmética para
+ * que lo mida un banco y no sólo el navegador.
+ *
+ * Modela el reparto de MANO, que es el único en el que la pregunta tiene
+ * sentido: por debajo de `sm` el lienzo es `flex flex-col` y las zonas se
+ * apilan una debajo de otra (en el terminal es `sm:flex-row
+ * sm:flex-wrap` y lo que limita es el ancho, no el alto). Recorre las
+ * zonas en el orden en que se pintan —`ZONE_ORDER`, Barra primero— y
+ * cuenta fila a fila hasta que una no cabe entera.
+ *
+ * Una fila cuenta sólo si cabe COMPLETA: media mesa asomando por abajo
+ * no es una mesa que el camarero vea y toque.
+ */
+export function mesasALaVistaDeMano(
+  zones: RoomZone[],
+  availableWidth: number,
+  availableHeight: number,
+  cardSize: number = TABLE_SHAPE_MIN_MANO,
+  zonePadding: number = ZONE_PADDING_MANO,
+): number {
+  const maxColumns = roomColumnsFor(availableWidth - 2 * zonePadding, cardSize);
+  let y = 0;
+  let vistas = 0;
+  for (const zone of zones) {
+    const columns = Math.max(1, Math.min(zone.tables, maxColumns));
+    const rows = Math.max(1, Math.ceil(zone.tables / columns));
+    // Lo que la zona mete por encima de su primera fila de mesas.
+    const chrome =
+      2 * zonePadding + ZONE_BORDER + (zone.isBar ? BAR_COUNTER_HEIGHT : 0);
+    for (let r = 0; r < rows; r += 1) {
+      const bottom = y + chrome + (r + 1) * cardSize + r * ROOM_GRID_GAP;
+      if (bottom > availableHeight) return vistas;
+      vistas += Math.min(columns, zone.tables - r * columns);
+    }
+    y += chrome + rows * cardSize + (rows - 1) * ROOM_GRID_GAP + ZONE_GAP;
+  }
+  return vistas;
 }
