@@ -27,3 +27,13 @@ export {
   type InformeParaPdf,
   type SeccionParaPdf,
 } from "./informe-clinico.js";
+// calidad-1 (D-75) · el Plan de Acciones Correctivas y el informe de no
+// conformidades por periodo. Aquí por lo mismo que los tres de arriba:
+// el folio A4 y sus primitivas ya están.
+export {
+  renderPacPdf,
+  type AccionParaPac,
+  type NcParaPac,
+  type PacParaPdf,
+  type VerificacionParaPac,
+} from "./pac.js";

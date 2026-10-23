@@ -2,8 +2,8 @@
 //
 // Nueve columnas de la clínica (clinica-7), seis de la residencia
 // (residencia-1b, D-63), dos del registro de cuidados (residencia-3),
-// cinco del libro de incidencias (residencia-4) y dos del relevo
-// (residencia-5). Veinticuatro.
+// cinco del libro de incidencias (residencia-4), dos del relevo
+// (residencia-5) y seis de calidad (calidad-1). Treinta.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -371,6 +371,107 @@ export function sitioResumenTardio(
     tenantId,
     tabla: "handover_late_additions",
     columna: "resumen",
+    filaId: id,
+  };
+}
+
+// ── calidad-1 · LA NO CONFORMIDAD Y SU EXPEDIENTE (D-63, D-73) ─────
+//
+// Seis columnas lógicas más. Lo que nace cifrado es **lo que alguien
+// escribió a mano sobre un hallazgo**, y ahí cabe el residente con
+// nombre y apellidos: «falta la hoja de cambios posturales de la 112 del
+// martes», «la causa fue que la auxiliar de refuerzo no conocía el plan
+// de doña Carmen», «lo comprobó la DUE con ella delante».
+//
+// Y lo que se queda EN CLARO, declarado y con su consecuencia dicha: la
+// clase, el origen, el estado, el proceso, la referencia, las fechas, el
+// plazo, los firmantes y **la descripción de un riesgo**. Lo primero
+// sostiene el PAC, los filtros y el panel sin descifrar nada; lo último
+// es deliberado y distinto — un riesgo describe algo que PUEDE pasar en
+// el centro, no algo que le pasó a alguien, y si alguien escribe un
+// nombre ahí está escribiéndolo en el sitio equivocado.
+//
+// **Seis columnas lógicas y no tres**, por la razón de siempre en este
+// fichero: con el mismo nombre lógico, la causa de una NC se podría
+// copiar a su descripción, o la nota de cierre de una acción al texto de
+// la acción, y descifrarían. «La auxiliar no conocía el plan» pasaría a
+// ser lo que la NC dice que pasó.
+
+/** Qué pasa. Lo escribe quien abre la no conformidad, y no se reescribe
+ *  nunca (trigger `non_conformities_inmutable`). */
+export function sitioDescripcionDeNc(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "non_conformities",
+    columna: "description",
+    filaId: id,
+  };
+}
+
+/** Y por qué pasa. Columna lógica propia: una causa que se pudiera
+ *  copiar a la descripción sería una causa que reescribe el hallazgo. */
+export function sitioCausaDeNc(tenantId: string, id: string): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "non_conformities",
+    columna: "cause",
+    filaId: id,
+  };
+}
+
+/** Qué se va a hacer. El texto de una acción correctiva. */
+export function sitioTextoDeAccionCorrectiva(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "corrective_actions",
+    columna: "what",
+    filaId: id,
+  };
+}
+
+/** Y qué se hizo exactamente al cerrarla. Columna lógica propia. */
+export function sitioCierreDeAccionCorrectiva(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "corrective_actions",
+    columna: "closing_note",
+    filaId: id,
+  };
+}
+
+/** La nota de una evidencia: «lo comprobó la DUE con doña Carmen
+ *  delante». */
+export function sitioNotaDeEvidencia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "corrective_action_evidences",
+    columna: "note",
+    filaId: id,
+  };
+}
+
+/** Qué se comprobó en la verificación de eficacia y cómo. Es el texto
+ *  que convierte un «sí» en una evidencia. */
+export function sitioNotaDeVerificacion(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "effectiveness_verifications",
+    columna: "note",
     filaId: id,
   };
 }

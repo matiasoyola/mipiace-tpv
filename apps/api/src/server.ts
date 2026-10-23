@@ -98,6 +98,9 @@ import { registerGuardiaWebSocketRoute } from "./residencia/guardia-ws-route.js"
 import { registerResidenciaSalaRoutes } from "./residencia/sala-routes.js";
 import { registerResidenciaPanelRoutes } from "./residencia/panel-routes.js";
 import { registerResidenciaObligacionesRoutes } from "./residencia/obligaciones-routes.js";
+// calidad-1 (D-70 a D-75) · el mapa de procesos, los riesgos, las no
+// conformidades y el PAC.
+import { registerResidenciaCalidadRoutes } from "./residencia/calidad-routes.js";
 // residencia-4 · el seed de la plantilla de gravedad (D-65), hermano del
 // del catálogo de controles.
 import { cargarPlantillaDeGravedad } from "./residencia/catalogo/cargar-plantilla.js";
@@ -369,6 +372,7 @@ async function main() {
   await registerResidenciaSalaRoutes(app);
   await registerResidenciaPanelRoutes(app);
   await registerResidenciaObligacionesRoutes(app);
+  await registerResidenciaCalidadRoutes(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
   // kds-1-cocina · los ajustes de cocina del panel del restaurante, las

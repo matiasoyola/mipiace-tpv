@@ -1704,6 +1704,21 @@ model Tenant {
   dutyOccurrences               DutyOccurrence[]
   indicatorTargets              IndicatorTarget[]
 
+  // calidad-1 (D-70 a D-73) · el mapa de procesos y lo que cuelga de él.
+  // El mapa, los riesgos, los objetivos y de qué proceso cuelga cada
+  // indicador se van con el centro (`Cascade`): son su configuración de
+  // calidad, no evidencia clínica. Las **no conformidades** y todo su
+  // expediente, no (`Restrict`): son la evidencia de la mejora ante una
+  // certificadora y una inspección, y se conservan como el libro.
+  processes                     Process[]
+  indicatorProcesses            IndicatorProcess[]
+  risks                         RiskOpportunity[]
+  qualityObjectives             QualityObjective[]
+  nonConformities               NonConformity[]
+  correctiveActions             CorrectiveAction[]
+  correctiveActionEvidences     CorrectiveActionEvidence[]
+  effectivenessVerifications    EffectivenessVerification[]
+
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
   // de tabla; con 1 tenant es invisible, pero ya documentamos el
@@ -2054,6 +2069,25 @@ model User {
   managementDutiesOwned    ManagementDuty[]  @relation("ManagementDutyResponsible")
   managementDutiesCreated  ManagementDuty[]  @relation("ManagementDutyCreatedBy")
   indicatorTargets         IndicatorTarget[]
+
+  // calidad-1 · lo de calidad que lleva firma. `Restrict` en todo lo que
+  // ES la firma (quién abrió, cerró o verificó) y `SetNull` en lo que
+  // sólo dice quién configuró (quién creó un proceso o un riesgo): ser
+  // responsable de una acción es `Restrict` por lo mismo que en
+  // `ManagementDuty.responsibleUser` — un `SetNull` dejaría la fila sin
+  // responsable y su CHECK la rechazaría al ejecutarse.
+  processesCreated         Process[]                   @relation("ProcessCreatedBy")
+  indicatorProcessesSet    IndicatorProcess[]          @relation("IndicatorProcessUpdatedBy")
+  risksCreated             RiskOpportunity[]           @relation("RiskCreatedBy")
+  risksReviewed            RiskOpportunity[]           @relation("RiskReviewedBy")
+  objectivesCreated        QualityObjective[]          @relation("ObjectiveCreatedBy")
+  ncOpened                 NonConformity[]             @relation("NonConformityOpenedBy")
+  ncClosed                 NonConformity[]             @relation("NonConformityClosedBy")
+  actionsOwned             CorrectiveAction[]          @relation("CorrectiveActionResponsibleUser")
+  actionsOpened            CorrectiveAction[]          @relation("CorrectiveActionOpenedBy")
+  actionsClosed            CorrectiveAction[]          @relation("CorrectiveActionClosedBy")
+  evidencesAdded           CorrectiveActionEvidence[]  @relation("EvidenceBy")
+  verificationsSigned      EffectivenessVerification[] @relation("VerificationBy")
 
   @@index([tenantId])
   @@map("users")
@@ -6522,6 +6556,12 @@ model CareRole {
   /// es vocabulario vivo del centro — primero se le cambia el
   /// responsable, después se retira el rol.
   managementDuties ManagementDuty[]
+  /// calidad-1 (D-70) · los procesos de los que este rol es responsable y
+  /// las acciones correctivas a su nombre. `Restrict` en las dos y por lo
+  /// mismo: un rol que es dueño de un proceso del mapa es vocabulario
+  /// vivo del centro.
+  processes        Process[]
+  correctiveActions CorrectiveAction[] @relation("CorrectiveActionResponsibleRole")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -6591,6 +6631,15 @@ model CareRoleAssignment {
   /// demás de esta lista.
   handoverAcks             HandoverAck[]
   dutyOccurrencesDone      DutyOccurrence[]
+  /// calidad-1 (D-31, D-73) · y la capacidad con la que se abrió y se
+  /// cerró una NC, se escribió una acción, se adjuntó una evidencia y se
+  /// firmó una verificación de eficacia.
+  ncOpened                 NonConformity[]             @relation("NonConformityOpenedWith")
+  ncClosed                 NonConformity[]             @relation("NonConformityClosedWith")
+  actionsOpened            CorrectiveAction[]          @relation("CorrectiveActionOpenedWith")
+  actionsClosed            CorrectiveAction[]          @relation("CorrectiveActionClosedWith")
+  evidencesAdded           CorrectiveActionEvidence[]  @relation("EvidenceByWith")
+  verificationsSigned      EffectivenessVerification[] @relation("VerificationByWith")
 
   @@index([tenantId])
   @@index([tenantId, userId])
@@ -7914,6 +7963,12 @@ model Incident {
   /// residencia-5 · las veces que esta incidencia se añadió a un parte ya
   /// congelado.
   lateAdditions        HandoverLateAddition[]
+  /// calidad-1 (D-38, D-73) · **EN QUÉ NO CONFORMIDAD ACABÓ.** El enlace
+  /// de «elevar a NC», leído desde este lado: es la MISMA fila que
+  /// `NonConformity.sourceIncidentId`, como los `incident_links` del
+  /// libro. Una lista y no una sola porque una avería que se repite puede
+  /// estar detrás de dos hallazgos de auditorías distintas.
+  nonConformities      NonConformity[]        @relation("NonConformityFromIncident")
 
   @@index([tenantId])
   /// **«Qué hay abierto hoy»**, que es literalmente la métrica de éxito
@@ -8848,4 +8903,664 @@ model IndicatorTarget {
   @@unique([tenantId, code])
   @@index([tenantId])
   @@map("indicator_targets")
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  calidad-1 (D-70 a D-76) · EL MAPA ÚNICO, LOS RIESGOS Y LAS NC
+// ════════════════════════════════════════════════════════════════════
+//
+// AENOR puso en 2026 una **NC 01** (apartado 4.4.1) porque el centro no
+// presenta evidencia de «una única determinación de sus procesos»: hay 8
+// procesos en la pantalla de indicadores y 4 en la de riesgos. Lo que
+// este bloque añade al modelo es la entidad que hace imposible repetir
+// ese fallo: **un solo `Process` por centro, y todo lo de calidad con FK
+// `NOT NULL` y `Restrict` hacia él.**
+//
+// No hay ninguna otra lista de procesos en ninguna pantalla. La NC queda
+// cerrada por construcción, que es distinto de cerrarla por disciplina.
+
+/// calidad-1 (D-70) · de qué fila del mapa es un proceso.
+///
+/// Los tres de un mapa de procesos de ISO 9001: arriba los que deciden,
+/// en medio la cadena de valor que recorre un residente, abajo los que la
+/// sostienen. No es decorativo: es cómo se lee el mapa en la auditoría y
+/// cómo se pinta la pantalla.
+enum ProcessType {
+  /// Dirección y planificación · Calidad y mejora.
+  STRATEGIC
+  /// Admisión, valoración, atención sanitaria, cuidados, vida social,
+  /// alojamiento. **Seis y no uno**: la observación 07 de AENOR dice que
+  /// «el proceso único de PRESTACIÓN DEL SERVICIO junta actividades muy
+  /// diversas».
+  OPERATIONAL
+  /// Personas · Mantenimiento e instalaciones · Documentación, registros
+  /// y protección de datos.
+  SUPPORT
+}
+
+/// calidad-1 (D-71) · un riesgo o una oportunidad. Misma tabla porque es
+/// el mismo trabajo (identificar, valorar, planificar, revisar) y porque
+/// la ISO 9001 los pide juntos en el 6.1.
+enum RiskKind {
+  RISK
+  OPPORTUNITY
+}
+
+/// calidad-1 (D-73) · **LA CLASE DE UN HALLAZGO.** No se cambia nunca
+/// (trigger `non_conformities_inmutable`): subir una NC menor a mayor
+/// después de cerrarla sería reescribir lo que el auditor dijo.
+enum NonConformityKind {
+  /// Incumplimiento que pone en cuestión la capacidad del sistema.
+  MAJOR
+  /// Incumplimiento puntual. La NC 01 de 2026 es de ésta.
+  MINOR
+  /// No es incumplimiento: es un aviso. Las diez de 2026 son de ésta.
+  OBSERVATION
+  /// Oportunidad de mejora. Entra en el mismo ciclo, más ligero: no
+  /// exige análisis de causa.
+  IMPROVEMENT
+}
+
+/// calidad-1 (D-73) · **DE DÓNDE SALIÓ.** Enum y no texto porque el PAC
+/// se filtra por esto («todas las NC de la auditoría externa de julio»),
+/// y un filtro sobre texto libre no encuentra «AENOR» cuando alguien
+/// escribió «Aenor 2026».
+enum NonConformityOrigin {
+  INTERNAL_AUDIT
+  /// AENOR y cualquier certificadora.
+  EXTERNAL_AUDIT
+  /// Bienestar Social, Sanidad, Trabajo.
+  INSPECTION
+  /// Una incidencia del libro único, elevada a NC (D-38). Conserva el
+  /// enlace en `sourceIncidentId`.
+  INCIDENT
+  /// Una queja del libro, elevada igual.
+  COMPLAINT
+  /// Un indicador fuera de umbral dos meses seguidos (D-74).
+  INDICATOR
+  MANAGEMENT_REVIEW
+  OTHER
+}
+
+/// calidad-1 (D-73) · **EL CICLO**, y el orden importa.
+///
+/// `OPEN` → `CAUSE_ANALYSED` → `ACTIONS` → `ACTIONS_CLOSED` → `CLOSED`.
+///
+/// Dos puertas que no las guarda una ruta sino el motor:
+///
+///   · una NC (mayor o menor) **no sale de `OPEN` sin causa** — CHECK
+///     `non_conformities_causa_antes_de_acciones`; una observación o una
+///     oportunidad sí;
+///   · **no llega a `CLOSED` sin una verificación de eficacia con
+///     resultado `EFFECTIVE`** — trigger `non_conformities_inmutable`.
+///
+/// Y un `NOT_EFFECTIVE` la devuelve a `ACTIONS`: el rastro de los dos
+/// intentos queda, porque las verificaciones son append-only.
+enum NonConformityState {
+  OPEN
+  CAUSE_ANALYSED
+  ACTIONS
+  ACTIONS_CLOSED
+  CLOSED
+}
+
+/// calidad-1 (D-73) · ¿funcionó la acción?
+enum VerificationResult {
+  EFFECTIVE
+  NOT_EFFECTIVE
+}
+
+/// calidad-1 · en qué quedó un objetivo de calidad del año.
+enum QualityObjectiveStatus {
+  OPEN
+  MET
+  NOT_MET
+  CANCELLED
+}
+
+/// calidad-1 (D-70) · **EL PROCESO. UNO SOLO POR CENTRO, Y TODO CUELGA
+/// DE AQUÍ.**
+///
+/// Indicadores, riesgos y oportunidades, objetivos de calidad y no
+/// conformidades: las cuatro FKs son `NOT NULL` y `Restrict`. No hay
+/// ninguna otra lista de procesos en el producto, así que **no existe el
+/// sitio donde escribir el segundo mapa** — que es lo que la NC 01 de
+/// AENOR 2026 reprocha.
+///
+/// ── DE REFERENCIA, Y LUEGO DEL CENTRO ───────────────────────────────
+///
+/// El producto trae un mapa de once procesos
+/// (`catalogo/procesos-de-serie.ts`). El centro lo carga una vez y lo
+/// adapta: renombra, añade los suyos y **desactiva** los que no usa.
+/// `referenceCode` guarda de qué proceso de referencia salió cada uno
+/// aunque le cambien el nombre, y es lo que ata cada indicador del
+/// producto a su proceso (D-72).
+///
+/// Es una PLANTILLA y no un catálogo de serie: no baja a todos los
+/// centros al arrancar la API y no se versiona. Misma distinción —y por
+/// lo mismo— que las obligaciones de dirección de residencia-5.
+///
+/// ── NI SE BORRA CON ALGO COLGANDO, NI SE DESACTIVA ──────────────────
+///
+/// Borrarlo lo para el motor (los `Restrict` de los cuatro hijos).
+/// **Desactivarlo lo para la ruta**, y es deliberado: un proceso inactivo
+/// con una NC abierta dentro es una NC que desaparece de la pantalla sin
+/// que nadie la haya cerrado. La ruta obliga a reasignar primero
+/// (`POST /residencia/procesos/:id/reasignar`), y entonces desactiva.
+model Process {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// Único por centro. En los del mapa de referencia es su código; en los
+  /// que añade el centro lo normaliza la ruta a partir del nombre.
+  code String
+  name String
+  type ProcessType
+
+  /// Qué hace este proceso, en una línea. **En claro**: es la ficha del
+  /// proceso, no un dato de nadie, y es lo primero que un auditor lee.
+  purpose String?
+
+  /// De qué proceso del mapa de referencia salió. NULL en los que el
+  /// centro añade. Único por centro cuando no es NULL (Postgres admite
+  /// NULLs repetidos), así que **cargar el mapa dos veces no lo
+  /// duplica**.
+  referenceCode String? @map("reference_code")
+
+  /// El responsable es un **ROL de cuidado, no una persona** (D-29,
+  /// D-50): en una residencia el dueño de un proceso es «la DUE» o
+  /// «calidad», y quien ocupa ese rol cambia en agosto. `Restrict`: un
+  /// rol que es responsable de un proceso no se retira sin pasarle el
+  /// proceso a otro.
+  responsibleCareRoleId String @map("responsible_care_role_id") @db.Uuid
+
+  active    Boolean @default(true)
+  sortOrder Int     @default(0) @map("sort_order")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  responsibleCareRole CareRole @relation(fields: [responsibleCareRoleId], references: [id], onDelete: Restrict)
+  createdBy         User?    @relation("ProcessCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  risks             RiskOpportunity[]
+  objectives        QualityObjective[]
+  nonConformities   NonConformity[]
+  indicators        IndicatorProcess[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, referenceCode])
+  @@index([tenantId])
+  @@index([tenantId, active, sortOrder])
+  @@map("processes")
+}
+
+/// calidad-1 (D-72) · **DE QUÉ PROCESO CUELGA UN INDICADOR EN ESTE
+/// CENTRO.**
+///
+/// Una fila por indicador del producto, creada al cargar el mapa: el
+/// cargador la pone apuntando al proceso que salió del
+/// `procesoDeReferencia` de ese indicador. Después el centro puede
+/// colgarlo de otro proceso suyo, y eso es un `UPDATE` de esta fila.
+///
+/// ── POR QUÉ NO ES UNA COLUMNA DE `indicator_targets` ────────────────
+///
+/// Porque son dos cosas con dos vidas. `indicator_targets` existe
+/// **sólo cuando el centro cambia el umbral** —sin fila, manda el de
+/// serie, y residencia-5 decidió a propósito no sembrarla para que «un
+/// umbral sembrado y nunca revisado» no se confunda con uno que la
+/// dirección eligió—. El proceso, al contrario, **tiene que estar
+/// siempre**: un indicador sin proceso es el agujero de la NC 01. Meter
+/// las dos en la misma fila habría obligado a sembrar un umbral para
+/// poder colgar un proceso.
+///
+/// `code` es texto y sin FK, como en `indicator_targets` y por lo mismo
+/// (D-11 llevado al panel): los indicadores son un fichero de datos del
+/// producto, y uno nuevo en 2028 es una fila del fichero, no una
+/// migración.
+model IndicatorProcess {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  code      String
+  processId String @map("process_id") @db.Uuid
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  process   Process @relation(fields: [processId], references: [id], onDelete: Restrict)
+  updatedBy User?   @relation("IndicatorProcessUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([processId])
+  @@map("indicator_processes")
+}
+
+/// calidad-1 (D-71) · **UN RIESGO O UNA OPORTUNIDAD, COLGADO DE SU
+/// PROCESO.**
+///
+/// La NC 01 de AENOR 2026 nombra cuatro riesgos intrínsecos de una
+/// residencia que «siguen sin asociarse a proceso»: errores en el
+/// tratamiento médico, intoxicaciones alimentarias, datos confidenciales
+/// y salidas no controladas. Los cuatro vienen de serie y **ya colgados**
+/// (`catalogo/procesos-de-serie.ts`).
+///
+/// ── EL NIVEL ES UNA COLUMNA CON UN CHECK, NO UN CÁLCULO ─────────────
+///
+/// `level = probability * impact`, y lo garantiza el CHECK
+/// `risk_opportunities_nivel_coherente`. Es columna porque el panel
+/// ordena por ella y porque un nivel que se calcula en dos sitios acaba
+/// dando dos números; y es un CHECK y no un `GENERATED` porque Prisma no
+/// sabe leer columnas generadas sin ignorarlas, y una columna que el
+/// cliente ignora es una columna que nadie comprueba.
+///
+/// Las bandas (bajo 1-2 · medio 3-4 · alto 6-9) son del producto y viven
+/// en `packages/residencia-plan/src/calidad.ts`: un centro que quiera
+/// otras bandas no cambia la base.
+///
+/// ── LA DESCRIPCIÓN VA EN CLARO, Y ESTÁ DECLARADO ────────────────────
+///
+/// Al revés que la de una NC (D-73). Un riesgo describe **algo que puede
+/// pasar en el centro**, no algo que le pasó a doña Carmen: «intoxicación
+/// alimentaria por rotura de la cadena de frío» no nombra a nadie. Y en
+/// claro es consultable, que es lo que permite que el mapa de riesgos se
+/// pinte y se exporte sin descifrar nada. Si alguien escribe un nombre
+/// ahí, está escribiéndolo en el sitio equivocado: eso es una incidencia
+/// del libro o una NC.
+model RiskOpportunity {
+  id        String @id @default(uuid()) @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
+  processId String @map("process_id") @db.Uuid
+
+  kind RiskKind
+
+  /// El código del riesgo de serie del que salió, para que cargar el mapa
+  /// dos veces no lo duplique. NULL en los que añade el centro.
+  code        String?
+  description String
+
+  /// 1-3 cada uno (CHECK). Ver la cabecera para el nivel.
+  probability Int
+  impact      Int
+  level       Int
+
+  plannedAction String? @map("planned_action")
+
+  /// **CUÁNDO TOCA REVISARLO**, «YYYY-MM-DD». Fecha de pared y no
+  /// `Timestamptz`, como `ManagementDuty.validUntil` y por lo mismo: lo
+  /// que se revisa es un día del calendario del centro, no un instante.
+  /// Una revisión vencida sale en el panel de dirección.
+  reviewAt String @map("review_at") @db.VarChar(10)
+
+  /// Cuándo se revisó por última vez y quién, para que «revisado» no sea
+  /// sólo haber movido la fecha.
+  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz()
+  reviewedByUserId String?   @map("reviewed_by_user_id") @db.Uuid
+
+  /// La cláusula de la ISO 9001:2015 (D-75). De serie, 6.1.
+  isoClause String? @map("iso_clause")
+
+  active Boolean @default(true)
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant     Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  process    Process @relation(fields: [processId], references: [id], onDelete: Restrict)
+  reviewedBy User?   @relation("RiskReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  createdBy  User?   @relation("RiskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([processId])
+  @@index([tenantId, reviewAt])
+  @@map("risk_opportunities")
+}
+
+/// calidad-1 · **UN OBJETIVO DE CALIDAD DEL AÑO, COLGADO DE SU PROCESO.**
+///
+/// Los cuatro de 2026 de Jardín de Gredos (informe de AENOR §6) son de
+/// ésta. Entra en este bloque porque **cabe sin pantalla nueva**: es una
+/// sección más de la ficha del proceso, igual que sus riesgos. El
+/// seguimiento anual con su borrador de revisión por la dirección es
+/// calidad-2.
+///
+/// `indicatorCode` ata el objetivo al indicador que lo mide cuando lo
+/// mide uno —«el 54 % de válidos acuda a actividades fuera» lo mide
+/// `ACTIVIDADES_SOCIOCULTURALES`— y es texto sin FK por lo mismo que en
+/// `indicator_targets`.
+model QualityObjective {
+  id        String @id @default(uuid()) @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
+  processId String @map("process_id") @db.Uuid
+
+  year Int
+  name String
+  /// La meta, en palabras: «que el 25 % mantenga o mejore la puntuación
+  /// en las escalas». En claro, como la del riesgo.
+  target String
+
+  status QualityObjectiveStatus @default(OPEN)
+
+  indicatorCode String? @map("indicator_code")
+  progressNote  String? @map("progress_note")
+  isoClause     String? @map("iso_clause")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  process   Process @relation(fields: [processId], references: [id], onDelete: Restrict)
+  createdBy User?   @relation("ObjectiveCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([processId])
+  @@index([tenantId, year])
+  @@map("quality_objectives")
+}
+
+/// calidad-1 (D-73) · **UNA NO CONFORMIDAD, CON SU CICLO COMPLETO.**
+///
+/// Entidad propia y **no una fila más de `incidents`** (que es lo que
+/// D-38 dejó abierto para «cuando se acerque la auditoría»). La razón es
+/// la forma: una incidencia del libro es un hecho con nivel, cierre y
+/// comunicación a la familia; una NC es un **expediente** con causa,
+/// acciones con responsable y plazo, evidencias y verificación de
+/// eficacia. Metida en `incidents` habría necesitado seis columnas que
+/// están NULL en el 99 % de las filas y un trigger que las exigiera
+/// según el tipo.
+///
+/// Lo que SÍ comparte con el libro es el régimen: **append-only, y la
+/// clase, el origen y quién la abrió no se cambian ni por SQL** (trigger
+/// `non_conformities_inmutable`). Lo que se hizo después se escribe como
+/// acción o como verificación, con su autor y su hora.
+///
+/// ── `id` SIN `DEFAULT` ──────────────────────────────────────────────
+///
+/// El AAD de `description_cifrado` ata el valor a
+/// `tenant|non_conformities|description|<id>`, y el id hay que saberlo
+/// antes de insertar. Misma decisión exacta que `care_records.id` y
+/// `handovers.id`.
+///
+/// ── LOS TEXTOS LIBRES NACEN CIFRADOS (D-63) ─────────────────────────
+///
+/// Al revés que los de un riesgo: **una NC puede nombrar a un
+/// residente**. «Falta la hoja de cambios posturales de la 112 del
+/// martes» y «la causa fue que la auxiliar de refuerzo no conocía el
+/// plan de doña Carmen» son salud con todas las letras. Misma maquinaria
+/// y mismo CHECK de formato que residencia-1b.
+///
+/// En claro, declarado: la clase, el origen, el estado, el proceso, la
+/// referencia, las fechas y los firmantes. Es lo que sostiene el PAC y
+/// los filtros sin descifrar nada, y es lo mismo que la carpeta de
+/// calidad dice ya hoy en el lomo.
+model NonConformity {
+  id        String @id @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
+  /// `Restrict` y `NOT NULL`: es la FK que cierra la NC 01.
+  processId String @map("process_id") @db.Uuid
+
+  /// Como la nombra el centro y como la nombra el auditor: «NC-2026-01».
+  /// Única por centro. La pone la ruta al abrir, con el año y el
+  /// siguiente número libre.
+  reference String
+
+  kind   NonConformityKind
+  origin NonConformityOrigin
+  state  NonConformityState  @default(OPEN)
+
+  /// La cláusula de la ISO 9001:2015 (D-75). La NC 01 de 2026 es del
+  /// 4.4.1.
+  isoClause String? @map("iso_clause")
+
+  /// Qué día se detectó, «YYYY-MM-DD»: la fecha del informe de auditoría
+  /// o del acta de inspección, que es la que cuenta para el plazo del
+  /// PAC. No es `createdAt`: una NC de julio se puede meter en agosto.
+  detectedOn String @map("detected_on") @db.VarChar(10)
+
+  /// **Qué pasa**, cifrado y obligatorio: una NC sin descripción no es
+  /// una NC.
+  descriptionCifrado String  @map("description_cifrado")
+  /// **Por qué pasa**, cifrado. Obligatorio para salir de `OPEN` si es
+  /// mayor o menor (CHECK `non_conformities_causa_antes_de_acciones`);
+  /// opcional en una observación o una oportunidad de mejora.
+  causeCifrado       String? @map("cause_cifrado")
+
+  /// ── DE DÓNDE SALIÓ ────────────────────────────────────────────────
+  ///
+  /// La incidencia del libro cuando se **elevó** una (D-38). Es UNA fila
+  /// leída desde los dos lados: desde la NC dice de qué incidencia salió
+  /// y desde la incidencia dice en qué NC acabó. `Restrict`: la
+  /// incidencia que originó una NC no se borra — en el libro ya no se
+  /// borraba nada, y esto lo vuelve a decir desde este lado.
+  sourceIncidentId     String? @map("source_incident_id") @db.Uuid
+  /// O el indicador y el mes, cuando la propuso el panel (D-74). Los dos
+  /// juntos o ninguno: un indicador sin mes no se puede volver a mirar.
+  sourceIndicatorCode  String? @map("source_indicator_code")
+  sourceIndicatorMonth String? @map("source_indicator_month") @db.VarChar(7)
+  /// O un texto: «AENOR, informe nº 24, 1er seguimiento, 21-07-2026».
+  /// En claro: es la referencia del documento, no su contenido.
+  sourceNote           String? @map("source_note")
+
+  /// ── EL INFORME ADJUNTO ────────────────────────────────────────────
+  ///
+  /// El PDF del auditor o el acta de la inspección. Fichero del volumen
+  /// clínico con cabecera `MPC1` y la huella del claro, **igual que la
+  /// evidencia de una obligación** (residencia-5): no se inventa un
+  /// segundo almacén. Las cuatro van juntas o ninguna (CHECK).
+  ///
+  /// La auditoría como ENTIDAD —con su plan anual y sus hallazgos— es
+  /// calidad-2. Aquí basta el origen y el documento.
+  reportFileName String? @map("report_file_name") @db.VarChar(100)
+  reportSha256   String? @map("report_sha256") @db.Char(64)
+  reportBytes    Int?    @map("report_bytes")
+  reportMimeType String? @map("report_mime_type") @db.VarChar(80)
+
+  /// ── QUIÉN LA ABRIÓ (D-31) ─────────────────────────────────────────
+  ///
+  /// Persona + capacidad, como todo lo que se firma en la residencia.
+  /// Abre quien tenga un rol de categoría `DIRECTIVO` o el rol
+  /// `CALIDAD` (D-73), y lo comprueba la ruta: es una regla sobre la
+  /// vigencia de una asignación, que cambia con el tiempo, y un CHECK no
+  /// sabe mirar otra tabla.
+  openedAt                     DateTime @map("opened_at") @db.Timestamptz()
+  openedByUserId               String   @map("opened_by_user_id") @db.Uuid
+  openedByCareRoleAssignmentId String   @map("opened_by_care_role_assignment_id") @db.Uuid
+
+  /// ── EL CIERRE ─────────────────────────────────────────────────────
+  ///
+  /// Las tres juntas o ninguna (CHECK `non_conformities_cierre_completo`)
+  /// y coherentes con el estado (CHECK
+  /// `non_conformities_cerrada_coherente`). Y **no se llega aquí sin una
+  /// verificación de eficacia `EFFECTIVE`**: lo para el trigger, no la
+  /// ruta.
+  closedAt                     DateTime? @map("closed_at") @db.Timestamptz()
+  closedByUserId               String?   @map("closed_by_user_id") @db.Uuid
+  closedByCareRoleAssignmentId String?   @map("closed_by_care_role_assignment_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  process        Process             @relation(fields: [processId], references: [id], onDelete: Restrict)
+  sourceIncident Incident?           @relation("NonConformityFromIncident", fields: [sourceIncidentId], references: [id], onDelete: Restrict)
+  openedBy       User                @relation("NonConformityOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  openedWith     CareRoleAssignment  @relation("NonConformityOpenedWith", fields: [openedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  closedBy       User?               @relation("NonConformityClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  closedWith     CareRoleAssignment? @relation("NonConformityClosedWith", fields: [closedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  actions       CorrectiveAction[]
+  verifications EffectivenessVerification[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId])
+  @@index([processId])
+  @@index([tenantId, state])
+  @@index([tenantId, origin, detectedOn])
+  @@index([sourceIncidentId])
+  @@map("non_conformities")
+}
+
+/// calidad-1 (D-73) · **UNA ACCIÓN CORRECTIVA: QUÉ, QUIÉN Y PARA
+/// CUÁNDO.**
+///
+/// Es la fila que el PAC a AENOR enseña, y la que hace que «se resolvió
+/// de palabra» deje de ser posible: con responsable y plazo, una acción
+/// vencida sale en el panel de dirección con su nombre.
+///
+/// **Append-only** (trigger `corrective_actions_append_only`): lo único
+/// que se puede cambiar de una acción escrita es cerrarla, y una vez
+/// cerrada ya no se toca. Una acción mal escrita se corrige escribiendo
+/// otra que lo diga — lo mismo que hace una `IncidentAction`.
+///
+/// `id` sin `DEFAULT` por el AAD de `what_cifrado`, como la NC.
+model CorrectiveAction {
+  id              String @id @db.Uuid
+  tenantId        String @map("tenant_id") @db.Uuid
+  nonConformityId String @map("non_conformity_id") @db.Uuid
+
+  /// **Qué se va a hacer**, cifrado: puede nombrar al residente o al
+  /// profesional de los que habla la NC.
+  whatCifrado String @map("what_cifrado")
+
+  /// El responsable: un rol de cuidado, una persona o una etiqueta libre
+  /// («Gestoría», «CINSA»). **Exactamente una** (CHECK
+  /// `corrective_actions_responsable`), y las dos FKs con `Restrict` por
+  /// lo mismo que en `ManagementDuty`: un `SetNull` dejaría la fila sin
+  /// responsable y el CHECK la rechazaría al ejecutarse.
+  responsibleCareRoleId String? @map("responsible_care_role_id") @db.Uuid
+  responsibleUserId     String? @map("responsible_user_id") @db.Uuid
+  responsibleLabel      String? @map("responsible_label")
+
+  /// El plazo, «YYYY-MM-DD». Fecha de pared, como el de una obligación.
+  dueOn String @map("due_on") @db.VarChar(10)
+
+  openedAt                     DateTime @map("opened_at") @db.Timestamptz()
+  openedByUserId               String   @map("opened_by_user_id") @db.Uuid
+  openedByCareRoleAssignmentId String   @map("opened_by_care_role_assignment_id") @db.Uuid
+
+  /// Cerrarla es decir que se hizo, con firma. Las tres juntas o ninguna
+  /// (CHECK `corrective_actions_cierre_completo`).
+  closedAt                     DateTime? @map("closed_at") @db.Timestamptz()
+  closedByUserId               String?   @map("closed_by_user_id") @db.Uuid
+  closedByCareRoleAssignmentId String?   @map("closed_by_care_role_assignment_id") @db.Uuid
+  /// Y qué se hizo exactamente, cifrado. Columna lógica propia: con el
+  /// mismo nombre que `what`, el texto de cierre se podría copiar al de
+  /// apertura y descifraría.
+  closingNoteCifrado           String?   @map("closing_note_cifrado")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  nonConformity       NonConformity       @relation(fields: [nonConformityId], references: [id], onDelete: Restrict)
+  responsibleCareRole CareRole?           @relation("CorrectiveActionResponsibleRole", fields: [responsibleCareRoleId], references: [id], onDelete: Restrict)
+  responsibleUser     User?               @relation("CorrectiveActionResponsibleUser", fields: [responsibleUserId], references: [id], onDelete: Restrict)
+  openedBy            User                @relation("CorrectiveActionOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  openedWith          CareRoleAssignment  @relation("CorrectiveActionOpenedWith", fields: [openedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  closedBy            User?               @relation("CorrectiveActionClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  closedWith          CareRoleAssignment? @relation("CorrectiveActionClosedWith", fields: [closedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  evidences CorrectiveActionEvidence[]
+
+  @@index([tenantId])
+  @@index([nonConformityId])
+  @@index([tenantId, dueOn])
+  @@map("corrective_actions")
+}
+
+/// calidad-1 (D-73) · **LA EVIDENCIA DE QUE LA ACCIÓN SE HIZO.**
+///
+/// Un fichero, una nota, o las dos (CHECK
+/// `corrective_action_evidences_dice_algo`): el acta de la formación, la
+/// foto del asidero cambiado, el albarán de la grúa nueva. Sin esto, el
+/// PAC dice que se hizo algo y no lo demuestra, que es la mitad de lo
+/// que AENOR mira.
+///
+/// Append-only sin escapatoria: ni `UPDATE` ni `DELETE`.
+///
+/// **El fichero va al volumen de siempre con la clase `EVIDENCIA`**, la
+/// misma que la de una obligación de dirección: no se inventa una
+/// carpeta. Y por eso el barrido de huérfanos de residencia-6 tiene que
+/// contar también estas filas — si no, borraría los adjuntos del PAC por
+/// no encontrarlos referenciados.
+model CorrectiveActionEvidence {
+  id       String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  actionId String @map("action_id") @db.Uuid
+
+  /// Las cuatro juntas o ninguna (CHECK
+  /// `corrective_action_evidences_fichero_completo`): media evidencia es
+  /// una fila que dice que hay un PDF que no se puede servir.
+  fileName String? @map("file_name") @db.VarChar(100)
+  sha256   String? @map("sha256") @db.Char(64)
+  bytes    Int?
+  mimeType String? @map("mime_type") @db.VarChar(80)
+
+  /// La nota, cifrada: puede decir «lo comprobó la DUE con doña Carmen
+  /// delante».
+  noteCifrado String? @map("note_cifrado")
+
+  at                     DateTime @default(now()) @db.Timestamptz()
+  byUserId               String   @map("by_user_id") @db.Uuid
+  byCareRoleAssignmentId String   @map("by_care_role_assignment_id") @db.Uuid
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  action CorrectiveAction   @relation(fields: [actionId], references: [id], onDelete: Restrict)
+  by     User               @relation("EvidenceBy", fields: [byUserId], references: [id], onDelete: Restrict)
+  byWith CareRoleAssignment @relation("EvidenceByWith", fields: [byCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([actionId, at])
+  @@map("corrective_action_evidences")
+}
+
+/// calidad-1 (D-73) · **LA VERIFICACIÓN DE EFICACIA.** La pieza que
+/// separa un sistema de calidad de una carpeta de buenas intenciones.
+///
+/// «Se formó al personal» no es que el problema esté resuelto: lo es que
+/// tres meses después el registro ya no tenga huecos. Esta tabla guarda
+/// quién lo comprobó, cuándo y qué salió.
+///
+/// ── DOS REGLAS QUE ESTÁN EN EL MOTOR ────────────────────────────────
+///
+///   1. **No la firma quien cerró la última acción** (misma idea que
+///      D-27/D-28 para N3/N4). Lo mira el trigger
+///      `effectiveness_verifications_otra_persona`, que además exige que
+///      haya al menos una acción cerrada: no se verifica la eficacia de
+///      lo que no se ha hecho.
+///   2. **Append-only.** Un `NOT_EFFECTIVE` no se corrige: se escribe
+///      otra acción, se cierra y se vuelve a verificar. Las dos
+///      verificaciones quedan, y ese rastro es lo que enseña que el
+///      primer intento no funcionó — que es justo lo que un auditor
+///      quiere ver y lo que una carpeta de Word borra.
+model EffectivenessVerification {
+  id              String @id @db.Uuid
+  tenantId        String @map("tenant_id") @db.Uuid
+  nonConformityId String @map("non_conformity_id") @db.Uuid
+
+  result VerificationResult
+
+  /// Qué se comprobó y cómo. Cifrado y **obligatorio**: una verificación
+  /// que sólo dice «sí» no verifica nada.
+  noteCifrado String @map("note_cifrado")
+
+  at                     DateTime @map("at") @db.Timestamptz()
+  byUserId               String   @map("by_user_id") @db.Uuid
+  byCareRoleAssignmentId String   @map("by_care_role_assignment_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  nonConformity NonConformity      @relation(fields: [nonConformityId], references: [id], onDelete: Restrict)
+  by            User               @relation("VerificationBy", fields: [byUserId], references: [id], onDelete: Restrict)
+  byWith        CareRoleAssignment @relation("VerificationByWith", fields: [byCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([nonConformityId, at])
+  @@map("effectiveness_verifications")
 }

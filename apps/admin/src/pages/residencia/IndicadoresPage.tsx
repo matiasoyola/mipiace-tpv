@@ -22,6 +22,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { Link } from "react-router-dom";
+
 import { AdminShell } from "../../AdminShell.js";
 import { api, ApiError } from "../../api.js";
 import {
@@ -37,10 +39,34 @@ import {
   type ValorDeIndicador,
 } from "./relevo-lib.js";
 
+/** calidad-1 (D-72) · el indicador, con el proceso del que cuelga en
+ *  ESTE centro. `null` mientras no se haya cargado el mapa. */
+interface IndicadorConProceso extends ValorDeIndicador {
+  proceso?: { id: string; nombre: string } | null;
+}
+
 interface Respuesta {
   mes: string;
-  indicadores: ValorDeIndicador[];
+  indicadores: IndicadorConProceso[];
   sinDato: Array<{ nombre: string; falta: string }>;
+  /** calidad-1 (R9) · la cumplimentación abierta por turno y zona. */
+  cumplimentacionPorTurnoYZona?: Array<{
+    shiftCode: string | null;
+    turno: string;
+    floorId: string | null;
+    zona: string;
+    tocan: number;
+    hechas: number;
+  }>;
+}
+
+/** La tabla de «de qué registros sale», tal y como la manda la ruta. */
+interface TablaDeRegistros {
+  titulo: string;
+  nota: string;
+  columnas: string[];
+  filas: string[][];
+  total: number;
 }
 
 export function IndicadoresPage() {
@@ -50,6 +76,10 @@ export function IndicadoresPage() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
   const [valor, setValor] = useState("");
+  // calidad-1 · qué indicador está abierto hasta sus registros, y la
+  // tabla que contestó la ruta.
+  const [abierto, setAbierto] = useState<string | null>(null);
+  const [tabla, setTabla] = useState<TablaDeRegistros | null>(null);
 
   const recargar = useCallback(async () => {
     try {
@@ -79,6 +109,34 @@ export function IndicadoresPage() {
       setTimeout(() => setAviso(null), 3000);
       setEditando(null);
       await recargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Error inesperado");
+    }
+  }
+
+  /**
+   * **ABRIR UN INDICADOR HASTA SUS REGISTROS** (07-calidad-iso §2).
+   *
+   * Es lo que convierte un número que hay que creerse en un número que
+   * se puede contrastar delante de un auditor. La tabla es genérica —
+   * columnas y filas de texto— porque cada indicador sale de una tabla
+   * distinta y trece componentes serían trece sitios donde acordarse
+   * del catorce.
+   */
+  async function abrir(code: string): Promise<void> {
+    if (abierto === code) {
+      setAbierto(null);
+      setTabla(null);
+      return;
+    }
+    setAbierto(code);
+    setTabla(null);
+    try {
+      setTabla(
+        await api<TablaDeRegistros>(
+          `/residencia/indicadores/${code}/registros?mes=${mes}`,
+        ),
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado");
     }
@@ -166,8 +224,92 @@ export function IndicadoresPage() {
             {/* **De qué registros sale** (07-calidad-iso §2): es lo que
                 permite abrirlo en una auditoría en vez de creérselo. */}
             <p className="mt-1 text-[12.5px] text-slate-500">
-              Sale de: {i.deDonde}.
+              Sale de: {i.deDonde}.{" "}
+              <button
+                type="button"
+                onClick={() => void abrir(i.code)}
+                className="underline"
+              >
+                {abierto === i.code ? "cerrar" : "ver los registros"}
+              </button>
             </p>
+            {/* calidad-1 (D-72) · de qué proceso cuelga EN ESTE CENTRO.
+                Sin mapa cargado no hay proceso, y la pantalla lo dice en
+                vez de pintar un hueco. */}
+            <p className="mt-0.5 text-[12.5px] text-slate-500">
+              {i.proceso != null ? (
+                <>
+                  Proceso:{" "}
+                  <Link
+                    to={`/admin/residencia/procesos/${i.proceso.id}`}
+                    className="underline"
+                  >
+                    {i.proceso.nombre}
+                  </Link>
+                </>
+              ) : (
+                <>
+                  Sin proceso:{" "}
+                  <Link to="/admin/residencia/procesos" className="underline">
+                    carga el mapa
+                  </Link>{" "}
+                  para colgarlo.
+                </>
+              )}
+            </p>
+
+            {abierto === i.code && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                {tabla == null ? (
+                  <p className="text-[13px] text-slate-500">Cargando…</p>
+                ) : (
+                  <>
+                    <h3 className="text-[13.5px] font-semibold">
+                      {tabla.titulo} ({tabla.total})
+                    </h3>
+                    <p className="mt-1 text-[12.5px] text-slate-500">
+                      {tabla.nota}
+                    </p>
+                    {tabla.filas.length === 0 ? (
+                      <p className="mt-2 text-[13px] text-slate-500">
+                        Ninguno este mes.
+                      </p>
+                    ) : (
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full text-left text-[12.5px]">
+                          <thead>
+                            <tr className="text-slate-500">
+                              {tabla.columnas.map((c) => (
+                                <th key={c} className="pr-4 pb-1 font-medium">
+                                  {c}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tabla.filas.map((f, n) => (
+                              <tr key={n} className="border-t border-slate-200">
+                                {f.map((celda, j) => (
+                                  <td key={j} className="pr-4 py-1">
+                                    {celda}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {tabla.total > tabla.filas.length && (
+                      <p className="mt-2 text-[12px] text-slate-500">
+                        Se enseñan las primeras {tabla.filas.length} de{" "}
+                        {tabla.total}.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {editando === i.code ? (
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -223,6 +365,65 @@ export function IndicadoresPage() {
           </li>
         ))}
       </ul>
+
+      {/* ── calidad-1 (R9) · LA CUMPLIMENTACIÓN, POR TURNO Y ZONA ── */}
+      {/*
+          El acta de la inspección del 08-10-2026 habla de «anotaciones
+          vacías puntuales», y la respuesta del centro comprometió que la
+          supervisora compruebe al final de cada turno que no quedan
+          casillas sin anotar. Un porcentaje del mes no sirve para eso:
+          lo que hace falta es ver QUÉ turno y QUÉ planta se quedan
+          cortos, y eso es esta tabla — lo peor arriba.
+      */}
+      {datos.cumplimentacionPorTurnoYZona != null &&
+        datos.cumplimentacionPorTurnoYZona.length > 0 && (
+          <section className="mt-7 rounded-2xl border border-slate-200 bg-white px-5 py-4">
+            <h2 className="text-[14.5px] font-semibold">
+              Cumplimentación por turno y zona
+            </h2>
+            <p className="mt-1 text-[13px] text-slate-500">
+              R9 de la inspección. Sale del mismo cruce que el parte de
+              relevo, así que esta tabla y el parte no se pueden
+              contradecir para el mismo turno. Lo peor, arriba.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="text-slate-500">
+                    <th className="pr-4 pb-1 font-medium">Turno</th>
+                    <th className="pr-4 pb-1 font-medium">Zona</th>
+                    <th className="pr-4 pb-1 font-medium">Tocaban</th>
+                    <th className="pr-4 pb-1 font-medium">Anotadas</th>
+                    <th className="pr-4 pb-1 font-medium">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {datos.cumplimentacionPorTurnoYZona.map((f) => {
+                    const pct = Math.round((f.hechas / f.tocan) * 1000) / 10;
+                    return (
+                      <tr
+                        key={`${f.shiftCode}|${f.floorId}`}
+                        className="border-t border-slate-200"
+                      >
+                        <td className="pr-4 py-1">{f.turno}</td>
+                        <td className="pr-4 py-1">{f.zona}</td>
+                        <td className="pr-4 py-1 tabular-nums">{f.tocan}</td>
+                        <td className="pr-4 py-1 tabular-nums">{f.hechas}</td>
+                        <td
+                          className={`pr-4 py-1 tabular-nums ${
+                            pct < 98 ? "font-semibold text-red-700" : ""
+                          }`}
+                        >
+                          {String(pct).replace(".", ",")} %
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
       {/* ── Los que todavía no se pueden calcular ─────────────────── */}
       <section className="mt-7 rounded-2xl border border-slate-200 bg-white px-5 py-4">

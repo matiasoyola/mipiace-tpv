@@ -18,6 +18,8 @@ import {
   FileText,
   FileWarning,
   Gauge,
+  Network,
+  ClipboardX,
   Gift,
   KeyRound,
   LayoutDashboard,
@@ -367,6 +369,23 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/admin/residencia/indicadores",
     label: "Indicadores",
     icon: Gauge,
+    capability: "residencia",
+  },
+  // calidad-1 (D-70, D-73) · el mapa y las no conformidades. Van DETRÁS
+  // de los indicadores y no antes: el mapa se toca una vez al año y las
+  // NC se trabajan por semanas, mientras que lo de arriba es lo del día.
+  // Y el mapa va antes que las NC porque una NC cuelga de un proceso:
+  // sin mapa, la pantalla de no conformidades no deja hacer nada.
+  {
+    to: "/admin/residencia/procesos",
+    label: "Procesos",
+    icon: Network,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/no-conformidades",
+    label: "No conformidades",
+    icon: ClipboardX,
     capability: "residencia",
   },
   // B-reservas-8 · los bonos de sesiones: los ajustes del centro, por qué

@@ -1537,7 +1537,12 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
       const codigos = (r.json().indicadores as Array<{ code: string }>).map(
         (i) => i.code,
       );
-      expect(codigos).toEqual([
+      // **NO REGRESIÓN.** calidad-1 añadió siete indicadores más (D-72) y
+      // los puso DETRÁS: los seis de este bloque siguen estando, en su
+      // orden, y las cuentas de abajo —que están hechas a mano— siguen
+      // dando lo mismo. Si alguien metiera uno delante, el orden en que
+      // la dirección los lee cada mes cambiaría sin que nadie lo pidiera.
+      expect(codigos.slice(0, 6)).toEqual([
         "SIN_DEPOSICION",
         "VISITA_MEDICA",
         "GIMNASIA",
@@ -1545,8 +1550,11 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
         "ACTIVIDADES_SOCIOCULTURALES",
         "AVERIAS_24H",
       ]);
-      // Y los once que faltan están NOMBRADOS.
-      expect((r.json().sinDato as unknown[]).length).toBe(11);
+      // Y los que faltan están NOMBRADOS. Eran once; con calidad-1 son
+      // trece: la rotación sale (ya se calcula), la fila de «rotación,
+      // absentismo y formación» se parte en dos y entra la
+      // representatividad de las encuestas.
+      expect((r.json().sinDato as unknown[]).length).toBe(13);
     });
 
     it("la visita médica, calculada a mano: 0 de 2 residentes = 0 %", async () => {
@@ -1652,8 +1660,9 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
       expect(Array.isArray(p.obligaciones.vencidas)).toBe(true);
       // 4 · el turno en curso, por planta
       expect(p.turno.plantas.length).toBeGreaterThanOrEqual(2);
-      // 5 · los indicadores
-      expect(p.indicadores).toHaveLength(6);
+      // 5 · los indicadores. Trece desde calidad-1 (D-72); los seis de
+      // este bloque son los seis primeros y el test de arriba lo fija.
+      expect(p.indicadores).toHaveLength(13);
     });
 
     it("y un ENCARGADO sin rol directivo no entra", async () => {
