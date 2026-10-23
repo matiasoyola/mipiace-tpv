@@ -699,8 +699,17 @@ error.
 WebView, un vídeo parado, y lo pinta con un triángulo gigante centrado que
 invita a tocarlo. `poster=""` no vale: Chrome trata un póster que no carga
 como si no hubiera. Lo que hay es una **capa propia** —negro opaco, el estado
-dentro, `pointer-events-none`— que se quita con el primer frame
-(`onLoadedData`).
+dentro, `pointer-events-none`— que se quita con el primer frame.
+
+Y eso **no puede ser una puerta sin salida**, porque la misma señal bloquea el
+disparador: un aparato donde el evento del primer frame no llegara dejaría la
+cámara abierta y la foto imposible, que es peor que el triángulo que se viene
+a tapar. Dos redes: se escuchan **tres** eventos (`loadeddata`, `playing`,
+`timeupdate` — en algunos WebView con autoplay restringido llega el segundo y
+no el primero) y hay un **plazo de 3 s** tras el cual se da por pintando de
+todas formas. Si a los 3 s no hay imagen, lo que se ve es negro y se puede
+disparar: **una foto negra se repite; una cámara que no dispara, no.** Es la
+misma forma de pensar que «cobrar siempre se puede», un piso más abajo.
 
 **e) La exposición con poca luz.** Dos cosas, y la segunda es la que importa:
 
@@ -1281,7 +1290,7 @@ empezar es el reloj y no el código de este bloque.
 |---|---|
 | `api/test/clinica-8b-nombre.test.ts` (5) | el nombre con el que se pinta a alguien, y que nunca lleva el dominio dentro |
 | `tpv-web/test/clinica-8b-puras.test.ts` (17) | el orden de los servicios y su contador, el reparto del buscador, si el aparato sabe enseñar un PDF, el nombre del cajero |
-| `tpv-web/test/clinica-8b-fotos.test.tsx` (11) | la zona de hoy, disparar sin zona, el disparador que no finge y la capa del póster |
+| `tpv-web/test/clinica-8b-fotos.test.tsx` (13) | la zona de hoy, disparar sin zona, el disparador que no finge, la capa del póster y que esa capa no es una puerta sin salida |
 | `tpv-web/test/clinica-8b-tablet.test.tsx` (14) | los cuatro del test en la tablet |
 | `tpv-web/test/clinica-8b-agenda.test.tsx` (10) | los servicios por categoría, las horas a la vista, el estetoscopio y la columna |
 | `tpv-web/test/clinica-8b-venta.test.ts` (6) | los iconos de clínica, y que el reparto de hostelería no se mueve |

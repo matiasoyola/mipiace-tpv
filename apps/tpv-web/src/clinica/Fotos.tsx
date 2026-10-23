@@ -236,7 +236,16 @@ function Camara(props: {
   // en medio de la pantalla se toca.
   //
   // Se tapa con una capa propia: negro, el texto de estado dentro y nada
-  // tocable. En cuanto llega el primer frame (`onLoadedData`) se quita.
+  // tocable. En cuanto llega el primer frame se quita.
+  //
+  // Y ESTO NO PUEDE SER UNA PUERTA SIN SALIDA. `pintando` bloquea además
+  // el disparador, así que un aparato donde el evento del primer frame
+  // no llegara dejaría la cámara abierta y la foto imposible — peor que
+  // el triángulo de «play» que se viene a tapar. Dos redes: se escuchan
+  // TRES eventos distintos (ver el `<video>`), y hay un plazo de 3 s
+  // tras el cual se da por pintando de todas formas. Si a los 3 s no hay
+  // imagen, lo que la podóloga ve es negro y puede disparar: una foto
+  // negra se repite, una cámara que no dispara no.
   const [pintando, setPintando] = useState(false);
   /** ¿La cámara de este aparato tiene flash que se pueda encender? */
   const [hayLinterna, setHayLinterna] = useState(false);
@@ -352,8 +361,13 @@ function Camara(props: {
         }
       }
     })();
+    // El plazo de los 3 s. Ver la nota de `pintando`.
+    const plazo = setTimeout(() => {
+      if (!cancelado) setPintando(true);
+    }, 3000);
     return () => {
       cancelado = true;
+      clearTimeout(plazo);
       pararStream();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -615,7 +629,14 @@ function Camara(props: {
           // a pintar su controlador. Lo que se hace es taparlo con una
           // capa propia mientras no haya frame (ver abajo), y quitarla
           // en cuanto el primero llegue.
+          // TRES eventos y no uno. `loadeddata` es el que llega en
+          // escritorio; en algunos WebView con autoplay restringido llega
+          // `playing` y `loadeddata` no, o llega sólo `timeupdate` al
+          // primer frame. Cualquiera de los tres significa lo mismo: ya
+          // hay imagen.
           onLoadedData={() => setPintando(true)}
+          onPlaying={() => setPintando(true)}
+          onTimeUpdate={() => setPintando(true)}
           className="absolute inset-0 w-full h-full object-cover"
         />
         {/* LA CAPA QUE TAPA EL PÓSTER DE «PLAY» de Android.

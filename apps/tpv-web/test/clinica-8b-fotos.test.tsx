@@ -277,3 +277,38 @@ describe("clinica-8 (10) · el póster de «play» no se ve", () => {
     ).toBeNull();
   });
 });
+
+// ── 5 · Y la capa NO puede ser una puerta sin salida ────────────────
+
+describe("clinica-8 (10) · si el primer frame no llega, se dispara igual", () => {
+  it("a los 3 s se da por pintando: una foto negra se repite, una cámara que no dispara no", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await montar(["L:h"]);
+      // Sin ningún evento del vídeo: el aparato donde `loadeddata` no
+      // llega. Antes del plazo, bloqueado (es lo que tapa el póster).
+      expect(disparador().disabled).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3100);
+      });
+      // Y después, se puede hacer la foto.
+      expect(disparador().disabled).toBe(false);
+      expect(
+        container.querySelector('[data-test="camara-arrancando"]'),
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("y `playing` solo también vale, sin esperar el plazo", async () => {
+    // En algunos WebView con autoplay restringido llega `playing` y
+    // `loadeddata` no.
+    await montar(["L:h"]);
+    const video = container.querySelector("video")!;
+    await act(async () => {
+      video.dispatchEvent(new Event("playing"));
+    });
+    expect(disparador().disabled).toBe(false);
+  });
+});
