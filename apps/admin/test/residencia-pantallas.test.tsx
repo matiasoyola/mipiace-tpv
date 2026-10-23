@@ -111,6 +111,12 @@ const EDIFICIO = {
 
 const RESIDENTES = {
   alcance: "CENTRO" as const,
+  // alta-minima · el resumen del centro. Carmen y Luis están COMPLETOS en
+  // este fixture a propósito: lo que estos tests guardan es la pantalla de
+  // residencia-1, y la de alta-minima tiene sus propios fixtures en
+  // `alta-minima-pantallas.test.tsx` — con el resumen a cero, el filtro
+  // «Sólo incompletas» ni se ofrece y la lista se pinta como siempre.
+  resumen: { total: 2, incompletas: 0, datosPendientes: 0, conImprescindibles: 0 },
   residentes: [
     {
       clientId: CARMEN,
@@ -137,6 +143,7 @@ const RESIDENTES = {
         floorName: "Primera",
         desde: "2026-01-10T00:00:00.000Z",
       },
+      faltan: [],
     },
     {
       // El INGRESO PENDIENTE: sin cama. Está permitido y tiene que verse.
@@ -154,6 +161,7 @@ const RESIDENTES = {
       placeType: "PRIVADA" as const,
       responsible: null,
       cama: null,
+      faltan: [],
     },
   ],
 };
@@ -411,13 +419,20 @@ describe("residencia-1 · Residentes", () => {
     expect(texto).toContain("Se libera su cama");
   });
 
-  it("el ingreso exige nombre, nivel y plaza, y lo dice ANTES de llegar al 400", async () => {
+  it("alta-minima · el ingreso SÓLO exige el nombre, y dice qué va a quedar pendiente", async () => {
+    // Esto es lo que alta-minima invirtió. Antes bloqueaban tres —nombre,
+    // nivel y plaza— y era lo que dejaba a cuarenta y tres señoras fuera
+    // del programa: existir en el sistema no puede depender de tener el
+    // papeleo hecho. Lo que queda es el aviso, que es dato y no bloqueo.
     await pintar(ResidentesPage);
     await pulsar(botonPorTexto("Nuevo ingreso")!);
-    expect(container.textContent).toContain("Falta el nombre");
-    expect(container.textContent).toContain("el nivel de dependencia");
-    expect(container.textContent).toContain("el tipo de plaza");
-    // Y el botón de guardar está deshabilitado.
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Con el nombre basta");
+    expect(texto).toContain("puedes completarlo después");
+    // Lo que se va a quedar pendiente, dicho antes de guardar.
+    expect(texto).toContain("el nivel de dependencia");
+    expect(texto).toContain("el tipo de plaza");
+    // Y el botón sigue deshabilitado SIN NOMBRE: eso no cambió.
     const guardar = botonPorTexto("Registrar ingreso")!;
     expect(guardar.disabled).toBe(true);
     expect(posts).toHaveLength(0);

@@ -94,6 +94,10 @@ export function PanelPage() {
   }
 
   const { abierto, relevos, obligaciones, turno, indicadores } = panel;
+  // alta-minima · con `?? null` porque el panel de una API anterior a
+  // este bloque no lo trae: durante los minutos de un despliegue, lo que
+  // la dirección ve es el panel sin la tarjeta, no una pantalla en blanco.
+  const fichas = panel.fichasIncompletas ?? null;
   const porArreglar = panel.porArreglar ?? {
     pinesPorRenovar: [],
     residentesSinPlan: [],
@@ -111,6 +115,104 @@ export function PanelPage() {
       </p>
 
       {error && <FieldError message={error} />}
+
+      {/* ══ alta-minima · LAS FICHAS DE RESIDENTE INCOMPLETAS ════
+          **ARRIBA Y FIJA mientras quede alguna**, y eso es lo que el
+          bloque pide con estas palabras: «avisar mucho, en todos los
+          sitios donde mira la dirección».
+
+          Va DELANTE de «qué hay abierto hoy» aunque no sea una urgencia
+          clínica, y es la única excepción al orden de urgencia de esta
+          pantalla. La razón: durante las dos semanas que duran, esto es
+          **el trabajo** de quien abre este panel, y detrás de cinco
+          secciones no se mira. Cuando no quede ninguna desaparece sola y
+          el panel vuelve a su orden de siempre.
+
+          Y el botón: «Completar» abre la primera y, al guardar,
+          «Siguiente incompleta» —eso lo hace la pantalla de Residentes—.
+          Recorrer las 43 no obliga a volver a la lista. */}
+      {fichas && fichas.incompletas > 0 && (
+        <section className="mb-7">
+          <div
+            className={`rounded-2xl border px-5 py-4 ${
+              fichas.conImprescindibles > 0
+                ? "border-rose-200 bg-rose-50"
+                : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <p
+              className={`text-[14.5px] font-semibold ${
+                fichas.conImprescindibles > 0 ? "text-rose-900" : "text-amber-900"
+              }`}
+            >
+              {fichas.incompletas === 1
+                ? "1 ficha de residente incompleta"
+                : `${fichas.incompletas} fichas de residentes incompletas`}
+              {" · "}
+              {fichas.datosPendientes === 1
+                ? "1 dato pendiente"
+                : `${fichas.datosPendientes} datos pendientes`}
+            </p>
+            <p
+              className={`mt-1 text-[13px] ${
+                fichas.conImprescindibles > 0 ? "text-rose-900" : "text-amber-900"
+              }`}
+            >
+              {fichas.conImprescindibles > 0 ? (
+                <>
+                  {fichas.conImprescindibles === 1
+                    ? "A 1 le falta algo imprescindible"
+                    : `A ${fichas.conImprescindibles} les falta algo imprescindible`}
+                  : sin DNI, sin grado reconocido o sin un familiar al que
+                  llamar, el expediente no está completo para una inspección —
+                  y en plaza concertada, sin grado{" "}
+                  <strong>no se factura a la Junta</strong>.
+                </>
+              ) : (
+                <>
+                  Lo que falta es recomendable: el NSS, la fecha de nacimiento,
+                  la cama. Se atienden igual.
+                </>
+              )}
+            </p>
+            {/* Unos cuantos nombres, no los 43. Cada uno abre SU ficha:
+                la dirección casi siempre va buscando a alguien concreto,
+                y «Completar» es para cuando va a hacer la pasada. */}
+            <ul className="mt-3 space-y-1">
+              {fichas.primeras.map((r) => (
+                <li key={r.clientId} className="text-[13.5px]">
+                  <Link
+                    to={`/admin/residencia/residentes?completar=${r.clientId}`}
+                    className="underline"
+                  >
+                    {r.nombre}
+                  </Link>
+                  <span className="text-slate-600">
+                    {r.habitacion && ` · habitación ${r.habitacion}`}
+                    {" · "}
+                    {r.faltan.map((f) => f.etiqueta).join(", ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {fichas.incompletas > fichas.primeras.length && (
+              <p className="mt-1 text-[13px] text-slate-600">
+                y {fichas.incompletas - fichas.primeras.length} más.
+              </p>
+            )}
+            <Link
+              to={`/admin/residencia/residentes${
+                fichas.primeras[0]
+                  ? `?completar=${fichas.primeras[0].clientId}`
+                  : ""
+              }`}
+              className="mt-4 flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-[13.5px] font-medium text-mipiace-ink hover:bg-slate-50 sm:w-auto sm:px-6"
+            >
+              Completar
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* ══ 1 · QUÉ HAY ABIERTO HOY ══════════════════════════════ */}
       <section className="mb-7">

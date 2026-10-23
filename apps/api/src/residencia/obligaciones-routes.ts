@@ -41,6 +41,9 @@ import {
   MIME_DE_PDF,
 } from "../clinica/ficheros.js";
 import { getPrisma } from "../context.js";
+// alta-minima · las fichas de residente incompletas, como obligación
+// viva del centro. La misma función que la tarjeta del panel.
+import { lasFichasIncompletas } from "./panel.js";
 import {
   periodicidadEnPalabras,
   utcToWallDate,
@@ -264,7 +267,7 @@ export async function registerResidenciaObligacionesRoutes(
       const prisma = getPrisma();
       const ahora = new Date();
 
-      const [duties, panel] = await Promise.all([
+      const [duties, panel, fichas] = await Promise.all([
         prisma.managementDuty.findMany({
           where: { tenantId: auth.tenantId },
           orderBy: [{ active: "desc" }, { family: "asc" }, { name: "asc" }],
@@ -289,6 +292,11 @@ export async function registerResidenciaObligacionesRoutes(
           },
         }),
         obligacionesDelPanel(prisma, { tenantId: auth.tenantId, ahora }),
+        // alta-minima · las fichas de residente incompletas. Es la MISMA
+        // función que alimenta la tarjeta del panel, no una segunda
+        // cuenta: dos cuentas del mismo número acaban diciendo cosas
+        // distintas en dos pantallas que la dirección mira seguidas.
+        lasFichasIncompletas(prisma, auth.tenantId),
       ]);
 
       return reply.code(200).send({
@@ -307,6 +315,50 @@ export async function registerResidenciaObligacionesRoutes(
         hoy: panel.hoy,
         vencidas: panel.vencidas,
         proximas: panel.proximas,
+        // ── alta-minima · LAS OBLIGACIONES VIVAS DEL CENTRO ───────
+        //
+        // Las fichas de residente incompletas son una obligación del
+        // centro, **sin fecha de vencimiento inventada**. Y de ahí sale
+        // que vayan aquí y no como una `ManagementDuty` con sus
+        // `DutyOccurrence`:
+        //
+        //   · una ocurrencia **necesita un `due_on`** (su índice único es
+        //     `(duty_id, due_on)`), así que meterla ahí obligaría a
+        //     inventarse un día de vencimiento. Un «vence el 31» que
+        //     nadie ha acordado con nadie es un dato falso que luego sale
+        //     en rojo en el panel;
+        //   · una ocurrencia **se marca hecha con firma y evidencia**, y
+        //     esto no se marca: se APAGA SOLO cuando el último dato
+        //     entra. Un botón de «hecho» sobre esto sería un botón para
+        //     mentir.
+        //
+        // Lo que sí tiene es la otra mitad de una obligación: un
+        // responsable (la dirección), una consecuencia y un sitio al que
+        // ir con un toque. `null` cuando no hay ninguna, para que la
+        // pantalla no pinte una sección vacía.
+        delCentro:
+          fichas.incompletas === 0
+            ? []
+            : [
+                {
+                  code: "FICHAS_DE_RESIDENTE_INCOMPLETAS",
+                  nombre: "Completar las fichas de residente",
+                  family: "INTERNO",
+                  // LEGAL y no INTERNO: sin DNI, sin grado reconocido y
+                  // sin familiar responsable localizable, el expediente
+                  // del residente no cumple lo que la Consejería pide en
+                  // una inspección. Lo que falta es administrativo; la
+                  // consecuencia de que falte, no.
+                  consequence: "LEGAL",
+                  cuantas: fichas.incompletas,
+                  datosPendientes: fichas.datosPendientes,
+                  conImprescindibles: fichas.conImprescindibles,
+                  detalle:
+                    fichas.incompletas === 1
+                      ? "1 ficha de residente incompleta"
+                      : `${fichas.incompletas} fichas de residentes incompletas`,
+                },
+              ],
         // Cuántas hay de la plantilla por cargar. Es lo que pinta el
         // botón: «cargar el catálogo (26)» o nada si ya está.
         plantilla: await cuantasFaltanDeLaPlantilla(auth.tenantId),

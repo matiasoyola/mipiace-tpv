@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@mipiacetpv/contrato-encargado": "workspace:*",
+    "@mipiacetpv/residencia-plan": "workspace:*",
     "@mipiacetpv/ticket-model": "workspace:*",
     "@sentry/react": "^10.57.0",
     "exceljs": "^4.4.0",

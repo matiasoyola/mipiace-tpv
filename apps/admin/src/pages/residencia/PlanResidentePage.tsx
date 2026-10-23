@@ -55,8 +55,10 @@ import { Pastilla, SelectorDeFrecuencia } from "./frecuencia-ui.js";
 
 interface Plan {
   residente: {
-    dependencyLevel: NivelDependencia;
-    admissionDate: string;
+    // alta-minima · los dos pueden ser `null`: un residente creado con
+    // sólo el nombre no tiene nivel, y sin nivel no se precarga plan.
+    dependencyLevel: NivelDependencia | null;
+    admissionDate: string | null;
     dischargeDate: string | null;
   };
   lineas: LineaDelPlan[];
@@ -162,8 +164,20 @@ export function PlanResidentePage() {
           Umbrales propios
         </Link>
         <p className="text-[13.5px] text-slate-500">
-          {NIVEL_LABEL[plan.residente.dependencyLevel]} · ingresó el{" "}
-          {new Date(plan.residente.admissionDate).toLocaleDateString("es-ES")}
+          {/* alta-minima · los dos con su hueco. Un `NIVEL_LABEL[null]` es
+              `undefined` y un `new Date(null)` es el 1 de enero de 1970:
+              lo que salía era «ingresó el 1/1/1970», que parece un dato y
+              no lo es. La frase dice qué hacer, porque el plan de este
+              residente depende de ello. */}
+          {plan.residente.dependencyLevel
+            ? NIVEL_LABEL[plan.residente.dependencyLevel]
+            : "Sin nivel de dependencia · ponlo en su ficha para poder precargar el plan"}
+          {plan.residente.admissionDate && (
+            <>
+              {" · ingresó el "}
+              {new Date(plan.residente.admissionDate).toLocaleDateString("es-ES")}
+            </>
+          )}
           {plan.residente.dischargeDate && (
             <>
               {" "}

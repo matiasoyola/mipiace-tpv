@@ -20,6 +20,9 @@ importers:
       '@mipiacetpv/contrato-encargado':
         specifier: workspace:*
         version: link:../../packages/contrato-encargado
+      '@mipiacetpv/residencia-plan':
+        specifier: workspace:*
+        version: link:../../packages/residencia-plan
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../../packages/ticket-model

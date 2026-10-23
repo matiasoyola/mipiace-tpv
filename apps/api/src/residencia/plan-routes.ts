@@ -79,6 +79,10 @@ import {
   deColumnasDefault,
   mismaFrecuencia,
 } from "./frecuencia-columnas.js";
+// alta-minima · la misma precarga que hace el alta de uno. Se reutiliza y
+// no se copia: dos versiones de «no abras una línea de un control que ya
+// tiene una viva» se separan a la primera.
+import { aplicarPlantilla } from "./plan.js";
 
 const PUERTAS_PLANTILLAS = [requireOwner, ensureClinicaEnabled, ensureResidenciaEnabled];
 const PUERTAS_PLAN = [requireOwnerOrCashier, ensureClinicaEnabled, ensureResidenciaEnabled];
@@ -535,8 +539,11 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
 
         return {
           residente: {
+            // alta-minima · los dos pueden ser `null`. La pantalla del
+            // plan lo pinta como «sin nivel todavía» y ofrece ponerlo;
+            // lo que no puede es salir como «Invalid Date».
             dependencyLevel: perfil.dependencyLevel,
-            admissionDate: perfil.admissionDate.toISOString().slice(0, 10),
+            admissionDate: perfil.admissionDate?.toISOString().slice(0, 10) ?? null,
             dischargeDate: perfil.dischargeDate?.toISOString().slice(0, 10) ?? null,
           },
           // Las vivas y el histórico, separados: la pantalla pinta las
@@ -721,6 +728,113 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
   // control»), y lo que pasa por debajo es un `UPDATE … SET to_at`. La
   // fila se queda: «¿qué le tocaba a doña Carmen el 3 de marzo?» tiene que
   // tener respuesta.
+  // ════════════════════════════════════════════════════════════════
+  //  alta-minima · CARGAR LA PLANTILLA DE SU NIVEL
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Un residente creado con sólo el nombre nace **sin nivel y sin plan**
+  // (ver `residentes-routes.ts`). Cuando la dirección le pone el nivel,
+  // la ficha ofrece «Cargar el plan de cuidados de «dependiente»» y esto
+  // es el botón: un toque, la misma precarga que hace el alta de uno.
+  //
+  // ── POR QUÉ ES UNA RUTA Y NO UN EFECTO DEL PATCH ───────────────
+  //
+  // Porque poner el nivel y abrirle a alguien veinte líneas de plan son
+  // dos actos distintos, y el segundo **no se puede deshacer con un
+  // botón**: las líneas se cierran, no se borran, así que un plan abierto
+  // por error se queda en el histórico para siempre.
+  //
+  // Y por lo que está pasando cuando ocurre: la dirección está
+  // corrigiendo cuarenta y tres fichas de golpe desde la tarjeta del
+  // panel. Que teclear un dato administrativo escriba de paso el plan de
+  // cuidados de una persona es la clase de efecto secundario que nadie
+  // relaciona con lo que acaba de hacer.
+  //
+  // ── IDEMPOTENTE, Y NO POR UN `if` ──────────────────────────────
+  //
+  // `aplicarPlantilla` con `nivelAnterior: null` no cierra nada y **no
+  // abre una línea de un control que ya tiene una viva**, sea de
+  // plantilla o manual. Así que darle dos veces no duplica el plan ni
+  // pisa lo que la DUE puso a mano: la segunda vez contesta con
+  // `abiertas: []`.
+  app.post(
+    "/residencia/residentes/:clientId/plan/plantilla",
+    {
+      preHandler: PUERTAS_PLAN,
+      schema: {
+        params: {
+          type: "object",
+          required: ["clientId"],
+          additionalProperties: false,
+          properties: { clientId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const ctx = await contextoDelPlan(request, reply);
+      if (!ctx) return;
+      const { tenantId, clientId, userId } = ctx;
+      const prisma = getPrisma();
+
+      return conHistoria(request, reply, { clientId, action: "WRITE" }, async () => {
+        const perfil = await prisma.residentProfile.findUniqueOrThrow({
+          where: { clientId },
+          select: {
+            dependencyLevel: true,
+            admissionDate: true,
+            dischargeDate: true,
+          },
+        });
+        if (perfil.dependencyLevel == null) {
+          // El orden importa: sin nivel no hay plantilla, y el mensaje
+          // manda a poner el nivel en vez de dejar a la dirección
+          // buscando qué falta.
+          return reply.code(409).send({
+            error: "SIN_NIVEL_DE_DEPENDENCIA",
+            message:
+              "Ponle primero el nivel de dependencia: el plan de cuidados se precarga del nivel.",
+          });
+        }
+        if (perfil.dischargeDate != null) {
+          return reply.code(409).send({
+            error: "RESIDENTE_DADO_DE_ALTA",
+            message:
+              "Este residente está dado de alta. Si ha vuelto a ingresar, quítale primero la fecha de alta.",
+          });
+        }
+
+        const resultado = await prisma.$transaction(async (tx) => {
+          const dek = await asegurarDek(tenantId, tx);
+          return aplicarPlantilla(tx, {
+            tenantId,
+            clientId,
+            nivel: perfil.dependencyLevel!,
+            // `null`: no hay plantilla anterior que cerrar. Es lo que
+            // distingue esto de un cambio de nivel.
+            nivelAnterior: null,
+            // La fecha de ingreso si se sabe, y «ahora» si no: igual que
+            // el alta de uno, para que `queToca` no le pida nada de antes
+            // de llegar al centro.
+            desde: perfil.admissionDate ?? new Date(),
+            userId,
+            motivo: "plan cargado de la plantilla del nivel",
+            dek,
+          });
+        });
+
+        return {
+          plan: {
+            abiertas: resultado.abiertas,
+            cerradas: resultado.cerradas,
+            // Las que ya tenía y no se han tocado: ahí están las
+            // manuales, que es la promesa de esta ruta.
+            intactas: resultado.yaTenian,
+          },
+        };
+      });
+    },
+  );
+
   app.delete(
     "/residencia/residentes/:clientId/plan/:itemId",
     {
