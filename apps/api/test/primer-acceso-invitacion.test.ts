@@ -459,6 +459,19 @@ describe("POST /auth/invitacion/reenviar", () => {
     expect(sentEmails[0]!.text).toContain("Jardín de Gredos, S.A.");
   });
 
+  it("la razón social acabada en punto no deja «S.A..» en el correo", async () => {
+    await sembrarInvitado();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: "/auth/invitacion/reenviar",
+      payload: { email: OWNER_EMAIL },
+    });
+    expect(sentEmails[0]!.text).toContain("Jardín de Gredos, S.A.");
+    expect(sentEmails[0]!.text).not.toContain("S.A..");
+    expect(sentEmails[0]!.html).not.toContain("S.A..");
+  });
+
   it("el de un comercio SÍ, y con la razón social dentro", async () => {
     tenant.residenciaEnabled = false;
     await sembrarInvitado();
@@ -610,6 +623,61 @@ describe("sabotajes", () => {
     // Y la contraseña sigue sin existir: el caducado no entra por ningún
     // camino.
     expect(users.get(OWNER_ID)!.passwordHash).toBeNull();
+  });
+
+  // Lo encontró el bucle visual del 23-10: con el candado compartido con
+  // el confirm del reset (10 en 15 min), abrir el enlace y elegir la
+  // contraseña se comía la mitad del cupo, y el panel en desarrollo monta
+  // los efectos dos veces. La propietaria se quedaba fuera de su propia
+  // pantalla con catorce minutos de espera.
+  it("abrir el enlace y aceptar NO agota el cupo, y el reset no se lo come", async () => {
+    const app = await buildApp();
+    // Diez visitas a la pantalla (dos peticiones cada una, como en
+    // desarrollo) y la undécima sigue contestando.
+    for (let i = 0; i < 5; i++) {
+      const token = await sembrarInvitado();
+      for (const _ of [1, 2]) {
+        const r = await app.inject({
+          method: "POST",
+          url: "/auth/invitacion/consultar",
+          payload: { token },
+        });
+        expect(r.statusCode).toBe(200);
+      }
+    }
+    const token = await sembrarInvitado();
+    const dentro = await app.inject({
+      method: "POST",
+      url: "/auth/invitacion/aceptar",
+      payload: { token, password: "elegidapor-carmen-2026" },
+    });
+    expect(dentro.statusCode, dentro.body).toBe(200);
+  });
+
+  it("el candado de la invitación NO es el del reset: no se gastan entre sí", async () => {
+    const app = await buildApp();
+    // Se agota el del reset a base de intentos con tokens inventados.
+    for (let i = 0; i < 12; i++) {
+      await app.inject({
+        method: "POST",
+        url: "/auth/password-reset/confirm",
+        payload: { token: `inventado-${i}`, newPassword: "cualquiera-123" },
+      });
+    }
+    const reset = await app.inject({
+      method: "POST",
+      url: "/auth/password-reset/confirm",
+      payload: { token: "otro-mas", newPassword: "cualquiera-123" },
+    });
+    expect(reset.statusCode).toBe(429);
+    // Y la invitación sigue abierta: son dos caminos del mismo día.
+    const token = await sembrarInvitado();
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/invitacion/aceptar",
+      payload: { token, password: "elegidapor-carmen-2026" },
+    });
+    expect(res.statusCode, res.body).toBe(200);
   });
 
   it("pedir reenvío de un email que no existe contesta EXACTAMENTE lo mismo", async () => {

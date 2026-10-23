@@ -427,6 +427,22 @@ function ModalAlta({
       .catch(() => setLibres([]));
   }, []);
 
+  // primer-acceso · DESPUÉS DE GUARDAR, EL CURSOR VUELVE ARRIBA.
+  //
+  // Lo vio el bucle visual del 23-10 y no un test: el modal se queda
+  // donde estaba —abajo, junto a los dos botones— así que el campo del
+  // nombre queda fuera de pantalla y cada residente costaba un scroll de
+  // vuelta. Con cuarenta y ocho, son cuarenta y ocho scrolls.
+  //
+  // `focus()` arrastra el scroll del contenedor solo, así que no hace
+  // falta tocarlo: basta con poner el cursor donde se escribe. Por id y
+  // no por ref porque `TextField` no reenvía la suya, y cambiar un
+  // componente compartido de toda la casa por esto sería pagar de más.
+  useEffect(() => {
+    if (ultimo == null) return;
+    document.getElementById("nombre")?.focus();
+  }, [ultimo]);
+
   // El aviso sale ANTES de llegar al 400, igual que el nº de colegiado en
   // la pantalla de Personal de clinica-1.
   const faltan = [

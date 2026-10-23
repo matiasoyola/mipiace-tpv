@@ -98,10 +98,16 @@ export async function sendOwnerInviteEmail(
     : "Ya tienes acceso a la gestión de tu centro";
   const caduca = diaYMes(params.caducaEl);
 
+  // «Jardín de Gredos, S.A.» ya acaba en punto: añadirle otro deja
+  // «S.A..» en el correo. Lo vio el bucle visual, no un test.
+  const presentacion = marca.presentacion.endsWith(".")
+    ? marca.presentacion
+    : `${marca.presentacion}.`;
+
   const text = [
     `Hola ${params.ownerName},`,
     ``,
-    `${marca.presentacion}.`,
+    presentacion,
     ``,
     `Crea tu contraseña aquí:`,
     params.enlace,
@@ -145,7 +151,7 @@ export async function sendOwnerInviteEmail(
 <html lang="es">
 <body style="font-family: -apple-system, system-ui, sans-serif; color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px;">
   <p>Hola ${escape(params.ownerName)},</p>
-  <p>${escape(marca.presentacion)}.</p>
+  <p>${escape(presentacion)}</p>
   <p style="margin: 28px 0;">
     <a href="${escape(params.enlace)}"
        style="display: inline-block; background: #E8614D; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; padding: 14px 26px; border-radius: 12px;">

@@ -14,14 +14,18 @@
 // nadie lo escribiera, y «ningún token en los logs» es una de las cosas que
 // este bloque respeta.
 //
-// ── El throttle es el del reset, y es a propósito ───────────────────
+// ── Los dos candados ────────────────────────────────────────────────
 //
-// `aceptar` y `consultar` hacen un `argon2.verify` por token vivo, igual
-// que el confirm del reset, así que comparten su candado por IP. Y
-// `reenviar` comparte el de solicitud por email: el prompt lo pide
-// explícitamente («el rate limit del reset se aplica también al reenvío»),
-// y si no, el enlace del primer acceso sería la puerta sin candado de la
-// misma casa.
+// `reenviar` comparte el throttle de SOLICITUD del reset, por email: el
+// prompt lo pide explícitamente («el rate limit del reset se aplica
+// también al reenvío»), y si no, el enlace del primer acceso sería la
+// puerta sin candado de la misma casa.
+//
+// `consultar` y `aceptar` hacen el mismo `argon2.verify` por token vivo
+// que el confirm del reset, así que llevan candado por IP — pero el
+// SUYO (`invitacionThrottle`), no el del reset. Ver el comentario del
+// techo en `rate-limit.ts`: compartirlo dejó al bucle visual fuera de su
+// propia pantalla con un 429.
 
 import type { FastifyInstance } from "fastify";
 
@@ -32,10 +36,7 @@ import {
 } from "../superadmin/invite-email.js";
 import { hashPassword } from "./passwords.js";
 import { buscarInvitacion, crearInvitacion } from "./invitacion.js";
-import {
-  passwordResetConfirmThrottle,
-  passwordResetThrottle,
-} from "./rate-limit.js";
+import { invitacionThrottle, passwordResetThrottle } from "./rate-limit.js";
 import { signAccessToken, signRefreshToken } from "./tokens.js";
 import {
   CONTRASENA_MIN,
@@ -92,7 +93,7 @@ export async function registerInvitacionRoutes(
     },
     async (request, reply) => {
       const { token } = request.body as { token: string };
-      const rl = await passwordResetConfirmThrottle(request.ip);
+      const rl = await invitacionThrottle(request.ip);
       if (rl.exceeded) {
         return reply.code(429).send({
           error: "RATE_LIMITED",
@@ -148,7 +149,7 @@ export async function registerInvitacionRoutes(
         password: string;
         remember?: boolean;
       };
-      const rl = await passwordResetConfirmThrottle(request.ip);
+      const rl = await invitacionThrottle(request.ip);
       if (rl.exceeded) {
         return reply.code(429).send({
           error: "RATE_LIMITED",

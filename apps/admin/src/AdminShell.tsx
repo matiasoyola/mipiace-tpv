@@ -639,7 +639,18 @@ export function AdminShell({
           empiece a facturar sin que nadie haya comprobado sus datos fiscales
           ni que sus cajas tienen la cadena limpia. Lo que sí dice es a quién
           llamar. */}
-      {shellCaps?.enEnsayo === true && <EnsayoAvisoBanner />}
+      {/* primer-acceso · Y SÓLO CON CAJA, que es la mitad que faltaba.
+          Lo encontró el bucle visual del 23-10: la PRIMERA pantalla de la
+          directora de Jardín de Gredos abría con seis líneas sobre el TPV,
+          los tickets de prueba y Hacienda. Esa residencia no tiene caja:
+          no vende, no cobra, no arquea y no emite una factura en su vida,
+          así que «tu cuenta está en ensayo» no le avisa de nada — le
+          describe un producto que no ha comprado, el día que entra.
+          Mismo gate y misma razón que el banner de Holded de aquí al lado
+          (H1): lo que no puede pasar en esa cuenta no se avisa. */}
+      {shellCaps?.enEnsayo === true && shellCaps?.caja === true && (
+        <EnsayoAvisoBanner />
+      )}
       <HoldedHealthBanner
         cajaEnabled={shellCaps?.caja === true}
         holdedEnabled={shellCaps?.holdedEnabled !== false}

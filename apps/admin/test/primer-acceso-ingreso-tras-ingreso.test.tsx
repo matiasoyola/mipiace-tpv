@@ -184,6 +184,10 @@ describe("el formulario de ingreso", () => {
     expect(
       container.querySelector('[data-test="ultimo-ingreso"]')!.textContent,
     ).toContain("Dolores queda registrado");
+    // …con el cursor ya en el nombre del siguiente: sin esto el modal se
+    // queda abajo, junto a los botones, y cada residente cuesta un
+    // scroll de vuelta.
+    expect(document.activeElement).toBe(container.querySelector("#nombre"));
 
     // Y la lista se ha recargado por detrás.
     const lecturas = peticiones.filter(

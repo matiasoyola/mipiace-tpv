@@ -74,7 +74,24 @@ vi.mock("../src/api.js", () => ({
           cajaEnabled: false,
           residenciaEnabled: true,
           agendaEnabled: true,
+          // puesta-en-marcha · `null` = la cuenta no factura todavía, que
+          // es como nace una residencia recién activada. Es lo que hace
+          // que el caso de la banda del ensayo sea el de Carmen.
+          facturaDesde: null,
+          businessType: "SERVICES",
+          holdedEnabled: false,
+          holdedDisconnectedAt: null,
           contratoClinico: meContrato,
+        },
+      };
+    }
+    if (path === "/admin/tenant/settings") {
+      return {
+        settings: {
+          agendaEnabled: true,
+          cajaEnabled: false,
+          residenciaEnabled: true,
+          clinicalRecordsEnabled: true,
         },
       };
     }
@@ -435,5 +452,30 @@ describe("el 423 del contrato no es un error rojo", () => {
     await render(<FieldError message="No se pudo guardar. Reintenta." />);
     expect(container.querySelector('[data-test="falta-contrato"]')).toBeNull();
     expect(texto()).toContain("No se pudo guardar");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  5 · La banda del ensayo no le habla del TPV a quien no tiene caja
+// ════════════════════════════════════════════════════════════════════
+//
+// Lo encontró el bucle visual del 23-10, en la PRIMERA pantalla de
+// Carmen: seis líneas sobre vender, cobrar, arquear y Hacienda, en un
+// centro que no tiene caja. Es la misma mitad que faltaba en el banner de
+// Holded antes de H1.
+
+describe("la banda del ensayo", () => {
+  it("no se pinta en una cuenta sin caja, aunque esté en ensayo", async () => {
+    const { AdminShell } = await vi.importActual<
+      typeof import("../src/AdminShell.js")
+    >("../src/AdminShell.js");
+    await render(
+      <AdminShell title="Panel de dirección">
+        <p>contenido</p>
+      </AdminShell>,
+    );
+    // `/auth/me` de este fichero es una residencia sin caja y sin
+    // `facturaDesde`, que es justo el caso: en ensayo y sin TPV.
+    expect(texto()).not.toContain("Tu cuenta está en ensayo");
   });
 });
