@@ -49,9 +49,17 @@ import type { Nivel, ReglaDeGravedad } from "@mipiacetpv/residencia-plan";
 /**
  * La versión vigente de la plantilla. Sube cuando cambia una fila.
  *
- * Hoy 1: es la primera vez que se publica.
+ * **Hoy 2** (historia-1, D-92): se añade la regla de la **salida no
+ * controlada**, que nace N4 con su aviso a guardia. La versión 1 se
+ * jubila con `supersededAt` y no se toca, igual que el catálogo de
+ * controles — una incidencia abierta en octubre guarda
+ * `plantillaVersion = 1` y la auditoría puede reconstruir con qué tabla
+ * se graduó.
+ *
+ * Y sube ENTERA aunque cambie una fila (ver arriba): «¿qué decía la
+ * plantilla el 14 de marzo?» tiene que contestarse con un número.
  */
-export const VERSION_DE_LA_PLANTILLA = 1;
+export const VERSION_DE_LA_PLANTILLA = 2;
 
 /**
  * Los tipos de incidencia que esta plantilla puede abrir.
@@ -80,6 +88,27 @@ export const TIPOS_DE_INCIDENCIA = {
   ALGO_NO_VA_BIEN: "ALGO_NO_VA_BIEN",
   SIN_DEPOSICION: "SIN_DEPOSICION",
   INGESTA_NULA: "INGESTA_NULA",
+  /**
+   * historia-1 (D-92) · **LA SALIDA NO CONTROLADA.**
+   *
+   * Un tipo nuevo y no `NO_LOCALIZADO`, que ya estaba, y la diferencia es
+   * real aunque las dos sean N4 y las dos suenen igual:
+   *
+   *   · `NO_LOCALIZADO` · **nadie sabe dónde está.** La auxiliar hace su
+   *     ronda y la habitación está vacía. Puede estar en el jardín, en la
+   *     capilla o fuera.
+   *   · `SALIDA_NO_CONTROLADA` · **se sabe que se ha ido** y nadie lo
+   *     autorizó. Se abre desde la pantalla de ausencias, y la ausencia
+   *     queda apuntada con sus días (D-93).
+   *
+   * Separarlas es lo que permite contarlas aparte, y eso importa: un
+   * centro con tres fugas por la puerta de la calle y cero
+   * desapariciones dentro tiene un problema de **puerta**, no de
+   * vigilancia, y la medida que lo arregla es otra. Juntas en un solo
+   * tipo, el indicador no distingue una cosa de la otra y la dirección
+   * no sabe qué arreglar.
+   */
+  SALIDA_NO_CONTROLADA: "SALIDA_NO_CONTROLADA",
 } as const;
 
 /**
@@ -307,7 +336,7 @@ export const PLANTILLA_DE_GRAVEDAD: ReglaDeSerie[] = [
     sortOrder: 81,
   },
 
-  // ── Las dos emergencias ──────────────────────────────────────────
+  // ── Las emergencias ──────────────────────────────────────────────
   {
     kind: "EVENT",
     evento: TIPOS_DE_INCIDENCIA.NO_LOCALIZADO,
@@ -315,6 +344,18 @@ export const PLANTILLA_DE_GRAVEDAD: ReglaDeSerie[] = [
     nivel: "N4",
     tipo: TIPOS_DE_INCIDENCIA.NO_LOCALIZADO,
     sortOrder: 90,
+  },
+  // historia-1 (D-92) · **LA FILA NUEVA DE LA VERSIÓN 2.** El §3 de
+  // `00-decisiones.md` gradúa «residente no localizado / salida no
+  // autorizada» como N4; esta fila es la segunda mitad de esa línea, con
+  // su tipo propio para poder contarla aparte (ver `TIPOS_DE_INCIDENCIA`).
+  {
+    kind: "EVENT",
+    evento: TIPOS_DE_INCIDENCIA.SALIDA_NO_CONTROLADA,
+    matiz: null,
+    nivel: "N4",
+    tipo: TIPOS_DE_INCIDENCIA.SALIDA_NO_CONTROLADA,
+    sortOrder: 92,
   },
   {
     kind: "EVENT",
@@ -381,6 +422,7 @@ export const NOMBRE_DEL_TIPO: Record<string, string> = {
   AVERIA: "Avería",
   QUEJA: "Queja",
   ALGO_NO_VA_BIEN: "Algo no va bien",
+  SALIDA_NO_CONTROLADA: "Se ha ido sin que nadie lo autorizara",
   SIN_DEPOSICION: "Sin deposición más de 3 días",
   INGESTA_NULA: "No ha comido nada en dos comidas seguidas",
 };

@@ -316,6 +316,17 @@ const fakePrisma: any = {
   careZoneAssignment: {
     findMany: vi.fn(async () => [{ floorId: null, fromAt: new Date(0), toAt: null }]),
   },
+  // historia-1 (D-92) · las AUSENCIAS. La vista «hoy» del plan las pide
+  // para pasárselas a `queToca`, y un doble sin este modelo contesta 500
+  // «reading findMany» — es la misma factura que `clinicalTenantKey` y
+  // `clinicalProcessorAgreement` ya pagaron en este fichero.
+  //
+  // Vacío: este fichero prueba el plan, no las ausencias. Lo que las
+  // ausencias pausan está en `packages/residencia-plan/test/ausencias.test.ts`
+  // (la tabla pura) y en el e2e de historia-1 (contra Postgres).
+  residentAbsence: {
+    findMany: vi.fn(async () => []),
+  },
   carePlanItem: {
     findMany: vi.fn(async ({ where }: any) => lineasDePlan.filter((l) => casa(l, where))),
     findFirst: vi.fn(async ({ where }: any) => lineasDePlan.find((l) => casa(l, where)) ?? null),

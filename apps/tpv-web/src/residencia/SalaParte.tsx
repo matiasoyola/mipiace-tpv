@@ -47,6 +47,10 @@ export const NOMBRE_DE_LA_CLASE: Record<string, string> = {
   REGISTRO_SIN_TURNO: "Registro sin turno",
   AVISO_QUE_NO_SALIO: "Aviso que no salió a tiempo",
   SIN_PLAN_DE_CUIDADOS: "Sin plan de cuidados",
+  // historia-1 (D-92) · el residente que no está. Una línea, arriba con
+  // las incidencias: es lo primero que el turno entrante tiene que saber
+  // de él.
+  AUSENTE: "Ausente",
 };
 
 /** El color de cada nivel. El mismo que el libro de incidencias del

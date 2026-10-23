@@ -2,8 +2,9 @@
 //
 // Nueve columnas de la clínica (clinica-7), seis de la residencia
 // (residencia-1b, D-63), dos del registro de cuidados (residencia-3),
-// cinco del libro de incidencias (residencia-4) y dos del relevo
-// (residencia-5). Veinticuatro.
+// cinco del libro de incidencias (residencia-4), dos del relevo
+// (residencia-5) y **trece de la ficha clínica del residente, sus
+// ausencias y su ingreso** (historia-1, D-90 a D-94). Treinta y siete.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -371,6 +372,186 @@ export function sitioResumenTardio(
     tenantId,
     tabla: "handover_late_additions",
     columna: "resumen",
+    filaId: id,
+  };
+}
+
+// ── historia-1 · LA FICHA CLÍNICA DEL RESIDENTE (D-90 a D-94) ───────
+//
+// Trece columnas lógicas más, y la razón de que sean TRECE y no cinco es
+// la de siempre en este fichero: **cada columna lógica es un AAD
+// distinto**, así que un `UPDATE` no puede mover el texto de un
+// diagnóstico a la frase de alerta que la puerta pinta en un pasillo, ni
+// el motivo de una ausencia a su destino, ni la nota de un elemento del
+// ingreso al detalle de una sonda. Con un nombre lógico compartido, todos
+// esos movimientos descifrarían y parecerían legítimos.
+//
+// Lo que se queda EN CLARO, declarado: el residente, las fechas, los
+// códigos cerrados (clase y gravedad de una alergia, textura, tipo de
+// ausencia, código de dispositivo, código de elemento) y las firmas. De
+// ahí salen «¿quién está ausente hoy?», «¿qué ingresos tienen
+// pendientes?», los días de la factura de la Junta y el bloqueo de
+// medicación de la Fase 2 — todas consultas SQL. La consecuencia es la de
+// residencia-1b §2: un `SELECT` sigue diciendo que doña Carmen tiene una
+// alergia grave a un medicamento y que lleva tres días fuera. Lo que no
+// dice es a qué, con qué reacción ni por qué.
+
+/** El diagnóstico, como lo escribió el médico. */
+export function sitioTextoDeDiagnostico(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_diagnoses",
+    columna: "text",
+    filaId: id,
+  };
+}
+
+/** Su código CIE-10-ES. Columna lógica propia: «E11.9» no es el texto del
+ *  diagnóstico aunque signifique lo mismo, y con el nombre compartido se
+ *  podrían intercambiar. */
+export function sitioCodigoDeDiagnostico(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_diagnoses",
+    columna: "icd10",
+    filaId: id,
+  };
+}
+
+/** **La frase accionable de la alerta** (D-91), que es lo ÚNICO de la
+ *  ficha que llega a la tablet de un pasillo. Columna lógica propia y
+ *  separada del texto del diagnóstico justamente por eso: si
+ *  compartieran nombre, un `UPDATE` podría copiar «Adenocarcinoma de
+ *  próstata con metástasis» a la columna que la puerta pinta, y
+ *  descifraría. */
+export function sitioFraseDeAlerta(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_diagnoses",
+    columna: "alert_phrase",
+    filaId: id,
+  };
+}
+
+/** Por qué se retiró un diagnóstico que estaba mal. */
+export function sitioMotivoDeRetiradaDeDiagnostico(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_diagnoses",
+    columna: "withdraw_reason",
+    filaId: id,
+  };
+}
+
+/** A qué es alérgico. */
+export function sitioAgenteDeAlergia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "allergies", columna: "agent", filaId: id };
+}
+
+/** Y qué le pasa. Columna lógica propia: «shock anafiláctico» no es el
+ *  agente, y confundirlos en una prescripción es lo que esto evita. */
+export function sitioReaccionDeAlergia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "allergies", columna: "reaction", filaId: id };
+}
+
+/** Por qué se retiró una alergia mal escrita. */
+export function sitioMotivoDeRetiradaDeAlergia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "allergies",
+    columna: "withdraw_reason",
+    filaId: id,
+  };
+}
+
+/** De dónde salió el dato de las alergias: «lo dice la hija», «informe
+ *  del alta». */
+export function sitioFuenteDeLaRevision(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "allergy_reviews", columna: "source", filaId: id };
+}
+
+/** El detalle de un dispositivo: «sonda vesical Foley 16». */
+export function sitioDetalleDeDispositivo(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_devices",
+    columna: "detail",
+    filaId: id,
+  };
+}
+
+/** Lo que no cabe en un código de restricción de dieta. */
+export function sitioNotasDeDieta(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "diet_profiles", columna: "notes", filaId: id };
+}
+
+/** Adónde se fue: «Hospital Nuestra Señora del Prado». */
+export function sitioDestinoDeAusencia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_absences",
+    columna: "destination",
+    filaId: id,
+  };
+}
+
+/** Y por qué: «caída con fractura de fémur». Columna lógica propia, por
+ *  lo mismo que el agente y la reacción de una alergia. */
+export function sitioMotivoDeAusencia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_absences",
+    columna: "reason",
+    filaId: id,
+  };
+}
+
+/** La nota de quien marcó un elemento del ingreso: «la hija trae el
+ *  informe del hospital el lunes». */
+export function sitioNotaDelIngreso(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "admission_checklist_items",
+    columna: "done_note",
     filaId: id,
   };
 }

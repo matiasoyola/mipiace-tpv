@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AjusteDelCentro, LineaDePlan } from "../src/que-toca.js";
+import type { AusenciaDelPlan } from "../src/ausencias.js";
 import { queToca } from "../src/que-toca.js";
 import type { Frecuencia, MomentoDelCentro } from "../src/frecuencia.js";
 import type { TurnoDelCentro } from "../src/turnos.js";
@@ -65,6 +66,10 @@ function elDia(fecha: string): [Date, Date] {
 }
 
 const SIN_AJUSTES: AjusteDelCentro[] = [];
+// historia-1 (D-92) · las ausencias son el séptimo parámetro y no tienen
+// valor por defecto. La tabla de lo que pausan está en
+// `ausencias.test.ts`; aquí se pasa vacío a propósito.
+const SIN_AUSENCIAS: AusenciaDelPlan[] = [];
 
 /** Las horas de pared de las ocurrencias, para leer el test de un golpe. */
 function horas(
@@ -73,7 +78,7 @@ function horas(
   hasta: Date,
   ajustes: AjusteDelCentro[] = SIN_AJUSTES,
 ): string[] {
-  return queToca(plan, ajustes, TURNOS, MOMENTOS, desde, hasta).map((o) =>
+  return queToca(plan, ajustes, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS).map((o) =>
     new Intl.DateTimeFormat("es-ES", {
       timeZone: "Europe/Madrid",
       hour: "2-digit",
@@ -91,7 +96,7 @@ describe("las ocho frecuencias, una por una", () => {
     // puerta y nada «toca». Si esto devolviera algo, la higiene extra
     // («se ha manchado») aparecería como incumplida todos los días.
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([linea("HIGIENE_EXTRA", { kind: "ON_DEMAND" })], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta)).toEqual([]);
+    expect(queToca([linea("HIGIENE_EXTRA", { kind: "ON_DEMAND" })], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toEqual([]);
   });
 
   it("EVERY_SHIFT da una FRANJA por turno indicado", () => {
@@ -103,6 +108,7 @@ describe("las ocho frecuencias, una por una", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     // Tres franjas y no cuatro: la de la noche de AYER arrancó a las
     // 22:00 de ayer, o sea antes de la ventana, y `queToca` contesta «qué
@@ -123,6 +129,7 @@ describe("las ocho frecuencias, una por una", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(oc).toHaveLength(1);
     const noche = oc[0]!;
@@ -141,6 +148,7 @@ describe("las ocho frecuencias, una por una", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(oc).toHaveLength(1);
     expect(oc[0]!.shiftCode).toBe("T");
@@ -156,6 +164,7 @@ describe("las ocho frecuencias, una por una", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(oc.map((o) => o.momentCode)).toEqual(["DESAYUNO", "COMIDA", "CENA"]);
     expect(oc.every((o) => !o.esFranja && o.until === null)).toBe(true);
@@ -174,6 +183,7 @@ describe("las ocho frecuencias, una por una", () => {
       temprano,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     // A las 07:30 todavía es NOCHE: el turno de mañana empieza a las 08.
     // Es correcto y es el ejemplo de por qué los momentos son del centro.
@@ -196,6 +206,7 @@ describe("las ocho frecuencias, una por una", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     // 00, 03 y 06 son noche; 09 y 12 mañana; 15 y 18 tarde; 21 tarde.
     expect(oc.map((o) => o.shiftCode)).toEqual(["N", "N", "N", "M", "M", "T", "T", "T"]);
@@ -210,9 +221,9 @@ describe("las ocho frecuencias, una por una", () => {
     const lunes = elDia("2026-10-12");
     const martes = elDia("2026-10-13");
     const miercoles = elDia("2026-10-14");
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...lunes)).toHaveLength(1);
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...martes)).toHaveLength(0);
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...miercoles)).toHaveLength(1);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...lunes, SIN_AUSENCIAS)).toHaveLength(1);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...martes, SIN_AUSENCIAS)).toHaveLength(0);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...miercoles, SIN_AUSENCIAS)).toHaveLength(1);
   });
 
   it("EVERY_N_DAYS se cuenta DESDE LA LÍNEA, no desde el calendario", () => {
@@ -221,18 +232,18 @@ describe("las ocho frecuencias, una por una", () => {
     const l = linea("ANALITICA", { kind: "EVERY_N_DAYS", everyNDays: 180, shiftCodes: ["M"] }, {
       fromAt: new Date("2026-10-14T06:00:00.000Z"),
     });
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"))).toHaveLength(1);
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-15"))).toHaveLength(0);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"), SIN_AUSENCIAS)).toHaveLength(1);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-15"), SIN_AUSENCIAS)).toHaveLength(0);
     // 14-10-2026 + 180 días = 12-04-2027.
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2027-04-12"))).toHaveLength(1);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2027-04-12"), SIN_AUSENCIAS)).toHaveLength(1);
   });
 
   it("MONTHLY toca su día del mes y ninguno más", () => {
     const l = linea("VISITA_MEDICA", { kind: "MONTHLY", monthDay: 1, shiftCodes: ["M"] });
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-11-01"))).toHaveLength(1);
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-11-02"))).toHaveLength(0);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-11-01"), SIN_AUSENCIAS)).toHaveLength(1);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-11-02"), SIN_AUSENCIAS)).toHaveLength(0);
     // Y en FEBRERO también, que es la razón de que el tope sea el 28.
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2027-02-01"))).toHaveLength(1);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2027-02-01"), SIN_AUSENCIAS)).toHaveLength(1);
   });
 });
 
@@ -265,6 +276,7 @@ describe("la noche y los dos cambios de hora", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     // La franja ARRANCA antes de la ventana, así que `at` queda fuera de
     // `[desde, hasta)` y no sale. Es correcto y es la decisión: `queToca`
@@ -280,6 +292,7 @@ describe("la noche y los dos cambios de hora", () => {
       MOMENTOS,
       new Date("2026-10-12T22:00:00.000Z"),
       new Date("2026-10-13T22:00:00.000Z"),
+      SIN_AUSENCIAS,
     );
     expect(dia13).toHaveLength(1);
     // 22:00 del 13 → 08:00 del 14, que en octubre (UTC+2) es 06:00Z.
@@ -337,6 +350,7 @@ describe("la noche y los dos cambios de hora", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(oc).toHaveLength(23);
     expect(new Set(oc.map((o) => o.at.getTime())).size).toBe(23);
@@ -355,6 +369,7 @@ describe("la noche y los dos cambios de hora", () => {
       MOMENTOS,
       desde,
       hasta,
+      SIN_AUSENCIAS,
     );
     expect(oc).toHaveLength(24);
     expect(new Set(oc.map((o) => o.at.getTime())).size).toBe(24);
@@ -371,6 +386,7 @@ describe("la noche y los dos cambios de hora", () => {
       [{ code: "M1", name: "a las 08:30", atTime: "08:30" }],
       new Date("2026-07-15T00:00:00.000Z"),
       new Date("2026-07-16T00:00:00.000Z"),
+      SIN_AUSENCIAS,
     );
     expect(verano[0]!.at.toISOString()).toBe("2026-07-15T06:30:00.000Z");
     expect(verano[0]!.shiftCode).toBe("M");
@@ -381,6 +397,7 @@ describe("la noche y los dos cambios de hora", () => {
       [{ code: "M1", name: "a las 08:30", atTime: "08:30" }],
       new Date("2026-12-15T00:00:00.000Z"),
       new Date("2026-12-16T00:00:00.000Z"),
+      SIN_AUSENCIAS,
     );
     expect(invierno[0]!.at.toISOString()).toBe("2026-12-15T07:30:00.000Z");
     expect(invierno[0]!.shiftCode).toBe("M");
@@ -398,7 +415,7 @@ describe("la vigencia de la línea", () => {
     // centro. Si la vigencia se midiera por DÍAS en vez de por instantes,
     // le saldría un cuidado incumplido el día de su ingreso.
     const l = linea("TRANSFERENCIAS", todoElDia, { fromAt: new Date("2026-10-14T13:00:00.000Z") });
-    const oc = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"));
+    const oc = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"), SIN_AUSENCIAS);
     expect(oc.map((o) => o.shiftCode)).toEqual(["T", "N"]);
   });
 
@@ -406,7 +423,7 @@ describe("la vigencia de la línea", () => {
     // «Dar de alta» en una residencia es que alguien SE VA. Se le cierra
     // el plan a las 15:00 y la tarde y la noche ya no son suyas.
     const l = linea("TRANSFERENCIAS", todoElDia, { toAt: new Date("2026-10-14T13:00:00.000Z") });
-    const oc = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"));
+    const oc = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"), SIN_AUSENCIAS);
     expect(oc.map((o) => o.shiftCode)).toEqual(["M"]);
     // La tarde empieza EXACTAMENTE a las 15:00, que es el instante del
     // cierre. Y no sale, porque la vigencia es semiabierta por el final
@@ -418,9 +435,9 @@ describe("la vigencia de la línea", () => {
     const l = linea("CAMBIO_POSTURAL", { kind: "EVERY_N_HOURS", everyNHours: 3 }, {
       toAt: new Date("2026-10-13T22:00:00.000Z"), // 00:00 de pared del 14
     });
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"))).toHaveLength(0);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-14"), SIN_AUSENCIAS)).toHaveLength(0);
     // Y el día anterior sí: el histórico se puede reconstruir.
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-13"))).toHaveLength(8);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, ...elDia("2026-10-13"), SIN_AUSENCIAS)).toHaveLength(8);
   });
 
   it("el plan de AYER se contesta con la misma llamada y otra ventana", () => {
@@ -448,9 +465,9 @@ describe("lo que el centro decide", () => {
   it("un control DESACTIVADO en el centro no «toca»", () => {
     const l = linea("HIDRATACION_CUTANEA", { kind: "DAILY", shiftCodes: ["T"] });
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([l], [{ controlCode: "HIDRATACION_CUTANEA", active: false }], TURNOS, MOMENTOS, desde, hasta)).toEqual([]);
+    expect(queToca([l], [{ controlCode: "HIDRATACION_CUTANEA", active: false }], TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toEqual([]);
     // Y volver a activarlo lo devuelve: desactivar no borra el plan.
-    expect(queToca([l], [{ controlCode: "HIDRATACION_CUTANEA", active: true }], TURNOS, MOMENTOS, desde, hasta)).toHaveLength(1);
+    expect(queToca([l], [{ controlCode: "HIDRATACION_CUTANEA", active: true }], TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toHaveLength(1);
   });
 
   it("un control SIN AJUSTE sigue tocando, y es a propósito", () => {
@@ -460,7 +477,7 @@ describe("lo que el centro decide", () => {
     // plan, que es la que alguien escribió a propósito.
     const l = linea("CONTROL_RARO", { kind: "DAILY", shiftCodes: ["M"] });
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([l], [{ controlCode: "OTRO", active: false }], TURNOS, MOMENTOS, desde, hasta)).toHaveLength(1);
+    expect(queToca([l], [{ controlCode: "OTRO", active: false }], TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toHaveLength(1);
   });
 
   it("un TURNO BORRADO deja la línea sin ocurrencias, sin inventar otro", () => {
@@ -468,13 +485,13 @@ describe("lo que el centro decide", () => {
     // La pantalla del plan pinta la línea en ámbar.
     const l = linea("HIDRATACION_CUTANEA", { kind: "DAILY", shiftCodes: ["NO_EXISTE"] });
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta)).toEqual([]);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toEqual([]);
   });
 
   it("un MOMENTO BORRADO, igual", () => {
     const l = linea("MEDICACION_DIURNA", { kind: "MOMENTS", momentCodes: ["NO_EXISTE"] });
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta)).toEqual([]);
+    expect(queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toEqual([]);
   });
 });
 
@@ -490,15 +507,15 @@ describe("el contrato de la función", () => {
       linea("B", { kind: "MOMENTS", momentCodes: ["DESAYUNO"] }),
     ];
     const [desde, hasta] = elDia("2026-10-14");
-    const oc = queToca(plan, SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta);
+    const oc = queToca(plan, SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS);
     expect(oc.map((o) => o.controlCode)).toEqual(["A", "B", "Z"]);
   });
 
   it("la ventana es SEMIABIERTA: dos ventanas seguidas no repiten el borde", () => {
     const l = linea("MEDICACION_DIURNA", { kind: "MOMENTS", momentCodes: ["DESAYUNO"] });
     // El desayuno del 14 es a las 09:00 de pared = 07:00Z.
-    const justoAntes = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, new Date("2026-10-14T06:00:00.000Z"), new Date("2026-10-14T07:00:00.000Z"));
-    const justoDespues = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, new Date("2026-10-14T07:00:00.000Z"), new Date("2026-10-14T08:00:00.000Z"));
+    const justoAntes = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, new Date("2026-10-14T06:00:00.000Z"), new Date("2026-10-14T07:00:00.000Z"), SIN_AUSENCIAS);
+    const justoDespues = queToca([l], SIN_AJUSTES, TURNOS, MOMENTOS, new Date("2026-10-14T07:00:00.000Z"), new Date("2026-10-14T08:00:00.000Z"), SIN_AUSENCIAS);
     expect(justoAntes).toHaveLength(0);
     expect(justoDespues).toHaveLength(1);
   });
@@ -511,18 +528,18 @@ describe("el contrato de la función", () => {
       { ...linea("MEDICACION_DIURNA", { kind: "MOMENTS", momentCodes: ["DESAYUNO"] }), id: "l-manuel", clientId: "manuel" },
     ];
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca(plan, SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta).map((o) => o.clientId)).toEqual(["manuel", "carmen"]);
+    expect(queToca(plan, SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS).map((o) => o.clientId)).toEqual(["manuel", "carmen"]);
   });
 
   it("un plan VACÍO devuelve una lista vacía y no revienta", () => {
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta)).toEqual([]);
+    expect(queToca([], SIN_AJUSTES, TURNOS, MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toEqual([]);
   });
 
   it("un centro SIN TURNOS no deja ninguna franja, y los instantes salen sin turno", () => {
     const [desde, hasta] = elDia("2026-10-14");
-    expect(queToca([linea("X", { kind: "DAILY", shiftCodes: ["M"] })], SIN_AJUSTES, [], MOMENTOS, desde, hasta)).toEqual([]);
-    const oc = queToca([linea("Y", { kind: "EVERY_N_HOURS", everyNHours: 12 })], SIN_AJUSTES, [], MOMENTOS, desde, hasta);
+    expect(queToca([linea("X", { kind: "DAILY", shiftCodes: ["M"] })], SIN_AJUSTES, [], MOMENTOS, desde, hasta, SIN_AUSENCIAS)).toEqual([]);
+    const oc = queToca([linea("Y", { kind: "EVERY_N_HOURS", everyNHours: 12 })], SIN_AJUSTES, [], MOMENTOS, desde, hasta, SIN_AUSENCIAS);
     expect(oc).toHaveLength(2);
     // `null` y no «el primero»: decir que no se sabe es mejor que
     // adscribirlo mal (la decisión de residencia-1, aquí heredada).

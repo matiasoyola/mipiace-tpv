@@ -9388,6 +9388,11 @@ model ResidentAbsence {
   /// que `started_at` o `ended_at` cambien. Mismo patrón que
   /// `duty_occurrences`: un «se me fue el dedo» se arregla diciendo
   /// quién lo arregla, porque esas dos fechas son días de factura.
+  ///
+  /// `correctionReason` va **en claro**, como la de `duty_occurrences` y
+  /// por lo mismo: «la DUE apuntó el día de antes» no es un dato de
+  /// salud, es administración de un registro. Lo clínico de una ausencia
+  /// es su motivo, y ése sí va cifrado.
   correctedAt       DateTime? @map("corrected_at") @db.Timestamptz()
   correctedByUserId String?   @map("corrected_by_user_id") @db.Uuid
   correctionReason  String?   @map("correction_reason")

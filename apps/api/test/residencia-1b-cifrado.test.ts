@@ -18,6 +18,14 @@
 //   3. **NI UNA LLAMADA A `aadDe` FUERA DE `cripto-campos.ts`.** La
 //      cabecera de ese fichero dice «un test lo vigila» desde clinica-7.
 //      No lo vigilaba ninguno. Ahora sí, y cubre los seis sitios nuevos.
+//
+// historia-1 le añade **las trece columnas de la ficha clínica del
+// residente** (D-90 a D-94), y la pareja que de verdad importa aquí: el
+// texto de un diagnóstico y la **frase de alerta** son dos columnas
+// lógicas distintas, así que un `UPDATE` no puede copiar
+// «Adenocarcinoma de próstata con metástasis» a la única columna de la
+// ficha que llega a una tablet de pasillo (D-91). Ese es el test de la
+// línea de abajo, no una formalidad del inventario.
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
@@ -68,6 +76,19 @@ import {
   sitioTextoDeAccion,
   sitioValorDeRegistro,
   sitioZonaDeFoto,
+  sitioAgenteDeAlergia,
+  sitioCodigoDeDiagnostico,
+  sitioDestinoDeAusencia,
+  sitioDetalleDeDispositivo,
+  sitioFraseDeAlerta,
+  sitioFuenteDeLaRevision,
+  sitioMotivoDeAusencia,
+  sitioMotivoDeRetiradaDeAlergia,
+  sitioMotivoDeRetiradaDeDiagnostico,
+  sitioNotaDelIngreso,
+  sitioNotasDeDieta,
+  sitioReaccionDeAlergia,
+  sitioTextoDeDiagnostico,
 } from "../src/clinica/cripto-campos.js";
 
 const DEK_A = randomBytes(32);
@@ -128,6 +149,38 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     // podría copiar al contenido de un parte y descifraría.
     ["contenido del parte", sitioContenidoDeRelevo, "handovers", "content"],
     ["resumen del añadido tardío", sitioResumenTardio, "handover_late_additions", "resumen"],
+    // historia-1 (D-90 a D-94) · **LAS TRECE DE LA FICHA CLÍNICA DEL
+    // RESIDENTE, SUS AUSENCIAS Y SU INGRESO.**
+    //
+    // Trece y no cinco, y la razón es la de todo este inventario: cada
+    // columna lógica es un AAD distinto, así que un `UPDATE` no puede
+    // mover el texto de un diagnóstico a la **frase de alerta que la
+    // puerta pinta en un pasillo** (la pareja que importa de este
+    // bloque), ni el motivo de una ausencia a su destino, ni la nota de
+    // un elemento del ingreso al detalle de una sonda.
+    ["texto del diagnóstico", sitioTextoDeDiagnostico, "resident_diagnoses", "text"],
+    ["código CIE-10", sitioCodigoDeDiagnostico, "resident_diagnoses", "icd10"],
+    ["frase de la alerta", sitioFraseDeAlerta, "resident_diagnoses", "alert_phrase"],
+    [
+      "motivo de retirada del diagnóstico",
+      sitioMotivoDeRetiradaDeDiagnostico,
+      "resident_diagnoses",
+      "withdraw_reason",
+    ],
+    ["agente de la alergia", sitioAgenteDeAlergia, "allergies", "agent"],
+    ["reacción de la alergia", sitioReaccionDeAlergia, "allergies", "reaction"],
+    [
+      "motivo de retirada de la alergia",
+      sitioMotivoDeRetiradaDeAlergia,
+      "allergies",
+      "withdraw_reason",
+    ],
+    ["fuente de la revisión", sitioFuenteDeLaRevision, "allergy_reviews", "source"],
+    ["detalle del dispositivo", sitioDetalleDeDispositivo, "resident_devices", "detail"],
+    ["notas de la dieta", sitioNotasDeDieta, "diet_profiles", "notes"],
+    ["destino de la ausencia", sitioDestinoDeAusencia, "resident_absences", "destination"],
+    ["motivo de la ausencia", sitioMotivoDeAusencia, "resident_absences", "reason"],
+    ["nota del ingreso", sitioNotaDelIngreso, "admission_checklist_items", "done_note"],
   ];
 
   it.each(SITIOS)("%s → tenant|%s|%s|fila", (_, sitioDe, tabla, columna) => {
@@ -136,7 +189,7 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     );
   });
 
-  it("son VEINTICUATRO, y no se añade una columna cifrada sin su sitio", () => {
+  it("son TREINTA Y SIETE, y no se añade una columna cifrada sin su sitio", () => {
     // El CHECK de formato (`~ '^c[0-9]+:…'`) es la marca de una columna
     // cifrada con una DEK: se cuentan los de TODAS las migraciones y se
     // comparan con los sitios de este inventario.
@@ -217,6 +270,79 @@ describe("un valor cifrado de la residencia no se puede mover", () => {
     );
     expect(() =>
       descifrarValor(cifrado, DEK_A, sitioMotivoDeOcupacion(CENTRO, otra)),
+    ).toThrow(NoSeDescifra);
+  });
+
+  // ── historia-1 (D-91) · **EL PAR QUE IMPORTA DE ESTE BLOQUE** ──────
+  //
+  // El texto de un diagnóstico y la frase de alerta son dos columnas de
+  // la MISMA fila, y la segunda es la única de la ficha clínica que llega
+  // a una tablet colgada en un pasillo. Si compartieran nombre lógico, un
+  // `UPDATE resident_diagnoses SET alert_phrase_cifrado = text_cifrado`
+  // publicaría «Adenocarcinoma de próstata con metástasis óseas» a la
+  // altura de los ojos de quien pase por el pasillo — y descifraría, así
+  // que nadie lo vería como un fallo.
+  it("**el texto de un diagnóstico NO se descifra como su frase de alerta**", () => {
+    const diagnostico = randomUUID();
+    const cifrado = cifrarValor(
+      "Adenocarcinoma de próstata con metástasis óseas",
+      DEK_A,
+      sitioTextoDeDiagnostico(CENTRO, diagnostico),
+    );
+    expect(
+      descifrarValor(cifrado, DEK_A, sitioTextoDeDiagnostico(CENTRO, diagnostico)),
+    ).toContain("Adenocarcinoma");
+    expect(() =>
+      descifrarValor(cifrado, DEK_A, sitioFraseDeAlerta(CENTRO, diagnostico)),
+    ).toThrow(NoSeDescifra);
+    // Y al revés tampoco: la frase no vale como diagnóstico.
+    const frase = cifrarValor(
+      "Toma anticoagulantes: cualquier golpe, avisa",
+      DEK_A,
+      sitioFraseDeAlerta(CENTRO, diagnostico),
+    );
+    expect(() =>
+      descifrarValor(frase, DEK_A, sitioTextoDeDiagnostico(CENTRO, diagnostico)),
+    ).toThrow(NoSeDescifra);
+  });
+
+  it("el código CIE-10 tampoco vale como texto del diagnóstico", () => {
+    const diagnostico = randomUUID();
+    const cifrado = cifrarValor("E11.9", DEK_A, sitioCodigoDeDiagnostico(CENTRO, diagnostico));
+    expect(() =>
+      descifrarValor(cifrado, DEK_A, sitioTextoDeDiagnostico(CENTRO, diagnostico)),
+    ).toThrow(NoSeDescifra);
+  });
+
+  it("el agente de una alergia no vale como su reacción", () => {
+    // «penicilina» en la columna de la reacción se leería como que la
+    // reacción es la penicilina. Y en una prescripción, lo que se mira es
+    // el agente.
+    const alergia = randomUUID();
+    const cifrado = cifrarValor("penicilina", DEK_A, sitioAgenteDeAlergia(CENTRO, alergia));
+    expect(() =>
+      descifrarValor(cifrado, DEK_A, sitioReaccionDeAlergia(CENTRO, alergia)),
+    ).toThrow(NoSeDescifra);
+  });
+
+  it("una alergia de Carmen no se descifra en la de Luis", () => {
+    const deCarmen = randomUUID();
+    const deLuis = randomUUID();
+    const cifrado = cifrarValor("penicilina", DEK_A, sitioAgenteDeAlergia(CENTRO, deCarmen));
+    expect(() =>
+      descifrarValor(cifrado, DEK_A, sitioAgenteDeAlergia(CENTRO, deLuis)),
+    ).toThrow(NoSeDescifra);
+  });
+
+  it("el destino de una ausencia no vale como su motivo", () => {
+    const ausencia = randomUUID();
+    const cifrado = cifrarValor(
+      "Hospital Nuestra Señora del Prado",
+      DEK_A,
+      sitioDestinoDeAusencia(CENTRO, ausencia),
+    );
+    expect(() =>
+      descifrarValor(cifrado, DEK_A, sitioMotivoDeAusencia(CENTRO, ausencia)),
     ).toThrow(NoSeDescifra);
   });
 

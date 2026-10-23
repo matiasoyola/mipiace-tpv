@@ -209,78 +209,174 @@ export function PuertaLoQueToca({
               </div>
             </div>
 
-            <ComoEstaHoy
-              registros={r.registros}
-              dimensiones={dimensiones}
-              onComoSiempre={() => onComoSiempre(r.clientId)}
-              onNoComoSiempre={() => onNoComoSiempre(r.clientId)}
-            />
+            {/* ── historia-1 (D-91) · LA FRANJA DE ALERTAS ──────────
+                Debajo del nombre y ANTES de todo lo demás, porque es lo
+                que hay que saber antes de tocar a alguien. **Sólo la
+                frase accionable**: el servidor manda `string[]` y aquí no
+                hay ningún diagnóstico que pintar (ver
+                `PuertaArranque.ocupantes[].alertas`).
 
-            <TocaAhora
-              toca={r.toca}
-              registros={r.registros}
-              controles={datos.controles}
-              onHecho={(o, opcion) => onHecho(r.clientId, o, opcion)}
-              onCorregir={(o) => onCorregir(r.clientId, o)}
-              onTomar={(o) => onTomarConstante(r.clientId, o.controlCode, o)}
-            />
+                Y la auxiliar no gana ni un toque (D-97): es texto, no un
+                desplegable. */}
+            <FranjaDeAlertas frases={r.alertas ?? []} />
 
-            <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-200">
-              {(aDemandaPorResidente[r.clientId] ?? []).map((d) => (
-                <button
-                  key={d.code}
-                  type="button"
-                  onClick={() => onADemanda(r.clientId, d.code)}
-                  className="min-h-touch-pad rounded-xl border-2 border-slate-300 px-6 text-[22px] font-medium"
-                >
-                  + {d.nombre}
-                </button>
-              ))}
-              {/* residencia-4 · «+ Constante». Un toque abre la lista de
-                  las constantes activas del centro; el segundo toque abre
-                  el teclado. Dos toques y no uno porque son siete y no
-                  caben en una fila de botones de 72 px — y porque la que
-                  se toma a demanda no es siempre la misma. */}
-              {constantesDisponibles.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setEligiendo((v) => (v === r.clientId ? null : r.clientId))
-                  }
-                  className="min-h-touch-pad rounded-xl border-2 border-slate-300 px-6 text-[22px] font-medium"
-                >
-                  + Constante
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onAlgoNoVaBien(r.clientId)}
-                className="min-h-touch-pad rounded-xl bg-amber-500 text-white px-6 text-[22px] font-semibold"
-              >
-                Algo no va bien
-              </button>
-            </div>
+            {/* ── historia-1 (D-92) · EL RESIDENTE QUE NO ESTÁ ──────
+                Y cuando está fuera, **nada de lo de abajo**: ni «¿cómo
+                está hoy?» ni «toca ahora» ni los botones. No por
+                esconderlo, sino porque pedirle a alguien que registre la
+                higiene de quien está en el hospital es pedirle que
+                invente un cuidado — y un «como siempre» de un residente
+                ausente es un dato falso firmado con su PIN.
 
-            {eligiendo === r.clientId && (
-              <div className="flex flex-wrap gap-3 rounded-2xl bg-slate-50 border border-slate-200 p-4">
-                {constantesDisponibles.map((c) => (
+                Lo que sí queda es el nombre, la foto y por qué no está,
+                que es lo que hace que nadie vaya a buscarla. */}
+            {r.ausente ? (
+              <TarjetaDeAusente ausente={r.ausente} />
+            ) : (
+              <>
+                <ComoEstaHoy
+                  registros={r.registros}
+                  dimensiones={dimensiones}
+                  onComoSiempre={() => onComoSiempre(r.clientId)}
+                  onNoComoSiempre={() => onNoComoSiempre(r.clientId)}
+                />
+
+                <TocaAhora
+                  toca={r.toca}
+                  registros={r.registros}
+                  controles={datos.controles}
+                  onHecho={(o, opcion) => onHecho(r.clientId, o, opcion)}
+                  onCorregir={(o) => onCorregir(r.clientId, o)}
+                  onTomar={(o) => onTomarConstante(r.clientId, o.controlCode, o)}
+                />
+
+                <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-200">
+                  {(aDemandaPorResidente[r.clientId] ?? []).map((d) => (
+                    <button
+                      key={d.code}
+                      type="button"
+                      onClick={() => onADemanda(r.clientId, d.code)}
+                      className="min-h-touch-pad rounded-xl border-2 border-slate-300 px-6 text-[22px] font-medium"
+                    >
+                      + {d.nombre}
+                    </button>
+                  ))}
+                  {/* residencia-4 · «+ Constante». Un toque abre la lista
+                      de las constantes activas del centro; el segundo
+                      toque abre el teclado. Dos toques y no uno porque son
+                      siete y no caben en una fila de botones de 72 px — y
+                      porque la que se toma a demanda no es siempre la
+                      misma. */}
+                  {constantesDisponibles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEligiendo((v) =>
+                          v === r.clientId ? null : r.clientId,
+                        )
+                      }
+                      className="min-h-touch-pad rounded-xl border-2 border-slate-300 px-6 text-[22px] font-medium"
+                    >
+                      + Constante
+                    </button>
+                  )}
                   <button
-                    key={c.code}
                     type="button"
-                    onClick={() => {
-                      setEligiendo(null);
-                      onTomarConstante(r.clientId, c.code, null);
-                    }}
-                    className="min-h-touch-pad rounded-xl bg-white border-2 border-slate-300 px-6 text-[21px] font-medium"
+                    onClick={() => onAlgoNoVaBien(r.clientId)}
+                    className="min-h-touch-pad rounded-xl bg-amber-500 text-white px-6 text-[22px] font-semibold"
                   >
-                    {c.nombre}
+                    Algo no va bien
                   </button>
-                ))}
-              </div>
+                </div>
+
+                {eligiendo === r.clientId && (
+                  <div className="flex flex-wrap gap-3 rounded-2xl bg-slate-50 border border-slate-200 p-4">
+                    {constantesDisponibles.map((c) => (
+                      <button
+                        key={c.code}
+                        type="button"
+                        onClick={() => {
+                          setEligiendo(null);
+                          onTomarConstante(r.clientId, c.code, null);
+                        }}
+                        className="min-h-touch-pad rounded-xl bg-white border-2 border-slate-300 px-6 text-[21px] font-medium"
+                      >
+                        {c.nombre}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
         ))}
       </main>
+    </div>
+  );
+}
+
+/**
+ * historia-1 (D-91) · **LA FRANJA DE ALERTAS DE LA PUERTA.**
+ *
+ * Lo accionable, y nada más. Las frases vienen calculadas del servidor
+ * (`frasesParaLaPuerta` del paquete puro), así que esta función no decide
+ * qué alerta: sólo lo pinta.
+ *
+ * ── Rojo, y con el texto grande ────────────────────────────────────
+ *
+ * No es decoración: la banda tiene que ganarle la mirada al nombre, que
+ * está justo encima y es lo que la auxiliar busca. 22 px —el tamaño de
+ * los botones de esta pantalla— y no 16: se lee a la distancia a la que
+ * alguien pasa por un pasillo con una bandeja en las manos.
+ *
+ * ── Y sin banda cuando no hay nada ─────────────────────────────────
+ *
+ * Nada de un hueco vacío que diga «sin alertas». El denominador cuenta en
+ * los registros (D-16), no en una banda: una banda gris que dice «sin
+ * alertas» en cuarenta puertas es la que hace que nadie mire la roja de
+ * la cuarenta y una.
+ */
+function FranjaDeAlertas({ frases }: { frases: string[] }) {
+  if (frases.length === 0) return null;
+  return (
+    <ul className="rounded-xl bg-rose-50 border-2 border-rose-300 px-5 py-3 flex flex-col gap-1">
+      {frases.map((f) => (
+        <li
+          key={f}
+          className="block text-[22px] font-semibold text-rose-900 leading-snug"
+        >
+          {f}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * historia-1 (D-92) · **EL RESIDENTE QUE NO ESTÁ.**
+ *
+ * En el hueco de «¿cómo está hoy?» y «toca ahora», que no se pintan. El
+ * rótulo corto grande y la frase entera debajo: la primera se lee de
+ * reojo, la segunda sólo si hace falta.
+ *
+ * Azul y no rojo: **no es una alerta, es una explicación**. Lo que la
+ * auxiliar tiene que hacer con esto es nada, y pintarlo del color de una
+ * alergia grave gastaría el rojo que la franja de arriba necesita.
+ */
+function TarjetaDeAusente({
+  ausente,
+}: {
+  ausente: { corta: string; frase: string };
+}) {
+  return (
+    <div className="rounded-xl bg-sky-50 border-2 border-sky-300 px-5 py-6 flex flex-col gap-2">
+      <p className="block text-[30px] font-semibold text-sky-900 leading-tight">
+        {ausente.corta}
+      </p>
+      <p className="block text-[20px] text-sky-800">{ausente.frase}</p>
+      <p className="block text-[18px] text-sky-700">
+        No le toca nada mientras esté fuera.
+      </p>
     </div>
   );
 }

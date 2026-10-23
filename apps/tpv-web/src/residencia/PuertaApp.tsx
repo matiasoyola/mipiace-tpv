@@ -42,11 +42,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   FRASE_PIN_POR_RENOVAR,
+  NOMBRE_CORTO_DE_LA_AUSENCIA,
   addDays,
   diaDelTurno,
+  fraseDeLaAusencia,
   gravedadDe,
   queToca,
   turnoDe,
+  type AusenciaDelPlan,
   type Ocurrencia,
   type ReglaDeGravedad,
 } from "@mipiacetpv/residencia-plan";
@@ -592,6 +595,23 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         arranque.momentos,
         desde,
         hasta,
+        // ── historia-1 (D-92) · SIN RED, TAMBIÉN SE PAUSA ───────────
+        //
+        // Las ausencias llegan en el arranque y viven en la caché, así
+        // que una puerta sin wifi tampoco pide los cuidados de quien está
+        // en el hospital. Sin esto, la auxiliar los vería «por hacer» y
+        // los marcaría como no hechos — o iría a buscar a alguien que no
+        // está en su habitación.
+        //
+        // `?? []` porque una caché de antes de este bloque no lo trae: la
+        // tablet se comporta como ayer y el servidor lo corrige en cuanto
+        // haya red, que es el criterio de todo este fichero.
+        (arranque.ausencias ?? []).map((a) => ({
+          clientId: a.clientId,
+          tipo: a.tipo,
+          desde: new Date(a.desde),
+          hasta: a.hasta ? new Date(a.hasta) : null,
+        })),
       );
       const alias = new Map(
         arranque.ajustes.map((a) => [a.controlCode, a.alias]),
@@ -634,6 +654,13 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
           bedLabel: o.bedLabel,
           nombre: o.nombre,
           tieneFoto: o.tieneFoto,
+          // historia-1 (D-91, D-92) · la franja y el «ausente», los dos
+          // de la caché. La frase se arma aquí con la MISMA función del
+          // paquete puro que usa el servidor, así que sin red dice lo
+          // mismo que con red: «Ausente: ingresado en el hospital desde
+          // el martes».
+          alertas: o.alertas ?? [],
+          ausente: ausenteDeLaCache(arranque.ausencias, o.clientId, ahora),
           toca: ocurrencias
             .filter(
               (oc) =>
@@ -1183,3 +1210,36 @@ function gravedadDeEventoLocal(
 }
 
 export { ALGO_NO_VA_BIEN };
+
+/**
+ * historia-1 (D-92) · **La tarjeta del ausente, calculada en la tablet.**
+ *
+ * Hermana de `fraseDeAusente` del servidor
+ * (`apps/api/src/residencia/puerta-registro-routes.ts`) y, como ella, usa
+ * `fraseDeLaAusencia` y `NOMBRE_CORTO_DE_LA_AUSENCIA` del paquete puro.
+ * Son dos llamantes de la MISMA función, no dos copias de la frase: la
+ * pantalla sin red dice exactamente lo que diría con red, que es la
+ * mitad del ADR-01.
+ *
+ * `undefined` entra —una caché de antes del bloque— y sale `null`: está
+ * en el centro, por lo que la tablet puede saber. El servidor lo corrige
+ * en cuanto haya red.
+ */
+function ausenteDeLaCache(
+  ausencias: PuertaArranque["ausencias"],
+  clientId: string,
+  ahora: Date,
+): { corta: string; frase: string } | null {
+  const mia = (ausencias ?? []).find((a) => a.clientId === clientId);
+  if (mia == null) return null;
+  const como: AusenciaDelPlan = {
+    clientId: mia.clientId,
+    tipo: mia.tipo,
+    desde: new Date(mia.desde),
+    hasta: mia.hasta ? new Date(mia.hasta) : null,
+  };
+  return {
+    corta: NOMBRE_CORTO_DE_LA_AUSENCIA[como.tipo],
+    frase: fraseDeLaAusencia(como, ahora),
+  };
+}

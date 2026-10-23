@@ -1014,6 +1014,11 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
           [],
           desde,
           ventanaDelTurno(manana, ayer).hasta,
+          // historia-1 (D-92) · sin ausencias: este escenario no las usa,
+          // y el parámetro es obligatorio a propósito para que una
+          // llamada nueva no vuelva en silencio al comportamiento de
+          // antes del bloque.
+          [],
         );
         expect(ocurrencias.length, "el plan no agenda cambios posturales").toBeGreaterThan(0);
         return ocurrencias[0]!.at;

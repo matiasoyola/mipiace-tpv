@@ -103,6 +103,14 @@ import { derivarDeEvento, derivarDeLaMedida } from "./derivacion.js";
 import { configuracionDeGuardia } from "./aviso.js";
 import { NOMBRE_DEL_TIPO } from "./catalogo/plantilla-de-gravedad.js";
 import { empujarAvisos } from "./guardia-bus.js";
+// historia-1 (D-91, D-92) · la franja recortada a frases y el «ausente».
+import { frasesDeLaPuerta } from "./ficha-clinica.js";
+import { ausenciasAbiertas, ausenciasDelPlan } from "./ausencias.js";
+import {
+  NOMBRE_CORTO_DE_LA_AUSENCIA,
+  fraseDeLaAusencia,
+  type AusenciaDelPlan,
+} from "@mipiacetpv/residencia-plan";
 
 // ── El rate-limit del PIN · POR PUERTA, y corto a propósito ──────────
 //
@@ -530,10 +538,36 @@ export async function registerResidenciaPuertaRegistroRoutes(
       // residencia-4 · la plantilla y la configuración de guardia. Las
       // dos son del centro o del producto, no de nadie: no hay dato de
       // salud de ningún residente en lo que esto añade a la caché.
-      const [plantilla, guardia] = await Promise.all([
-        plantillaVigente(prisma),
-        configuracionDeGuardia(prisma, ctx.tenantId),
-      ]);
+      const [plantilla, guardia, alertasDeArranque, ausenciasDeArranque] =
+        await Promise.all([
+          plantillaVigente(prisma),
+          configuracionDeGuardia(prisma, ctx.tenantId),
+          // historia-1 (D-91) · **sólo las frases**, por lo mismo que en
+          // «lo que toca»: la ruta no tiene el `detalle` delante, así que
+          // un diagnóstico no puede llegar a esta tablet ni por un error
+          // de quien escriba la pantalla mañana.
+          frasesDeLaPuerta(
+            prisma,
+            ctx.tenantId,
+            ocupantes.map((o) => o.clientId),
+            dek,
+          ),
+          // historia-1 (D-92) · y quién de los dos no está, **para que la
+          // tablet lo sepa SIN RED**. Sin esto, una puerta sin wifi
+          // seguiría pidiendo los cuidados de quien lleva tres días en el
+          // hospital y la auxiliar los marcaría como no hechos o iría a
+          // buscarla.
+          //
+          // Lo que viaja es el TIPO y las dos fechas, que es exactamente
+          // lo que la tarjeta pinta («En el hospital · desde el martes»).
+          // Adónde fue y por qué **no**: `ausenciasAbiertas` no los trae
+          // de la base.
+          ausenciasAbiertas(
+            prisma,
+            ctx.tenantId,
+            ocupantes.map((o) => o.clientId),
+          ),
+        ]);
 
       return {
         device: { id: ctx.deviceId, name: ctx.deviceName },
@@ -562,6 +596,16 @@ export async function registerResidenciaPuertaRegistroRoutes(
           // `true`, y pinta las iniciales si no.
           tieneFoto:
             fotoPorCliente.get(o.clientId) != null && conFoto.has(o.clientId),
+          // historia-1 (D-91) · las frases accionables de su franja.
+          alertas: alertasDeArranque.get(o.clientId) ?? [],
+        })),
+        // historia-1 (D-92) · las ausencias abiertas de los ocupantes, para
+        // que `queToca` en la tablet no genere lo de quien no está.
+        ausencias: ausenciasDeArranque.map((a) => ({
+          clientId: a.clientId,
+          tipo: a.tipo,
+          desde: a.desde.toISOString(),
+          hasta: a.hasta?.toISOString() ?? null,
         })),
         plan: plan.map((l) => ({
           id: l.id,
@@ -1011,6 +1055,16 @@ export async function registerResidenciaPuertaRegistroRoutes(
       const desde = wallTimeToUtc(careDay, "00:00");
       const hasta = wallTimeToUtc(siguienteDia(diaDePared), "00:00");
 
+      // historia-1 (D-92) · las ausencias de estos dos residentes que
+      // tocan el día. `queToca` no generará lo de quien no esté.
+      const ausencias = await ausenciasDelPlan(
+        prisma,
+        ctx.tenantId,
+        desde,
+        hasta,
+        clientIds,
+      );
+
       const ocurrencias = queToca(
         plan.map((l) => ({
           id: l.id,
@@ -1025,6 +1079,7 @@ export async function registerResidenciaPuertaRegistroRoutes(
         momentos,
         desde,
         hasta,
+        ausencias,
       );
 
       // Lo registrado en ESTE día del centro, de estos residentes. La
@@ -1059,6 +1114,19 @@ export async function registerResidenciaPuertaRegistroRoutes(
         clientIds,
       );
 
+      // ── historia-1 (D-91, D-92) · LA FRANJA Y EL «AUSENTE» ────────
+      //
+      // Las **frases** de la franja y la ausencia abierta de cada
+      // ocupante. Y sólo las frases: `frasesDeLaPuerta` devuelve
+      // `string[]`, así que de aquí no puede salir un diagnóstico a una
+      // tablet de pasillo ni queriendo. La prueba está en el test del
+      // paquete puro, y el mecanismo —que la ruta no tenga el `detalle`
+      // delante— está aquí.
+      const [alertas, abiertas] = await Promise.all([
+        frasesDeLaPuerta(prisma, ctx.tenantId, clientIds, dek),
+        ausenciasAbiertas(prisma, ctx.tenantId, clientIds),
+      ]);
+
       const porOcurrencia = (o: Ocurrencia) => ({
         controlCode: o.controlCode,
         nombre: nombreDe(o.controlCode),
@@ -1084,6 +1152,13 @@ export async function registerResidenciaPuertaRegistroRoutes(
             nombre: o.nombre,
             tieneFoto:
               fotoPorCliente.get(o.clientId) != null && conFoto.has(o.clientId),
+            // historia-1 (D-91) · **sólo lo accionable**, nunca el
+            // diagnóstico. «Disfagia: triturado y espesante nivel 2».
+            alertas: alertas.get(o.clientId) ?? [],
+            // historia-1 (D-92) · y si no está, la tarjeta lo dice y no
+            // pinta lo que toca: no se le pide a nadie un cuidado de
+            // quien está en el hospital.
+            ausente: fraseDeAusente(abiertas, o.clientId, ahora),
             // Lo que toca en el turno de ahora. Si no hay turno —hueco en
             // el cuadrante— se devuelve lo del día sin filtrar y la
             // pantalla lo pinta con su aviso: un cuidado que toca no se
@@ -1917,4 +1992,33 @@ function siguienteDia(fecha: string): string {
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(
     t.getUTCDate(),
   ).padStart(2, "0")}`;
+}
+
+/**
+ * historia-1 (D-92) · **La tarjeta del residente ausente.**
+ *
+ * Dos textos y no uno: el corto («En el hospital») cabe en la tarjeta de
+ * la puerta, y la frase entera («Ausente: ingresado en el hospital desde
+ * el martes») es la que la pantalla enseña debajo. Es la misma decisión
+ * que las dos caras de una alerta (D-91): en una tablet de pasillo la
+ * primera línea se lee de reojo y la segunda sólo si hace falta.
+ *
+ * `null` = está en el centro, y entonces la tarjeta es la de siempre.
+ *
+ * Lo que **no** lleva, y es deliberado: adónde fue ni por qué. «Hospital
+ * Nuestra Señora del Prado» y «caída con fractura de fémur» son datos de
+ * la ficha, que se miran en el despacho — y `ausenciasAbiertas` no los
+ * trae de la base, así que no se pueden mandar por error.
+ */
+function fraseDeAusente(
+  abiertas: AusenciaDelPlan[],
+  clientId: string,
+  ahora: Date,
+): { corta: string; frase: string } | null {
+  const mia = abiertas.find((a) => a.clientId === clientId);
+  if (mia == null) return null;
+  return {
+    corta: NOMBRE_CORTO_DE_LA_AUSENCIA[mia.tipo],
+    frase: fraseDeLaAusencia(mia, ahora),
+  };
 }

@@ -145,6 +145,44 @@ export interface PuertaArranque {
      *  tablet no sabe de consentimientos: pide la foto si esto es `true` y
      *  pinta las iniciales si no. */
     tieneFoto: boolean;
+    /**
+     * historia-1 (D-91) · **LAS FRASES DE LA FRANJA DE ALERTAS**, y nada
+     * más que las frases: «Disfagia: triturado y espesante nivel 2»,
+     * «Alergia: penicilina».
+     *
+     * **Aquí no llega ni un diagnóstico, y no es una costumbre de quien
+     * escribe la pantalla**: el servidor calcula las frases con
+     * `frasesParaLaPuerta` y lo que manda es `string[]`. La tablet no
+     * tiene el texto del diagnóstico ni la reacción de la alergia, así
+     * que no puede pintarlos. Un pasillo de residencia lo cruza
+     * cualquiera.
+     *
+     * Opcional como todo lo de este fichero: una caché de antes del
+     * bloque no lo trae y la pantalla no pinta banda.
+     */
+    alertas?: string[];
+  }>;
+  /**
+   * historia-1 (D-92) · **quién de los ocupantes NO ESTÁ**, para que la
+   * tablet lo sepa SIN RED.
+   *
+   * `queToca` las recibe y no genera las ocurrencias de quien está fuera.
+   * Sin esto, una puerta sin wifi seguiría pidiendo los cuidados de quien
+   * lleva tres días en el hospital.
+   *
+   * Lo que viaja es el TIPO y las dos fechas, que es lo que la tarjeta
+   * pinta. **Adónde fue y por qué no viajan.**
+   */
+  ausencias?: Array<{
+    clientId: string;
+    tipo:
+      | "INGRESO_HOSPITALARIO"
+      | "URGENCIAS"
+      | "VACACIONES_FAMILIA"
+      | "CONSULTA_EXTERNA"
+      | "SALIDA_NO_CONTROLADA";
+    desde: string;
+    hasta: string | null;
   }>;
   plan: LineaDePlanDeLaPuerta[];
   ajustes: Array<{ controlCode: string; active: boolean; alias: string | null }>;
@@ -223,6 +261,12 @@ export interface LoQueToca {
     bedLabel: string;
     nombre: string;
     tieneFoto: boolean;
+    /** historia-1 (D-91) · las frases de su franja. Ver
+     *  `PuertaArranque.ocupantes[].alertas`: **sólo frases**. */
+    alertas?: string[];
+    /** historia-1 (D-92) · `null` = está en el centro. Si no, lo que la
+     *  tarjeta pinta: el rótulo corto y la frase entera. */
+    ausente?: { corta: string; frase: string } | null;
     toca: OcurrenciaDeLaPuerta[];
     registros: RegistroDeLaPuerta[];
   }>;

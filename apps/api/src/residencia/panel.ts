@@ -52,6 +52,10 @@ import {
 
 import { FRECUENCIA_SELECT, deColumnas } from "./frecuencia-columnas.js";
 import { ventanaDelTurno } from "./relevo.js";
+// historia-1 (D-92) · las ausencias que `queToca` necesita para no
+// generar lo de quien no está, y las vueltas que la DUE tiene pendientes
+// de revisar.
+import { ausenciasDelPlan } from "./ausencias.js";
 import { obligacionesDelPanel, type OcurrenciaPintada } from "./obligaciones.js";
 
 /** Lo que hay abierto hoy. La primera fila, y la métrica de éxito. */
@@ -481,6 +485,21 @@ async function turnoEnCurso(
 
   const turno = turnoDe(ahora, turnos);
   const careDay = diaDelTurno(ahora, turno);
+  // ── historia-1 (D-92) · LAS AUSENCIAS DEL DÍA ────────────────────
+  //
+  // Una sola consulta para las dos llamadas a `queToca` de esta función
+  // (el turno en curso y lo no hecho de los turnos cerrados): la ventana
+  // que las cubre a las dos va de las 00:00 del `careDay` al final del
+  // turno, y pedirlas dos veces serían dos consultas para la misma
+  // respuesta.
+  const ausencias = await ausenciasDelPlan(
+    prisma,
+    tenantId,
+    wallTimeToUtc(careDay, "00:00"),
+    turno == null
+      ? wallTimeToUtc(addDays(careDay, 1), "00:00")
+      : ventanaDelTurno(turno, careDay).hasta,
+  );
   const floorPorCliente = new Map(
     ocupaciones.map((o) => [o.clientId, o.bed.room.floorId as string | null]),
   );
@@ -541,6 +560,7 @@ async function turnoEnCurso(
       momentos,
       desde,
       hasta,
+      ausencias,
     );
     const porPlanta = new Map<string | null, typeof ocurrencias>();
     for (const oc of ocurrencias) {
@@ -596,6 +616,7 @@ async function turnoEnCurso(
     momentos,
     wallTimeToUtc(careDay, "00:00"),
     inicioDelTurno,
+    ausencias,
   );
   const noHechoCerrados = loQueNoSeHizo({
     ocurrencias: ocurrenciasDelDia,
@@ -752,6 +773,7 @@ export async function indicadoresDelMes(
     recordedAt: r.recordedAt,
     voidedAt: r.voidedAt,
   }));
+  const ausenciasDelMes = await ausenciasDelPlan(prisma, tenantId, desde, hasta);
   const ocurrencias = queToca(
     plan.map((l) => ({
       id: l.id,
@@ -771,6 +793,18 @@ export async function indicadoresDelMes(
     // saldría al 10 % y el panel diría que el centro va fuera de umbral
     // por no haber hecho todavía lo de la semana que viene.
     hasta.getTime() < ahora.getTime() ? hasta : ahora,
+    // ── historia-1 (D-92) · **FUERA DEL DENOMINADOR** ──────────────
+    //
+    // Es la mitad de D-92 que no se ve en ninguna pantalla y es la que
+    // más importa: la gimnasia que no se le hizo a doña Carmen mientras
+    // estaba ingresada **no cuenta como incumplida**, porque `queToca` no
+    // la genera. Sin esto, el indicador de AENOR del mes en que dos
+    // residentes pasan una semana en el hospital sale por debajo del
+    // umbral y el centro abre una acción correctiva por algo que no pasó.
+    //
+    // Y no hace falta tocar `calcularIndicadores`: la fórmula sigue
+    // siendo la misma, lo que cambia es lo que entra.
+    ausenciasDelMes,
   );
 
   // El cumplimiento por control, con el MISMO cruce que el parte.

@@ -111,6 +111,8 @@ export const NOMBRE_DE_LA_CLASE: Record<string, string> = {
   REGISTRO_SIN_TURNO: "Registro sin turno",
   AVISO_QUE_NO_SALIO: "Aviso que no salió a tiempo",
   SIN_PLAN_DE_CUIDADOS: "Sin plan de cuidados",
+  // historia-1 (D-92) · el residente ausente.
+  AUSENTE: "Ausente",
 };
 
 /** Y de qué es un añadido tardío. En castellano, no el enum: la lección
