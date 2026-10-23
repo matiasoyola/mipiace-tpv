@@ -20,6 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
+import { conReloj } from "./reloj-fijado.js";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL =
@@ -37,6 +38,13 @@ const { registerFichajeAdminRoutes } = await import(
 );
 const { signAccessToken } = await import("../src/auth/tokens.js");
 const { localDate, localToUtc } = await import("../src/fichaje/time.js");
+
+/** Un día cuyo tramo abierto es una salida OLVIDADA corra la suite a la
+ *  hora que corra. Desde hotfix-fichaje-medianoche lo decide la duración
+ *  (máximo 16 h de serie), y "ayer a las 08:00" lleva abierto entre 16 h
+ *  —a las 00:00 clavadas, que es el límite y NO es olvido— y 40 h.
+ *  Anteayer, entre 40 h y 64 h. */
+const DIA_OLVIDADO = () => localDate(new Date(Date.now() - 2 * 86_400_000));
 
 describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
   if (!e2eEnabled) console.warn(`\n${SKIP_MESSAGE}\n`);
@@ -280,7 +288,7 @@ describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
     const luis = await altaEmpleado("Luis");
     const ana = await altaEmpleado("Ana");
     const hoy = localDate(new Date());
-    const ayer = localDate(new Date(Date.now() - 86_400_000));
+    const olvidado = DIA_OLVIDADO();
 
     // Marta está dentro desde esta mañana.
     await prisma.timeEntry.create({
@@ -292,13 +300,13 @@ describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
         startSource: "MOBILE",
       },
     });
-    // Luis se dejó ayer sin cerrar.
+    // Luis se dejó un día sin cerrar.
     await prisma.timeEntry.create({
       data: {
         tenantId,
         employeeId: luis,
-        startedAt: localToUtc(ayer, "08:00"),
-        startedServerAt: localToUtc(ayer, "08:00"),
+        startedAt: localToUtc(olvidado, "08:00"),
+        startedServerAt: localToUtc(olvidado, "08:00"),
         startSource: "MOBILE",
       },
     });
@@ -319,6 +327,83 @@ describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
     ]);
     expect(body.alerts.missingExit).toHaveLength(1);
     expect(body.alerts.missingExit[0].employeeName).toBe("Luis");
+  });
+
+  // hotfix-fichaje-medianoche · LAS DOS PANTALLAS DEL TURNO DE NOCHE.
+  it("Hoy, a las 02:00, el turno que entró a las 22:00 está DENTRO", async () => {
+    const marta = await altaEmpleado("Marta");
+    const entrada = localToUtc("2026-09-22", "22:00");
+    await prisma.timeEntry.create({
+      data: {
+        tenantId,
+        employeeId: marta,
+        startedAt: entrada,
+        startedServerAt: entrada,
+        startSource: "MOBILE",
+      },
+    });
+
+    await conReloj(localToUtc("2026-09-23", "02:00"), async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/admin/fichaje/today",
+        headers: auth(),
+      });
+      const body = res.json();
+      // Está trabajando. Antes no salía aquí —su tramo "no era de hoy"— y
+      // además aparecía como salida olvidada: la empresa veía un aviso
+      // rojo por alguien que estaba en el edificio.
+      expect(body.inside.map((x: any) => x.employeeName)).toEqual(["Marta"]);
+      expect(body.alerts.missingExit).toEqual([]);
+      // Y no se la lista como "no ha aparecido": está dentro.
+      expect(body.notClockedIn).toEqual([]);
+    });
+  });
+
+  it("el turno de noche cerrado a las 06:00 suma en el día de ENTRADA", async () => {
+    const marta = await altaEmpleado("Marta");
+    // 22:00 del 22 → 08:00 del 23: diez horas, jornada del 22.
+    await prisma.timeEntry.create({
+      data: {
+        tenantId,
+        employeeId: marta,
+        startedAt: localToUtc("2026-09-22", "22:00"),
+        startedServerAt: localToUtc("2026-09-22", "22:00"),
+        startSource: "MOBILE",
+        endedAt: localToUtc("2026-09-23", "08:00"),
+        endedServerAt: localToUtc("2026-09-23", "08:00"),
+        endSource: "MOBILE",
+      },
+    });
+    // Y una jornada normal del 23, para que se vea que no se mezclan.
+    await prisma.timeEntry.create({
+      data: {
+        tenantId,
+        employeeId: marta,
+        startedAt: localToUtc("2026-09-23", "22:00"),
+        startedServerAt: localToUtc("2026-09-23", "22:00"),
+        startSource: "MOBILE",
+        endedAt: localToUtc("2026-09-24", "06:00"),
+        endedServerAt: localToUtc("2026-09-24", "06:00"),
+        endSource: "MOBILE",
+      },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/admin/fichaje/entries?month=2026-09",
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(200);
+    const [bloque] = res.json().blocks;
+    const dias = Object.fromEntries(
+      bloque.days.map((d: any) => [d.date, d.totalMinutes]),
+    );
+    // Ni una hora en el 23 por culpa de la noche del 22, ni una en el 24.
+    expect(dias["2026-09-22"]).toBe(10 * 60);
+    expect(dias["2026-09-23"]).toBe(8 * 60);
+    expect(dias["2026-09-24"]).toBeUndefined();
+    expect(res.json().totalMinutes).toBe(18 * 60);
   });
 
   it("Hoy marca lo que llegó sin conexión", async () => {

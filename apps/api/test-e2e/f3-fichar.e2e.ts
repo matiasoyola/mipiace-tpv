@@ -24,6 +24,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
+import { conReloj } from "./reloj-fijado.js";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL =
@@ -270,6 +271,82 @@ describe.skipIf(!e2eEnabled)("e2e · fichar desde el móvil", () => {
     expect(s.json().entry.minutes).toBe(240);
   });
 
+  // hotfix-fichaje-medianoche · EL CASO QUE ESTABA ROTO.
+  //
+  // El turno de noche de una residencia: entra a las 22:00, sale a las
+  // 08:00. Pasa de medianoche y se cierra con un toque, como cualquier
+  // otro. Antes devolvía 409 PENDING_EXIT_REQUIRES_REASON porque el día
+  // de la entrada no era el día de la salida, y la persona tenía que
+  // corregir su propia salida con motivo CADA NOCHE.
+  //
+  // El reloj se finge sólo aquí dentro: el día lo elige el test, no la
+  // hora a la que corra la suite.
+  it("un turno de noche 22:00 → 08:00 se cierra con un toque", async () => {
+    const token = await emparejar(marta);
+    const entrada = localToUtc("2026-09-22", "22:00");
+    const salida = localToUtc("2026-09-23", "08:00");
+    await conReloj(entrada, async (avanzar) => {
+      const e = await entrar(token, entrada);
+      expect(e.statusCode).toBe(201);
+
+      // Las 08:00 del día SIGUIENTE. Otro día del calendario, el mismo turno.
+      avanzar(salida);
+      const s = await salir(token, e.json().entry.id, salida);
+      expect(s.statusCode).toBe(200);
+      expect(s.json().entry.open).toBe(false);
+      expect(s.json().entry.minutes).toBe(10 * 60);
+      // Y la jornada es del día en que EMPEZÓ.
+      expect(s.json().entry.date).toBe("2026-09-22");
+    });
+  });
+
+  it("un cierre de bar a la 01:00 tampoco pide motivo", async () => {
+    const token = await emparejar(marta);
+    const entrada = localToUtc("2026-09-22", "20:00");
+    const salida = localToUtc("2026-09-23", "01:00");
+    await conReloj(entrada, async (avanzar) => {
+      const e = await entrar(token, entrada);
+      avanzar(salida);
+      const s = await salir(token, e.json().entry.id, salida);
+      expect(s.statusCode).toBe(200);
+      expect(s.json().entry.minutes).toBe(5 * 60);
+    });
+  });
+
+  // …y lo que SIGUE pidiendo motivo: pasarse del máximo.
+  it("un tramo de más de 16 h sigue necesitando corrección con motivo", async () => {
+    const token = await emparejar(marta);
+    const entrada = localToUtc("2026-09-22", "08:00");
+    const demasiadoTarde = localToUtc("2026-09-23", "09:00"); // 25 h
+    await conReloj(entrada, async (avanzar) => {
+      const e = await entrar(token, entrada);
+      avanzar(demasiadoTarde);
+      const s = await salir(token, e.json().entry.id, demasiadoTarde);
+      expect(s.statusCode).toBe(409);
+      expect(s.json().error).toBe("PENDING_EXIT_REQUIRES_REASON");
+    });
+  });
+
+  // El máximo es dato del tenant: con 8 h, el mismo turno de noche SÍ se
+  // pregunta. Es lo que se le tocaría a un cliente que lo pidiera, y se
+  // toca desde super-admin porque no hay pantalla para esto.
+  it("con el máximo del tenant en 8, el turno de noche vuelve a preguntarse", async () => {
+    const token = await emparejar(marta);
+    await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { fichajeMaxOpenHours: 8 },
+    });
+    const entrada = localToUtc("2026-09-22", "22:00");
+    const salida = localToUtc("2026-09-23", "08:00"); // 10 h > 8
+    await conReloj(entrada, async (avanzar) => {
+      const e = await entrar(token, entrada);
+      avanzar(salida);
+      const s = await salir(token, e.json().entry.id, salida);
+      expect(s.statusCode).toBe(409);
+      expect(s.json().error).toBe("PENDING_EXIT_REQUIRES_REASON");
+    });
+  });
+
   it("estando dentro, volver a entrar no abre un segundo tramo", async () => {
     const token = await emparejar(marta);
     const e1 = await entrar(token, new Date());
@@ -406,18 +483,26 @@ describe.skipIf(!e2eEnabled)("e2e · fichar desde el móvil", () => {
     return row.id;
   }
 
-  async function tramoDeAyer(employeeId: string): Promise<string> {
-    const ayer = localToUtc(
-      localDate(new Date(Date.now() - 86_400_000)),
-      "08:00",
-    );
+  /** Un tramo abierto que es una salida OLVIDADA a cualquier hora a la que
+   *  corra la suite.
+   *
+   *  Antes era "ayer a las 08:00", y eso no es olvido a todas horas:
+   *  desde que el criterio es la duración (hotfix-fichaje-medianoche,
+   *  máximo 16 h), "ayer a las 08:00" lleva abierto entre 16 h —a las
+   *  00:00 clavadas— y 40 h. A medianoche en punto caía justo en el
+   *  límite, que NO es olvido, y el banco se ponía rojo un minuto al día.
+   *  Anteayer a las 08:00 lleva entre 40 h y 64 h: olvido siempre. */
+  const DIA_OLVIDADO = () => localDate(new Date(Date.now() - 2 * 86_400_000));
+
+  async function tramoOlvidado(employeeId: string): Promise<string> {
+    const inicio = localToUtc(DIA_OLVIDADO(), "08:00");
     const row = await prisma.timeEntry.create({
       data: {
         tenantId,
         employeeId,
-        startedAt: ayer,
-        startedDeviceAt: ayer,
-        startedServerAt: ayer,
+        startedAt: inicio,
+        startedDeviceAt: inicio,
+        startedServerAt: inicio,
         startSource: "MOBILE",
       },
       select: { id: true },
@@ -427,7 +512,7 @@ describe.skipIf(!e2eEnabled)("e2e · fichar desde el móvil", () => {
 
   it("al abrir la pantalla, la salida olvidada es lo PRIMERO que sale", async () => {
     const token = await emparejar(marta);
-    const entryId = await tramoDeAyer(marta);
+    const entryId = await tramoOlvidado(marta);
 
     const me = await app.inject({
       method: "GET",
@@ -459,7 +544,7 @@ describe.skipIf(!e2eEnabled)("e2e · fichar desde el móvil", () => {
         },
       });
     }
-    await tramoDeAyer(marta);
+    await tramoOlvidado(marta);
 
     const me = await app.inject({
       method: "GET",
@@ -468,15 +553,15 @@ describe.skipIf(!e2eEnabled)("e2e · fichar desde el móvil", () => {
     });
     const sugerida = me.json().pendingExit.suggestedEndAt;
     expect(sugerida).not.toBeNull();
-    const ayer = localDate(new Date(Date.now() - 86_400_000));
+    // La propuesta se aplica al día en que EMPEZÓ el tramo, no a hoy.
     expect(new Date(sugerida).toISOString()).toBe(
-      localToUtc(ayer, "17:30").toISOString(),
+      localToUtc(DIA_OLVIDADO(), "17:30").toISOString(),
     );
   });
 
   it("la salida olvidada NO se cierra con el toque normal", async () => {
     const token = await emparejar(marta);
-    const entryId = await tramoDeAyer(marta);
+    const entryId = await tramoOlvidado(marta);
     const res = await salir(token, entryId, new Date());
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("PENDING_EXIT_REQUIRES_REASON");
@@ -490,9 +575,8 @@ describe.skipIf(!e2eEnabled)("e2e · fichar desde el móvil", () => {
 
   it("contestarla deja una corrección OLVIDO y el tramo cerrado", async () => {
     const token = await emparejar(marta);
-    const entryId = await tramoDeAyer(marta);
-    const ayer = localDate(new Date(Date.now() - 86_400_000));
-    const salida = localToUtc(ayer, "17:30");
+    const entryId = await tramoOlvidado(marta);
+    const salida = localToUtc(DIA_OLVIDADO(), "17:30");
 
     const res = await app.inject({
       method: "POST",

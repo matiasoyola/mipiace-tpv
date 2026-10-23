@@ -211,7 +211,8 @@ export async function flushOutbox(): Promise<void> {
         const reason = err instanceof Error ? err.message : "Error de red";
         if (isPermanent(err)) {
           // El servidor ha dicho que no y no va a cambiar de opinión
-          // (p. ej. un tramo abierto de otro día que hay que contestar).
+          // (p. ej. un tramo que lleva demasiadas horas abierto y hay que
+          // contestar con la hora de salida y un motivo).
           // Se saca de la cola y se avisa: dejarlo reintentando en bucle
           // sería enseñar "pendiente de enviar" para siempre.
           await withStore("readwrite", (s) =>

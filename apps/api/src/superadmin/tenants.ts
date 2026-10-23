@@ -16,6 +16,10 @@ import {
 import { hashPassword } from "../auth/passwords.js";
 import { getPrisma } from "../context.js";
 import { comprobarSueloFiscal } from "../fiscal/activacion.js";
+import {
+  MAX_OPEN_HOURS_MAX,
+  MAX_OPEN_HOURS_MIN,
+} from "../fichaje/time.js";
 import { encryptSecret } from "../crypto.js";
 import { holdedConnectionStatus } from "../holded/connection-status.js";
 import {
@@ -551,6 +555,10 @@ export async function registerSuperAdminTenantsRoutes(
           // Talavera es el único módulo que va a tener encendido.
           fichaje: tenant.fichajeEnabled,
         },
+        // hotfix-fichaje-medianoche · el ajuste del fichaje, para que el
+        // detalle enseñe lo que hay antes de que nadie lo cambie. Fuera de
+        // `modules` porque no es un interruptor.
+        fichajeMaxOpenHours: tenant.fichajeMaxOpenHours,
         // catalogo-local (addendum 3) · el interruptor de Holded, para
         // que el detalle pueda pintarlo y moverlo.
         holdedEnabled: tenant.holdedEnabled,
@@ -1062,6 +1070,17 @@ export async function registerSuperAdminTenantsRoutes(
             // F1 (ADR-018) · el control horario, con el mismo gobierno que
             // la caja: se enciende y se apaga sólo desde aquí.
             fichajeEnabled: { type: "boolean" },
+            // hotfix-fichaje-medianoche · cuántas horas puede llevar abierto
+            // un tramo antes de ser una «salida olvidada». 16 de serie, y
+            // sin pantalla: se toca desde aquí cuando un cliente lo pide
+            // (una residencia con guardias de 24 h, un turno corto que
+            // quiere avisos antes). El rango está también en el CHECK de la
+            // base; aquí es un 400 limpio en vez de un 500 de Postgres.
+            fichajeMaxOpenHours: {
+              type: "integer",
+              minimum: MAX_OPEN_HOURS_MIN,
+              maximum: MAX_OPEN_HOURS_MAX,
+            },
             // catalogo-local (addendum 3) · el interruptor de Holded.
             // Sólo se mueve desde aquí, y apagarlo tiene guarda: ver más
             // abajo el 409.
@@ -1131,6 +1150,7 @@ export async function registerSuperAdminTenantsRoutes(
         crmEnabled?: boolean;
         agendaEnabled?: boolean;
         fichajeEnabled?: boolean;
+        fichajeMaxOpenHours?: number;
         holdedEnabled?: boolean;
         clinicalRecordsEnabled?: boolean;
         kitchenDisplayEnabled?: boolean;
@@ -1277,6 +1297,25 @@ export async function registerSuperAdminTenantsRoutes(
           message:
             "Una empresa tiene que conservar al menos un módulo encendido (caja, CRM, agenda o control horario).",
         });
+      }
+
+      // hotfix-fichaje-medianoche · el máximo de horas abiertas.
+      //
+      // Fuera de `MODULE_FIELDS` porque no es un interruptor: es un entero
+      // de ajuste, hermano de `agendaSlotMinutes`. No se puede poner a
+      // cualquier cosa —el rango lo defiende el schema de arriba y el CHECK
+      // de la base—, y como todo lo de este handler, deja traza: a los seis
+      // meses, "¿por qué a esta residencia no le avisa de los olvidos?" se
+      // contesta mirando el audit, no adivinando.
+      if (
+        body.fichajeMaxOpenHours !== undefined &&
+        body.fichajeMaxOpenHours !== tenant.fichajeMaxOpenHours
+      ) {
+        changes.fichajeMaxOpenHours = {
+          before: tenant.fichajeMaxOpenHours,
+          after: body.fichajeMaxOpenHours,
+        };
+        data.fichajeMaxOpenHours = body.fichajeMaxOpenHours;
       }
 
       // catalogo-local (addendum 3) · EL INTERRUPTOR DE HOLDED.

@@ -15,6 +15,10 @@ export default defineConfig({
     name: "api-e2e",
     include: ["test-e2e/**/*.e2e.ts"],
     globalSetup: ["test-e2e/global-setup.ts"],
+    // hotfix-fichaje-medianoche · no-op salvo que se pase `FICHAJE_RELOJ`.
+    // Es cómo se reproduce a mediodía un fallo que sólo daba entre las
+    // 00:00 y las 02:00 de Madrid. Ver la cabecera del fichero.
+    setupFiles: ["test-e2e/reloj-fijado.ts"],
     fileParallelism: false,
     sequence: { concurrent: false },
     // Migrar de cero y generar PDFs contra Postgres real no es instantáneo.

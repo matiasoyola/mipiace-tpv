@@ -78,6 +78,13 @@ const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { hashPassword } = await import("../src/auth/passwords.js");
 const { signAccessToken } = await import("../src/auth/tokens.js");
 const { localDate, localToUtc } = await import("../src/fichaje/time.js");
+
+/** El día de un tramo que es una salida OLVIDADA corra la suite a la hora
+ *  que corra. Con el criterio por duración (máximo 16 h de serie), "ayer a
+ *  las 08:00" lleva abierto entre 16 h y 40 h según la hora: a medianoche
+ *  en punto cae JUSTO en el límite, que no es olvido. Anteayer, entre 40 h
+ *  y 64 h: olvido siempre. */
+const DIA_OLVIDADO = () => localDate(new Date(Date.now() - 2 * 86_400_000));
 const jwtLib = (await import("jsonwebtoken")).default;
 
 describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
@@ -345,14 +352,14 @@ describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
     // ── y el caso principal del producto ───────────────────────────────
 
     it("10 · con una salida olvidada, al día siguiente se le PREGUNTA", async () => {
-      const ayer = localDate(new Date(Date.now() - 86_400_000));
+      const olvidado = DIA_OLVIDADO();
       await prisma.timeEntry.create({
         data: {
           tenantId,
           employeeId: profesorId,
-          startedAt: localToUtc(ayer, "08:00"),
-          startedDeviceAt: localToUtc(ayer, "08:00"),
-          startedServerAt: localToUtc(ayer, "08:00"),
+          startedAt: localToUtc(olvidado, "08:00"),
+          startedDeviceAt: localToUtc(olvidado, "08:00"),
+          startedServerAt: localToUtc(olvidado, "08:00"),
           startSource: "MOBILE",
         },
       });
@@ -363,7 +370,7 @@ describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
         headers: movil(),
       });
       expect(me.json().pendingExit).not.toBeNull();
-      expect(me.json().pendingExit.date).toBe(ayer);
+      expect(me.json().pendingExit.date).toBe(olvidado);
 
       // Y la empresa lo ve marcado "sin salida".
       const hoy = await app.inject({
@@ -375,7 +382,7 @@ describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
     });
 
     it("11 · contesta con un toque y queda como corrección OLVIDO", async () => {
-      const ayer = localDate(new Date(Date.now() - 86_400_000));
+      const olvidado = DIA_OLVIDADO();
       const me = await app.inject({
         method: "GET",
         url: "/fichaje/v1/me",
@@ -389,7 +396,7 @@ describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
         headers: movil(),
         payload: {
           field: "ended_at",
-          value: localToUtc(ayer, "17:30").toISOString(),
+          value: localToUtc(olvidado, "17:30").toISOString(),
           reasonCode: "OLVIDO",
         } as never,
       });
@@ -403,10 +410,10 @@ describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
         select: { startedAt: true, startedDeviceAt: true },
       });
       expect(fila.startedAt.toISOString()).toBe(
-        localToUtc(ayer, "08:00").toISOString(),
+        localToUtc(olvidado, "08:00").toISOString(),
       );
       expect(fila.startedDeviceAt!.toISOString()).toBe(
-        localToUtc(ayer, "08:00").toISOString(),
+        localToUtc(olvidado, "08:00").toISOString(),
       );
 
       // Y la traza dice quién, cuándo y por qué.
