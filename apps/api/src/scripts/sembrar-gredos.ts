@@ -69,6 +69,21 @@ import { wallTimeToUtc } from "@mipiacetpv/residencia-plan";
 import { cargarCatalogoDeSerie } from "../residencia/catalogo/cargar-catalogo.js";
 import { cargarPlantillaDeGravedad } from "../residencia/catalogo/cargar-plantilla.js";
 import { aplicarPlantilla } from "../residencia/plan.js";
+// calidad-1 · el mapa de procesos y el ciclo de la NC. Las MISMAS
+// funciones que usan las rutas, no SQL a mano: lo que se fotografía es
+// el producto.
+import {
+  abrirNc,
+  analizarCausa,
+  anotarEvidencia,
+  avanzarCiclo,
+  capacidadDeCalidad,
+  cargarMapaDeReferencia,
+  cerrarAccion,
+  escribirAccion,
+  verificarEficacia,
+  type Firma,
+} from "../residencia/calidad.js";
 
 const T = "99999999-0000-4000-8000-000000000001";
 const DIRECCION = "99999999-0000-4000-8000-000000000010";
@@ -94,6 +109,13 @@ const CAMA_201 = "99999999-0000-4000-8000-000000000042";
 const ANTONIO = "99999999-0000-4000-8000-000000000052";
 const TABLET_SALA = "99999999-0000-4000-8000-000000000063";
 const MARI = "99999999-0000-4000-8000-000000000014";
+// calidad-1 (D-73) · **la responsable de calidad.** En Jardín de Gredos
+// quien lleva la calidad es la terapeuta ocupacional con el rol
+// `CALIDAD`, no la directora — por eso D-73 deja abrir una NC también
+// con ese rol y no sólo con categoría directiva. Y por eso hacen falta
+// DOS personas con capacidad de calidad: la verificación de eficacia la
+// firma alguien distinto de quien cerró la última acción.
+const ISA = "99999999-0000-4000-8000-000000000015";
 
 /** El token de la tablet y el PIN de la auxiliar. Son de prueba y están
  *  escritos aquí porque el bucle visual los teclea. */
@@ -198,6 +220,8 @@ async function main(): Promise<void> {
     // residencia-5 · la auxiliar de la SEGUNDA planta. Existe para que se
     // pueda ver que no ve la primera.
     [MARI, "Mari Carmen", "mari@gredos.local", "CLINICIAN"],
+    // calidad-1 · la TO que lleva la calidad del centro.
+    [ISA, "Isa (calidad)", "isa@gredos.local", "CLINICIAN"],
   ] as const) {
     await prisma.$executeRawUnsafe(
       `INSERT INTO users (id, tenant_id, email, alias, role, password_hash, is_clinician, clinical_scope)
@@ -258,6 +282,7 @@ async function main(): Promise<void> {
     [ROSA, "DUE"],
     [MARI, "AUXILIAR"],
     [SOTO, "MEDICO"],
+    [ISA, "CALIDAD"],
   ] as const) {
     const ya = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
       `SELECT count(*) AS n FROM care_role_assignments a
@@ -495,6 +520,7 @@ async function main(): Promise<void> {
     await sembrarElDia(dek, dia);
   }
   await sembrarLasObligaciones();
+  await sembrarLaCalidad();
 
   console.log(
     [
@@ -511,6 +537,9 @@ async function main(): Promise<void> {
       `  móvil dirección   ${TOKEN_DE_RESPONSABLE}`,
       `  tablet de la sala ${TOKEN_DE_LA_SALA}`,
       `  PIN de Mari       ${PIN_DE_MARI}   (auxiliar, SEGUNDA planta)`,
+      "  calidad           isa@gredos.local, rol CALIDAD (abre y trabaja las NC)",
+      "  mapa              los 11 de referencia, adaptados al vocabulario del centro",
+      "  no conformidades  cinco, una en cada estado del ciclo (NC 01 de AENOR incluida)",
       "  relevo            tres partes de ayer: mañana CONFIRMADO, tarde y noche sin confirmar",
       "  obligaciones      el catálogo del bloque C cargado, con una vencida",
     ].join("\n"),
@@ -912,3 +941,415 @@ async function sembrarLasObligaciones(): Promise<void> {
 }
 
 await main();
+
+// ════════════════════════════════════════════════════════════════════
+//  calidad-1 · EL MAPA, LOS UMBRALES DEL CENTRO Y LAS CINCO NC
+// ════════════════════════════════════════════════════════════════════
+//
+// Lo que se siembra aquí es **el escenario de la auditoría de 2026**:
+//
+//   1. el mapa de referencia cargado y **adaptado** al vocabulario de
+//      Jardín de Gredos — los 8 procesos de su pantalla de indicadores y
+//      los 4 de la de riesgos, reconducidos a uno solo (la
+//      correspondencia, proceso por proceso, está en el done);
+//   2. los **umbrales del centro** del catálogo de AENOR §5 en
+//      `indicator_targets`, para que la pantalla diga «del centro» y no
+//      «de serie» donde la dirección eligió de verdad;
+//   3. la **NC 01 de AENOR 2026** con su causa y dos acciones, una
+//      cerrada con evidencia y otra en plazo;
+//   4. una **observación de la inspección** de Bienestar Social del
+//      08-10-2026;
+//   5. una **queja del libro elevada a NC** (D-38), con el ciclo
+//      entero hasta la verificación de eficacia;
+//   6. y dos más para que haya **una NC en cada estado**, que es lo que
+//      hace fotografiable el ciclo.
+//
+// ── SE LLAMAN LAS FUNCIONES DEL PRODUCTO, NO SQL A MANO ────────────
+//
+// `cargarMapaDeReferencia`, `abrirNc`, `analizarCausa`, `escribirAccion`,
+// `cerrarAccion`, `anotarEvidencia` y `verificarEficacia`. Igual que
+// residencia-5 hizo con `congelarParte`: lo que se fotografía es el
+// producto, no una maqueta. Y de paso, el sembrador es la primera vez
+// que el ciclo entero se ejecuta de principio a fin.
+//
+// ── IDEMPOTENCIA ───────────────────────────────────────────────────
+//
+// El mapa la tiene de serie (índices únicos). Las NC **no**: su
+// referencia es «la siguiente libre del año», así que correr esto dos
+// veces abriría NC-2026-06 a NC-2026-10. Por eso hay un guardia: si ya
+// hay una sola NC en el centro, esta parte no hace nada. Es el único
+// «si ya hay, no hagas nada» del sembrador, y está aquí porque la
+// alternativa —borrar y rehacer— tiraría evidencia, que es justo lo que
+// el trigger de la tabla impide.
+async function sembrarLaCalidad(): Promise<void> {
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  // ── 1 · El mapa, y adaptado ───────────────────────────────────────
+  await cargarMapaDeReferencia(prisma, T, DIRECCION, hoy);
+
+  // El vocabulario del centro encima del mapa de referencia. El `code` y
+  // el `reference_code` NO se tocan: es lo que ata cada indicador a su
+  // proceso aunque le cambien el nombre (D-70).
+  const COMO_LO_LLAMA_GREDOS: Array<[string, string]> = [
+    ["DIRECCION_PLANIFICACION", "Dirección y planificación"],
+    ["CALIDAD_MEJORA", "Calidad, medición y mejora"],
+    ["ADMISION_INGRESO", "Información preliminar, admisión e ingreso"],
+    ["VALORACION_PAI", "Valoración funcional y PAI"],
+    ["ATENCION_SANITARIA", "Atención geriátrica y sanitaria"],
+    ["CUIDADOS_ABVD", "Cuidados y ABVD"],
+    ["VIDA_SOCIAL", "Vida social, animación y terapias"],
+    ["ALOJAMIENTO_RESTAURACION", "Alojamiento, manutención y limpieza"],
+    ["PERSONAS", "Personas (Dirección-RRHH)"],
+    ["MANTENIMIENTO_INSTALACIONES", "Limpieza y mantenimiento"],
+    ["DOCUMENTACION_DATOS", "Documentación, registro y protección de datos"],
+  ];
+  for (const [code, nombre] of COMO_LO_LLAMA_GREDOS) {
+    await prisma.process.updateMany({
+      where: { tenantId: T, referenceCode: code },
+      data: { name: nombre },
+    });
+  }
+
+  const procesos = await prisma.process.findMany({
+    where: { tenantId: T },
+    select: { id: true, referenceCode: true },
+  });
+  const proceso = (ref: string): string =>
+    procesos.find((p) => p.referenceCode === ref)!.id;
+
+  // ── 2 · Los umbrales del centro (catálogo de AENOR §5) ────────────
+  //
+  // Son los objetivos 2026 que Jardín de Gredos declara, y por eso se
+  // escriben: la pantalla dirá «del centro» y no «de serie». Que
+  // coincidan con el de serie en cinco de ellos no los hace lo mismo —
+  // uno lo eligió la dirección y el otro no lo ha mirado nadie, y es la
+  // distinción que residencia-5 dejó escrita.
+  const UMBRALES: Array<[string, number, "AT_LEAST" | "AT_MOST"]> = [
+    ["SIN_DEPOSICION", 3, "AT_MOST"],
+    ["VISITA_MEDICA", 100, "AT_LEAST"],
+    ["GIMNASIA", 73.5, "AT_LEAST"],
+    ["ESTIMULACION_COGNITIVA", 58.5, "AT_LEAST"],
+    ["ACTIVIDADES_SOCIOCULTURALES", 2, "AT_LEAST"],
+    ["AVERIAS_24H", 10, "AT_MOST"],
+    // 44 de 48 residentes que permanecen mes a mes = 91,7 % de ocupación.
+    ["OCUPACION_MEDIA", 91.7, "AT_LEAST"],
+  ];
+  for (const [code, target, comparison] of UMBRALES) {
+    await prisma.indicatorTarget.upsert({
+      where: { tenantId_code: { tenantId: T, code } },
+      create: { tenantId: T, code, target, comparison, updatedByUserId: DIRECCION },
+      update: { target, comparison, updatedByUserId: DIRECCION },
+    });
+  }
+
+  // ── 3 · Los cuatro objetivos de calidad 2026 (AENOR §6) ───────────
+  const OBJETIVOS: Array<[string, string, string, string | null]> = [
+    [
+      "VIDA_SOCIAL",
+      "Aumentar la participación de los usuarios en la comunidad",
+      "Que el 54 % de los residentes válidos acuda a actividades fuera del centro.",
+      "ACTIVIDADES_SOCIOCULTURALES",
+    ],
+    [
+      "CUIDADOS_ABVD",
+      "Aumentar los semiasistidos que participan en las transferencias",
+      "Que el 25 % pueda hacer las transferencias de forma independiente.",
+      null,
+    ],
+    [
+      "VIDA_SOCIAL",
+      "Mejorar capacidades cognitivas con programas individuales y colectivos",
+      "Que el 25 % mantenga o mejore su puntuación en las escalas.",
+      "ESTIMULACION_COGNITIVA",
+    ],
+    [
+      "VIDA_SOCIAL",
+      "Disminuir el sedentarismo propio de la senectud",
+      "Que el 54 % de independientes y semiasistidos participe en la gimnasia.",
+      "GIMNASIA",
+    ],
+  ];
+  for (const [ref, nombre, meta, indicador] of OBJETIVOS) {
+    const ya = await prisma.qualityObjective.findFirst({
+      where: { tenantId: T, year: 2026, name: nombre },
+      select: { id: true },
+    });
+    if (ya != null) continue;
+    await prisma.qualityObjective.create({
+      data: {
+        tenantId: T,
+        processId: proceso(ref),
+        year: 2026,
+        name: nombre,
+        target: meta,
+        indicatorCode: indicador,
+        isoClause: "6.2",
+        createdByUserId: DIRECCION,
+      },
+    });
+  }
+
+  // ── 4 · Las no conformidades ──────────────────────────────────────
+  const yaHay = await prisma.nonConformity.count({ where: { tenantId: T } });
+  if (yaHay > 0) return;
+
+  const rolDe = async (userId: string): Promise<string> => {
+    const r = await capacidadDeCalidad(prisma, T, userId, new Date());
+    return r!.assignmentId;
+  };
+  const firmaIsa: Firma = {
+    userId: ISA,
+    careRoleAssignmentId: await rolDe(ISA),
+  };
+  const firmaPilar: Firma = {
+    userId: DIRECCION,
+    careRoleAssignmentId: await rolDe(DIRECCION),
+  };
+
+  /** Un rol de cuidado del centro, por código, para los responsables. */
+  const roles = await prisma.careRole.findMany({
+    where: { tenantId: T },
+    select: { id: true, code: true },
+  });
+  const rolCode = (code: string): string =>
+    roles.find((r) => r.code === code)!.id;
+
+  // ── 4.1 · LA NC 01 DE AENOR 2026 · en «acciones» ──────────────────
+  const nc01 = await abrirNc(
+    prisma,
+    T,
+    {
+      processId: proceso("CALIDAD_MEJORA"),
+      kind: "MINOR",
+      origin: "EXTERNAL_AUDIT",
+      detectedOn: "2026-07-21",
+      isoClause: "4.4.1",
+      sourceNote: "AENOR · Informe de auditoría nº 24, 1er seguimiento (AS1)",
+      descripcion:
+        "La organización no presenta evidencia de una única determinación de sus procesos: en la pantalla de indicadores hay 8 procesos y en la de riesgos y oportunidades, 4. Además siguen sin asociarse a proceso cuatro riesgos intrínsecos de una residencia: errores en el tratamiento médico, intoxicaciones alimentarias, datos confidenciales y salidas no controladas.",
+    },
+    firmaIsa,
+    new Date("2026-07-24T09:00:00Z"),
+  );
+  await analizarCausa(
+    prisma,
+    T,
+    nc01.id,
+    "El mapa de procesos se mantiene en dos documentos de Word distintos, uno por cada pantalla del sistema de gestión, y nadie es responsable de que coincidan. Los riesgos se revisaron en 2022 sin volver a cruzarlos con el mapa de procesos.",
+  );
+  // Sin `avanzarCiclo(… "ACTIONS")`: escribir la primera acción ya mueve
+  // el estado. Ver la cabecera de `escribirAccion`.
+  const accionMapa = await escribirAccion(
+    prisma,
+    T,
+    nc01.id,
+    {
+      que: "Determinar un mapa de procesos único del centro y dejarlo en el sistema de gestión informatizado, de forma que indicadores, riesgos, objetivos y no conformidades cuelguen del mismo mapa.",
+      dueOn: "2026-10-31",
+      responsibleCareRoleId: rolCode("CALIDAD"),
+    },
+    firmaIsa,
+    new Date("2026-07-24T09:10:00Z"),
+  );
+  await cerrarAccion(
+    prisma,
+    T,
+    accionMapa,
+    "Mapa único cargado en el sistema: 11 procesos, con los 8 de indicadores y los 4 de riesgos reconducidos. Ya no hay dónde escribir un segundo mapa.",
+    firmaIsa,
+    new Date("2026-10-28T12:00:00Z"),
+  );
+  await anotarEvidencia(
+    prisma,
+    T,
+    accionMapa,
+    {
+      nota: "Captura del mapa de procesos del sistema, con el recuento de indicadores, riesgos y objetivos que cuelgan de cada uno.",
+    },
+    firmaIsa,
+    new Date("2026-10-28T12:05:00Z"),
+  );
+  // Y la segunda, EN PLAZO: es la que hace que la NC 01 siga abierta y
+  // salga en el panel con su responsable.
+  await escribirAccion(
+    prisma,
+    T,
+    nc01.id,
+    {
+      que: "Evaluar el Plan de Protección de Datos (última evaluación 20-11-2022) y fijar su periodicidad como obligación del calendario de dirección, con responsable y fecha.",
+      dueOn: "2027-03-31",
+      responsibleCareRoleId: rolCode("DIRECCION"),
+    },
+    firmaIsa,
+    new Date("2026-07-24T09:20:00Z"),
+  );
+
+  // ── 4.2 · LA INSPECCIÓN DE BIENESTAR SOCIAL · «causa analizada» ───
+  const nc02 = await abrirNc(
+    prisma,
+    T,
+    {
+      processId: proceso("DOCUMENTACION_DATOS"),
+      kind: "OBSERVATION",
+      origin: "INSPECTION",
+      detectedOn: "2026-10-08",
+      isoClause: "8.5.1",
+      sourceNote:
+        "JCCM · Consejería de Bienestar Social · acta de inspección del 08-10-2026",
+      descripcion:
+        "Registros de atención directa con anotaciones vacías puntuales: en el muestreo de la visita aparecen casillas de aseo y de líquidos sin anotar al final del turno.",
+    },
+    firmaIsa,
+    new Date("2026-10-09T10:00:00Z"),
+  );
+  await analizarCausa(
+    prisma,
+    T,
+    nc02.id,
+    "Al final del turno nadie repasa qué quedó sin anotar, y el soporte de papel no permite verlo de un vistazo: hay que recorrer hoja por hoja.",
+  );
+
+  // ── 4.3 · UNA QUEJA DEL LIBRO, ELEVADA A NC · CERRADA (D-38) ──────
+  //
+  // El ciclo entero, hasta la verificación de eficacia firmada por OTRA
+  // persona. Es la NC que hace fotografiable el final del flujo.
+  const queja = await prisma.incident.findFirst({
+    where: { tenantId: T, subject: "COMPLAINT" },
+    orderBy: { openedAt: "desc" },
+    select: { id: true, careDay: true },
+  });
+  if (queja != null) {
+    const nc03 = await abrirNc(
+      prisma,
+      T,
+      {
+        processId: proceso("ALOJAMIENTO_RESTAURACION"),
+        kind: "IMPROVEMENT",
+        origin: "COMPLAINT",
+        detectedOn: queja.careDay,
+        isoClause: "10.2",
+        sourceIncidentId: queja.id,
+        descripcion:
+          "Queja de la familia por la temperatura de la comida en la segunda planta. Elevada desde el libro de incidencias.",
+      },
+      firmaIsa,
+      new Date(),
+    );
+    await analizarCausa(
+      prisma,
+      T,
+      nc03.id,
+      "El carro de la segunda planta sale el último y recorre dos pasillos sin tapa térmica.",
+    );
+    const accionCarro = await escribirAccion(
+      prisma,
+      T,
+      nc03.id,
+      {
+        que: "Repartir primero la segunda planta y poner tapa térmica en el carro.",
+        dueOn: hoy,
+        responsibleCareRoleId: rolCode("COCINA"),
+      },
+      firmaIsa,
+      new Date(),
+    );
+    await cerrarAccion(
+      prisma,
+      T,
+      accionCarro,
+      "Cambiado el orden de reparto y comprada la tapa térmica.",
+      firmaIsa,
+      new Date(),
+    );
+    await anotarEvidencia(
+      prisma,
+      T,
+      accionCarro,
+      { nota: "Albarán de la tapa térmica y cuadrante de reparto nuevo." },
+      firmaIsa,
+      new Date(),
+    );
+    await avanzarCiclo(prisma, T, nc03.id, "ACTIONS_CLOSED");
+    // **La firma PILAR y no Isa**: la eficacia la verifica una persona
+    // distinta de quien cerró la última acción, y el trigger lo exige.
+    await verificarEficacia(
+      prisma,
+      T,
+      nc03.id,
+      {
+        resultado: "EFFECTIVE",
+        nota: "Medida la temperatura de servicio en la segunda planta tres días seguidos: 64, 66 y 65 °C. Sin quejas nuevas en tres semanas.",
+      },
+      firmaPilar,
+      new Date(),
+    );
+  }
+
+  // ── 4.4 · UNA DE UN INDICADOR FUERA DE UMBRAL · «abierta» ─────────
+  //
+  // El resultado de aceptar la propuesta del panel (D-74), con el origen
+  // ya relleno. Se queda en `OPEN` a propósito: es el estado que la
+  // pantalla enseña recién abierta.
+  await abrirNc(
+    prisma,
+    T,
+    {
+      processId: proceso("VIDA_SOCIAL"),
+      kind: "MINOR",
+      origin: "INDICATOR",
+      detectedOn: hoy,
+      isoClause: "9.1.3",
+      sourceIndicatorCode: "ESTIMULACION_COGNITIVA",
+      sourceIndicatorMonth: hoy.slice(0, 7),
+      descripcion:
+        "La asistencia al programa de estimulación cognitiva lleva dos meses seguidos por debajo del 58,5 % que el centro fijó como objetivo.",
+    },
+    firmaIsa,
+    new Date(),
+  );
+
+  // ── 4.5 · UNA PENDIENTE DE VERIFICAR · «acciones cerradas» ────────
+  const nc05 = await abrirNc(
+    prisma,
+    T,
+    {
+      processId: proceso("MANTENIMIENTO_INSTALACIONES"),
+      kind: "MINOR",
+      origin: "INTERNAL_AUDIT",
+      detectedOn: "2026-11-14",
+      isoClause: "7.1.3",
+      sourceNote: "Auditoría interna de noviembre · Calidad → Dirección",
+      descripcion:
+        "La grúa de la primera planta no funciona y no consta aviso al mantenedor.",
+    },
+    firmaIsa,
+    new Date("2026-11-14T11:00:00Z"),
+  );
+  await analizarCausa(
+    prisma,
+    T,
+    nc05.id,
+    "No hay revisión periódica de las ayudas técnicas ni responsable de avisar al mantenedor cuando una falla.",
+  );
+  const accionGrua = await escribirAccion(
+    prisma,
+    T,
+    nc05.id,
+    {
+      que: "Reparar la grúa y añadir la revisión trimestral de ayudas técnicas al calendario de obligaciones.",
+      dueOn: "2026-12-15",
+      responsibleLabel: "Mantenimiento (externo)",
+    },
+    firmaPilar,
+    new Date("2026-11-14T11:20:00Z"),
+  );
+  await cerrarAccion(
+    prisma,
+    T,
+    accionGrua,
+    "Grúa reparada el 2 de diciembre y revisión trimestral dada de alta en el calendario.",
+    firmaPilar,
+    new Date("2026-12-02T16:00:00Z"),
+  );
+  await avanzarCiclo(prisma, T, nc05.id, "ACTIONS_CLOSED");
+}

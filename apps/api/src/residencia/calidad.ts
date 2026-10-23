@@ -723,24 +723,44 @@ export async function escribirAccion(
 
   const dek = await asegurarDek(tenantId, prisma);
   const id = nuevoIdDeFila();
-  await prisma.correctiveAction.create({
-    data: {
-      id,
-      tenantId,
-      nonConformityId: ncId,
-      whatCifrado: cifrarTexto(
-        entrada.que,
-        dek,
-        sitioTextoDeAccionCorrectiva(tenantId, id),
-      )!,
-      responsibleCareRoleId: entrada.responsibleCareRoleId || null,
-      responsibleUserId: entrada.responsibleUserId || null,
-      responsibleLabel: entrada.responsibleLabel || null,
-      dueOn: entrada.dueOn,
-      openedAt: ahora,
-      openedByUserId: firma.userId,
-      openedByCareRoleAssignmentId: firma.careRoleAssignmentId,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.correctiveAction.create({
+      data: {
+        id,
+        tenantId,
+        nonConformityId: ncId,
+        whatCifrado: cifrarTexto(
+          entrada.que,
+          dek,
+          sitioTextoDeAccionCorrectiva(tenantId, id),
+        )!,
+        responsibleCareRoleId: entrada.responsibleCareRoleId || null,
+        responsibleUserId: entrada.responsibleUserId || null,
+        responsibleLabel: entrada.responsibleLabel || null,
+        dueOn: entrada.dueOn,
+        openedAt: ahora,
+        openedByUserId: firma.userId,
+        openedByCareRoleAssignmentId: firma.careRoleAssignmentId,
+      },
+    });
+    // **ESCRIBIR LA PRIMERA ACCIÓN *ES* PASAR A ACCIONES.**
+    //
+    // No hay un botón «pasar a acciones» aparte, y es deliberado: un
+    // estado que hay que empujar a mano después de haber hecho el
+    // trabajo es un estado que se queda atrás, y entonces el panel
+    // cuenta mal. El sembrador de este mismo bloque fue el primero en
+    // tropezar con el orden —escribió el avance antes que la acción— y
+    // eso es exactamente lo que le pasaría a quien use la pantalla.
+    //
+    // Desde `OPEN` sólo salta en una observación o una oportunidad de
+    // mejora: las que no exigen causa (D-73). En una NC mayor o menor,
+    // la comprobación de arriba ya ha rechazado la acción.
+    if (nc.estado === "CAUSE_ANALYSED" || nc.estado === "OPEN") {
+      await tx.nonConformity.update({
+        where: { id: ncId },
+        data: { state: "ACTIONS" },
+      });
+    }
   });
   return id;
 }
