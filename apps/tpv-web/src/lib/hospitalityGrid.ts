@@ -607,3 +607,101 @@ export function hojaDeComandaVisible(opts: {
 }): boolean {
   return opts.abierta && !opts.fueraDeLaVenta;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// n1-hosteleria-2 · R1 y R2 · LA HOJA OCUPA LA PANTALLA Y LOS AVISOS NO
+// LA EMPUJAN (hallazgos 1, 3 y 4)
+//
+// Los tres hallazgos de Matías del 23-10 son el mismo problema visto
+// desde tres sitios:
+//
+//   · (1) «la previa no está nada bien»: encima de la hoja se apilaban
+//     «T6 listo para servir» y «M5 listo para servir», la hoja quedaba
+//     baja y las seis líneas de la comanda se veían DE UNA EN UNA;
+//   · (3) los avisos de cocina tapan trabajo;
+//   · (4) al entrar un «Urgente · alergia» la ventana de debajo seguía
+//     ocupando ~15 % de la pantalla.
+//
+// Y la causa común es de reparto, no de cada pieza: la hoja era
+// `max-h-[88dvh]` anclada abajo, o sea que su alto lo decidía SU
+// CONTENIDO. Cada banda de aviso que entraba era contenido nuevo arriba,
+// así que la hoja crecía hacia arriba hasta topar con el 88 % y lo que
+// se comía era el desplazador de las líneas, que es el único bloque
+// flexible. Dos avisos = 112 px menos de comanda, y el 12 % que no
+// ocupaba la hoja era el «~15 % de la ventana de debajo» del hallazgo 4.
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * ¿La hoja de la comanda ocupa la pantalla entera?
+ *
+ * En la mano, **sí**, y por las dos reglas a la vez:
+ *
+ *   · R1 pide una sola capa a la vista. Con `max-h-[88dvh]` quedaba
+ *     siempre una franja de la venta asomando por arriba, que es lo que
+ *     Matías vio como «dos ventanas apiladas»;
+ *   · el hallazgo 1 pide que con seis líneas se vean las seis. Con el
+ *     alto decidido por el contenido eso no se puede prometer, porque lo
+ *     decide lo que haya llegado de cocina. Con el alto CLAVADO a la
+ *     pantalla, los avisos ya no pueden quitarle sitio a las líneas: lo
+ *     que sobra o falta se reparte dentro, y el único bloque que estira
+ *     es la lista.
+ *
+ * Es la misma lección que `n1-hosteleria` aprendió con `h-screen` en el
+ * mapa (§1.4): un contenedor que crece con su contenido no recorta nada,
+ * y lo que se mueve acaba siendo lo que el camarero estaba mirando.
+ *
+ * En el terminal la comanda no es una hoja: es la columna izquierda. Esta
+ * función no se consulta allí.
+ */
+export function hojaOcupaLaPantalla(deMano: boolean): boolean {
+  return deMano;
+}
+
+/** El alto de UNA banda de aviso, en px. `MIN_TOUCH_PX` más su hueco. */
+export const BANDA_AVISO_PX = 56;
+
+/** El relleno vertical del bloque de avisos (`pt-2` arriba). */
+export const AVISOS_PADDING_PX = 8;
+
+/**
+ * El alto, en px, que se llevan los avisos de «listo para servir».
+ *
+ * **En la mano está ACOTADO**: una sola franja de `BANDA_AVISO_PX`, diga
+ * cocina lo que diga, porque lo que entra en el bloque es un CONTADOR y
+ * no la pila. En el terminal crece con el número de avisos, como hasta
+ * ahora.
+ *
+ * Que sea una función y no un `if` dentro del componente es lo que
+ * permite que un banco recorra la tabla —0, 1, 2, 5, 12 avisos— y diga
+ * que en la mano el coste no se mueve. Medir eso en jsdom, que no aplica
+ * hojas de estilo, no se puede.
+ */
+export function altoDeLosAvisos(opts: {
+  deMano: boolean;
+  avisos: number;
+}): number {
+  if (opts.avisos <= 0) return 0;
+  const bandas = opts.deMano ? 1 : opts.avisos;
+  // El hueco entre bandas apiladas (`gap-1`) sólo existe en el terminal,
+  // y sólo entre banda y banda.
+  const huecos = opts.deMano ? 0 : (bandas - 1) * 4;
+  return AVISOS_PADDING_PX + bandas * BANDA_AVISO_PX + huecos;
+}
+
+/**
+ * ¿Los avisos se pintan como PILA o como CONTADOR?
+ *
+ * En la mano, contador: una franja con «N listos» y el nombre de la mesa
+ * que lleva más tiempo esperando, y un toque abre la lista entera como
+ * su propia capa.
+ *
+ * El nombre de la mesa más antigua se queda dentro del contador a
+ * propósito: la decisión 5 de kds-1 dice que el camarero coge lo que
+ * lleva más tiempo en el pase, así que si el contador sólo dijera «2
+ * listos» obligaría a abrir la lista para saber si le pilla de camino.
+ * Con el nombre, el caso normal —un solo aviso— se resuelve sin abrir
+ * nada, y es el caso que pasa el 90 % de las veces.
+ */
+export function modoDeLosAvisos(deMano: boolean): "pila" | "contador" {
+  return deMano ? "contador" : "pila";
+}

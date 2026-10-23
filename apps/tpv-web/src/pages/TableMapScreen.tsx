@@ -72,6 +72,7 @@ import { mapServerDraftLines } from "../lib/tableDraft.js";
 import type { ServerDraft } from "../lib/tableDraft.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 import {
+  CABECERA_DE_ZONA_PX,
   ROOM_GRID_GAP,
   repartoDeSala,
   SUELO_LETRA_MANO_PX,
@@ -97,6 +98,7 @@ import {
   EYEBROW_PX,
   EYEBROW_TRACKING,
   MIN_TOUCH_PX,
+  PRESS_FEEDBACK_CLASS,
   TABLE_BILLING_FILL,
   TABLE_BILLING_TEXT,
   TABLE_BUSY_FILL,
@@ -110,6 +112,14 @@ import {
   TABLE_NAME_PX,
 } from "../lib/hospitalityTheme.js";
 import { syncNow } from "../lib/syncNow.js";
+import {
+  guardarZonasPlegadas,
+  leerZonasPlegadas,
+  type ResumenDeZona,
+  resumenDeZona,
+  rotuloDeZonaPlegada,
+  zonasSePliegan,
+} from "../lib/zonasPlegadas.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { summarizeOpenTables } from "../lib/openTables.js";
 import { VERDE_LISTA, VERDE_LISTA_TEXT } from "../lib/kitchenTheme.js";
@@ -286,6 +296,27 @@ export function TableMapScreen(props: TableMapScreenProps) {
   const [cobro, setCobro] = useState<CobroState | null>(null);
   // auditoria-sirope (#14) · la mesa POR RECOGER que se acaba de tocar.
   const [porRecoger, setPorRecoger] = useState<ApiTable | null>(null);
+  /**
+   * n1-hosteleria-2 · hallazgo 2 · qué zonas están plegadas.
+   *
+   * El inicial se LEE del aparato en el `useState`, no en un efecto: con
+   * un efecto habría un primer pintado con las tres zonas abiertas y el
+   * mapa daría un salto en cuanto se recordara el pliegue — justo en la
+   * pantalla que el camarero está mirando para decidir adónde va.
+   */
+  const [zonasPlegadas, setZonasPlegadas] = useState<Set<string>>(() =>
+    leerZonasPlegadas(),
+  );
+
+  const alternarZona = useCallback((zona: string) => {
+    setZonasPlegadas((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(zona)) siguiente.delete(zona);
+      else siguiente.add(zona);
+      guardarZonasPlegadas(siguiente);
+      return siguiente;
+    });
+  }, []);
   const [cobroBusyId, setCobroBusyId] = useState<string | null>(null);
   // Aviso inline de expulsión / éxito. Copia local del prop para poder
   // autocerrarlo a los 4 s sin depender del padre.
@@ -873,6 +904,20 @@ export function TableMapScreen(props: TableMapScreenProps) {
             {ZONE_ORDER.map((zone) => {
               const zoneTables = visible.filter((t) => t.zone === zone);
               if (zoneTables.length === 0) return null;
+              // n1-hosteleria-2 · hallazgo 2 · en la mano y en «Todas»,
+              // cada zona es una sección que se pliega de un toque. Ver
+              // `lib/zonasPlegadas.ts`.
+              const plegable = zonasSePliegan({ deMano, filtro: zoneFilter });
+              const plegada = plegable && zonasPlegadas.has(zone);
+              const cabecera = plegable ? (
+                <ZoneHeader
+                  zona={zone}
+                  label={ZONE_LABEL[zone].toUpperCase()}
+                  plegada={plegada}
+                  resumen={resumenDeZona(zoneTables, props.mesasListas)}
+                  onAlternar={() => alternarZona(zone)}
+                />
+              ) : null;
               if (zone === "BARRA") {
                 return (
                   <BarZone
@@ -881,6 +926,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
                     renderCard={renderRoomCard}
                     zonePadding={reparto.zonePadding}
                     deMano={deMano}
+                    cabecera={cabecera}
+                    plegada={plegada}
                   />
                 );
               }
@@ -889,6 +936,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
                   key={zone}
                   label={ZONE_LABEL[zone].toUpperCase()}
                   zonePadding={reparto.zonePadding}
+                  cabecera={cabecera}
+                  plegada={plegada}
                 >
                   <RoomGrid>{zoneTables.map(renderRoomCard)}</RoomGrid>
                 </ZoneFrame>
@@ -1084,23 +1133,45 @@ export function TableMapScreen(props: TableMapScreenProps) {
           «Dejar libre» la deja lista sin sentar a nadie; «Abrir cuenta
           nueva» la ocupa directamente —y la limpia de paso, que es lo
           que pasa de verdad cuando llega el siguiente cliente—. */}
+      {/* n1-hosteleria-2 · hallazgo 8 · LA ACCIÓN MÁS PROBABLE, PRIMERO.
+          «Dejar libre» y «Abrir cuenta nueva» se cambian de sitio, y las
+          dos razones apuntan al mismo lado:
+
+            · FRECUENCIA. El estado POR RECOGER existe para decirle al
+              camarero «ve a recoger ésta»: lo crea el cobro y lo deshace
+              la recogida. Durante el servicio se mira el mapa buscando
+              mesas que recoger, no mesas que abrir — abrir pasa cuando
+              llega gente, y entonces se mira la mesa LIBRE.
+            · COSTE DE EQUIVOCARSE. «Abrir cuenta nueva» sin querer deja
+              un borrador abierto que luego hay que anular (en el ensayo
+              del 23-10 quedaron tres). «Dejar libre» sin querer no
+              cuesta nada: se vuelve a tocar y se abre.
+
+          Lo que NO cambia es el contrato de `ConfirmSheet`: el botón de
+          relleno sigue siendo «lo que va a pasar» y la salida neutra
+          sigue abajo y sigue siendo lo que hace el atrás de Android.
+          auditoria-sirope (#14) había puesto «Abrir cuenta nueva»
+          delante porque «es lo que pasa de verdad cuando llega el
+          siguiente cliente», y eso sigue siendo cierto: por eso se queda
+          como segunda acción, con su botón entero, y no como el texto
+          gris que era «Dejar libre». */}
       {porRecoger && (
         <ConfirmSheet
           title={`${porRecoger.name} · por recoger`}
           body={`Se cobró hace ${minutosDesde(porRecoger.porRecogerDesde)}. ¿Qué hacemos con ella?`}
-          confirmLabel="Abrir cuenta nueva"
+          confirmLabel="Dejar libre"
           cancelLabel="Volver"
-          altLabel="Dejar libre"
+          altLabel="Abrir cuenta nueva"
           onCancel={() => setPorRecoger(null)}
           onConfirm={() => {
             const mesa = porRecoger;
             setPorRecoger(null);
-            props.onPickTable(mesa);
+            void dejarLibre(mesa);
           }}
           onAlt={() => {
             const mesa = porRecoger;
             setPorRecoger(null);
-            void dejarLibre(mesa);
+            props.onPickTable(mesa);
           }}
         />
       )}
@@ -1234,9 +1305,19 @@ function ZoneFrame({
   children,
   extraTop,
   zonePadding,
+  cabecera,
+  plegada = false,
 }: {
   label: string;
   children: ReactNode;
+  /**
+   * n1-hosteleria-2 · la cabecera plegable de la mano. Cuando la hay,
+   * sustituye al rótulo flotante del marco: dos rótulos de la misma zona
+   * en la misma caja es ruido, y el flotante es el que no se toca.
+   */
+  cabecera?: ReactNode;
+  /** Plegada, la zona es sólo su cabecera. */
+  plegada?: boolean;
   /**
    * n1-hosteleria · 12 px en la mano y 18 en el terminal
    * (`RepartoDeSala.zonePadding`). Los 6 px por lado son los que hacen
@@ -1246,26 +1327,59 @@ function ZoneFrame({
   /** El mostrador dibujado de la Barra. */
   extraTop?: ReactNode;
 }) {
+  // n1-hosteleria-2 · hallazgo 2 · CON CABECERA NO HAY MARCO.
+  //
+  // Y no es estética: es lo que paga la cabecera. Una franja de 48 px
+  // encima de cada zona, por sí sola, baja de 11 mesas a la vista a 8 —
+  // medido con las 23 de Sirope a 360 × 720—. Lo que las devuelve es que
+  // el marco discontinuo y su rótulo flotante se vayan: entre los dos
+  // cuestan 2 × 12 de relleno más 1,5 de borde por zona, y una cabecera
+  // sólida con el nombre dentro ya dice dónde empieza y dónde acaba la
+  // zona. Dos cosas diciendo lo mismo, y se queda la que se toca.
+  //
+  // El cálculo está en `CABECERA_DE_ZONA_PX` y lo mide
+  // `n1-zonas-plegables.test.ts`, no este comentario.
+  //
+  // Por encima del umbral de mano no hay cabecera, así que el marco y el
+  // rótulo flotante se quedan exactamente como estaban: es la
+  // restricción del bloque.
+  const conCabecera = cabecera != null;
   return (
     <section
       data-testid="zone-frame"
       data-zone-label={label}
-      className="relative rounded-[22px] border-[1.5px] border-dashed"
-      style={{ padding: zonePadding, borderColor: DARK_SURFACE_RAISED }}
+      data-plegada={plegada ? "true" : "false"}
+      data-con-marco={conCabecera ? "false" : "true"}
+      className={
+        conCabecera
+          ? "relative"
+          : "relative rounded-[22px] border-[1.5px] border-dashed"
+      }
+      style={
+        conCabecera
+          ? undefined
+          : { padding: zonePadding, borderColor: DARK_SURFACE_RAISED }
+      }
     >
-      <span
-        className="absolute -top-[9px] left-[22px] px-2 font-medium"
-        style={{
-          background: DARK_CANVAS,
-          color: DARK_TEXT_MUTED,
-          fontSize: EYEBROW_PX,
-          letterSpacing: EYEBROW_TRACKING,
-        }}
-      >
-        {label}
-      </span>
-      {extraTop}
-      {children}
+      {cabecera ?? (
+        <span
+          className="absolute -top-[9px] left-[22px] px-2 font-medium"
+          style={{
+            background: DARK_CANVAS,
+            color: DARK_TEXT_MUTED,
+            fontSize: EYEBROW_PX,
+            letterSpacing: EYEBROW_TRACKING,
+          }}
+        >
+          {label}
+        </span>
+      )}
+      {!plegada && (
+        <div className={conCabecera ? "pt-2" : undefined}>
+          {extraTop}
+          {children}
+        </div>
+      )}
     </section>
   );
 }
@@ -1942,10 +2056,15 @@ function BarZone({
   renderCard,
   zonePadding,
   deMano = false,
+  cabecera,
+  plegada = false,
 }: {
   tables: ApiTable[];
   renderCard: (t: ApiTable) => ReactNode;
   zonePadding: number;
+  /** n1-hosteleria-2 · la cabecera plegable. Ver `ZoneFrame`. */
+  cabecera?: ReactNode;
+  plegada?: boolean;
   /**
    * n1-hosteleria · el mostrador se queda —es lo que da identidad a la
    * zona— pero COMPACTO: 14 px de alto y `mb-2.5` en vez de 22 y `mb-4`.
@@ -1962,6 +2081,8 @@ function BarZone({
     <ZoneFrame
       label={ZONE_LABEL.BARRA.toUpperCase()}
       zonePadding={zonePadding}
+      cabecera={cabecera}
+      plegada={plegada}
       extraTop={
         <div
           data-testid="bar-counter"
@@ -1975,6 +2096,89 @@ function BarZone({
     >
       <RoomGrid>{sorted.map(renderCard)}</RoomGrid>
     </ZoneFrame>
+  );
+}
+
+/**
+ * n1-hosteleria-2 · hallazgo 2 · LA CABECERA DE UNA ZONA PLEGABLE.
+ *
+ * Un objetivo de `MIN_TOUCH_PX` a todo el ancho del marco con el nombre
+ * de la zona, lo que hay dentro y el signo de plegado.
+ *
+ * **48 px, los del hallazgo, y aquí la casa pierde.** A todo lo demás
+ * este bloque le ha dado `MIN_TOUCH_PX` = 56 (la X de la comanda, el
+ * botón de cobro, la etiqueta LISTO), pero esta franja se mide tres
+ * veces en la pantalla y a 56 **cuesta tres mesas**: BARRA se lleva tres
+ * filas de 88 y deja a SALÓN asomando justo en el límite, así que 8 px
+ * por zona empujan su primera fila fuera. R3 pide ≥ 48 y 48 cumple R3.
+ * La cuenta está en `CABECERA_DE_ZONA_PX`.
+ *
+ * El rótulo de la zona va SIEMPRE a la izquierda y en el mismo sitio,
+ * plegada o desplegada: es lo que permite recorrer la sala con el pulgar
+ * sin leer. Lo que cambia a la derecha es el resumen, y sólo cuando está
+ * plegada — desplegada, lo que hay dentro ya se ve.
+ */
+function ZoneHeader({
+  zona,
+  label,
+  plegada,
+  resumen,
+  onAlternar,
+}: {
+  zona: string;
+  label: string;
+  plegada: boolean;
+  resumen: ResumenDeZona;
+  onAlternar: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="zone-header"
+      data-zone={zona}
+      data-plegada={plegada ? "true" : "false"}
+      onClick={onAlternar}
+      aria-expanded={!plegada}
+      aria-label={`${label} · ${rotuloDeZonaPlegada(resumen)} · ${
+        plegada ? "desplegar" : "plegar"
+      }`}
+      className={`w-full flex items-center gap-3 rounded-[16px] px-4 ${PRESS_FEEDBACK_CLASS}`}
+      style={{
+        height: CABECERA_DE_ZONA_PX,
+        background: DARK_SURFACE,
+        color: DARK_TEXT_SOFT,
+      }}
+    >
+      {/* El signo, y no un icono: una punta de flecha de 16 px en una
+          fila de 56 es lo que el camarero mira para saber si lo que no
+          ve es que no hay o que está plegado. */}
+      <span
+        className="shrink-0 font-bold"
+        style={{ fontSize: 15, color: DARK_TEXT_MUTED, lineHeight: 1 }}
+        aria-hidden
+      >
+        {plegada ? "▸" : "▾"}
+      </span>
+      <span
+        className="shrink-0 font-semibold"
+        style={{
+          fontSize: SUELO_LETRA_MANO_PX + 2,
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {label}
+      </span>
+      {/* Plegada dice lo que hay dentro; desplegada, nada: se ve. */}
+      {plegada && (
+        <span
+          data-testid="zone-header-resumen"
+          className="flex-1 min-w-0 truncate text-right"
+          style={{ fontSize: SUELO_LETRA_MANO_PX, color: DARK_TEXT_MUTED }}
+        >
+          {rotuloDeZonaPlegada(resumen)}
+        </span>
+      )}
+    </button>
   );
 }
 

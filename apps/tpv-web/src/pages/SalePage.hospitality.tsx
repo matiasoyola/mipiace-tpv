@@ -58,6 +58,7 @@ import {
   GRID_GAP,
   PRODUCT_COLUMNS_HANDHELD,
   hojaDeComandaVisible,
+  hojaOcupaLaPantalla,
   repartoDelCatalogo,
   tamanoNombreProducto,
 } from "../lib/hospitalityGrid.js";
@@ -117,6 +118,7 @@ import {
 } from "../kitchen/tpv/DeshacerToast.js";
 import { ListoBanner, type AvisoListo } from "../kitchen/tpv/ListoBanner.js";
 import { useAparatoDeMano } from "../hooks/useAparatoDeMano.js";
+import { useBackGuard } from "../hooks/useBackGuard.js";
 import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 
 /**
@@ -298,6 +300,27 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // Handheld: la comanda vive en un bottom-sheet. Cerrarlo no toca nada
   // —las líneas viven en `SalePage`—, así que es sólo abierto/cerrado.
   const [sheetOpen, setSheetOpen] = useState(false);
+  /**
+   * n1-hosteleria-2 · hallazgo 6 · el atrás de Android cierra la hoja.
+   *
+   * R3 pide que «toda hoja o ventana se cierra también con el atrás de
+   * Android», y la comanda era la única capa de la venta que no estaba
+   * registrada en la pila de `useBackGuard`.
+   *
+   * Lo que pasaba antes, y se midió en el §9.3 de la pasada: sin capa
+   * registrada el atrás caía al guardia de fondo de `App.tsx`, que
+   * dentro de una venta significa «vuelve al mapa». O sea que el gesto
+   * de cerrar una hoja sacaba al camarero de la mesa, y la hoja se
+   * cerraba de rebote (por `fueraDeLaVenta`) y no porque alguien lo
+   * hubiera pedido. Salía del aparato lo contrario de lo que se toca.
+   *
+   * Ahora el primer atrás cierra la hoja y el segundo vuelve al mapa,
+   * que es el orden que esperaría cualquiera. Y con la hoja a pantalla
+   * completa (hallazgos 1 y 4) esto dejó de ser un detalle: el velo que
+   * se tocaba para cerrar ya no existe, así que las salidas son la X y
+   * el atrás — las dos que pide R3, y ninguna de las dos de adorno.
+   */
+  useBackGuard(() => setSheetOpen(false), sheetOpen && handheld);
   /**
    * n1-hosteleria · ¿el camarero ha pedido ver la rejilla de familias
    * otra vez, teniendo ya una elegida? (hallazgos 2 y 7)
@@ -834,37 +857,89 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             abierta: sheetOpen,
             fueraDeLaVenta: props.fueraDeLaVenta,
           }) && (
+            // n1-hosteleria-2 · hallazgos 1 y 4 · LA HOJA OCUPA LA
+            // PANTALLA.
+            //
+            // Era `max-h-[88dvh]` anclada abajo, o sea con el alto
+            // decidido por SU CONTENIDO, y de ahí salían los dos
+            // hallazgos a la vez:
+            //
+            //   · cada banda de «listo para servir» era contenido nuevo
+            //     arriba, así que la hoja crecía hasta topar con el 88 %
+            //     y lo que se comía era el desplazador de las líneas, el
+            //     único bloque flexible. Dos avisos = 112 px menos de
+            //     comanda, y las seis líneas se veían de una en una;
+            //   · el 12 % que la hoja no ocupaba era la franja de venta
+            //     que Matías vio asomando por arriba — el «~15 % de la
+            //     pantalla» del hallazgo 4, que R1 prohíbe.
+            //
+            // Con el alto clavado a la pantalla los avisos ya no pueden
+            // quitarle sitio a las líneas, porque no hay de dónde: lo que
+            // sobre o falte se reparte dentro y el único que estira es la
+            // lista. Es la misma lección del `h-screen` del mapa (§1.4 de
+            // n1-hosteleria).
+            //
+            // Y con la hoja a pantalla completa el velo deja de tener
+            // sentido —no hay nada que velar—, así que se va con él el
+            // «toca fuera para cerrar»: fuera no queda. Se cierra con la
+            // X de 56 px y con el atrás de Android, que son las dos vías
+            // que pide R3.
             <div className="fixed inset-0 z-40">
-              <div
-                className="absolute inset-0"
-                style={{ background: "rgba(0,0,0,0.55)" }}
-                onClick={() => setSheetOpen(false)}
-              />
+              {!hojaOcupaLaPantalla(handheld) && (
+                <div
+                  className="absolute inset-0"
+                  style={{ background: "rgba(0,0,0,0.55)" }}
+                  onClick={() => setSheetOpen(false)}
+                />
+              )}
               <div
                 role="dialog"
                 aria-modal="true"
                 aria-label={mandaACocina ? "Comanda" : "Pedido"}
-                className="absolute inset-x-0 bottom-0 max-h-[88dvh] rounded-t-3xl flex flex-col overflow-hidden"
+                data-testid="hoja-comanda"
+                data-pantalla-completa={
+                  hojaOcupaLaPantalla(handheld) ? "true" : "false"
+                }
+                className={
+                  hojaOcupaLaPantalla(handheld)
+                    ? "absolute inset-0 flex flex-col overflow-hidden"
+                    : "absolute inset-x-0 bottom-0 max-h-[88dvh] rounded-t-3xl flex flex-col overflow-hidden"
+                }
                 style={{
                   background: DARK_PANEL,
                   paddingBottom: "var(--keyboard-offset, 0px)",
                 }}
               >
                 <div className="flex items-center justify-between px-4 pt-3 pb-1 shrink-0">
-                  <span className="w-11" aria-hidden />
+                  <span
+                    style={{ width: MIN_TOUCH_PX }}
+                    aria-hidden
+                  />
                   <span
                     className="h-1.5 w-10 rounded-full"
                     style={{ background: DARK_SURFACE_KEY }}
                     aria-hidden
                   />
+                  {/* n1-hosteleria-2 · hallazgo 6 · medía 44 (`h-11 w-11`)
+                      y R3 pide 48. Se le da `MIN_TOUCH_PX` = 56, que es el
+                      suelo de la casa para la venta y la sala y lo que ya
+                      recibió el botón de cobro de la mesa pequeña por el
+                      mismo argumento. Con la hoja a pantalla completa esta
+                      X es la única salida que se ve, así que es el último
+                      objetivo de la pantalla que puede quedarse corto. */}
                   <button
                     type="button"
                     onClick={() => setSheetOpen(false)}
                     aria-label="Cerrar la comanda"
-                    className="h-11 w-11 rounded-xl flex items-center justify-center"
-                    style={{ color: DARK_TEXT_MUTED }}
+                    data-testid="hoja-comanda-cerrar"
+                    className="rounded-xl flex items-center justify-center"
+                    style={{
+                      width: MIN_TOUCH_PX,
+                      height: MIN_TOUCH_PX,
+                      color: DARK_TEXT_MUTED,
+                    }}
                   >
-                    <X className="w-4 h-4" strokeWidth={2.25} />
+                    <X className="w-5 h-5" strokeWidth={2.25} />
                   </button>
                 </div>
                 <Comanda
@@ -1373,6 +1448,7 @@ function Comanda({
           avisos={props.kitchen.avisosListo}
           beep={props.kitchen.readyBeep}
           onServido={props.kitchen.onServido}
+          deMano={deMano}
         />
       )}
 

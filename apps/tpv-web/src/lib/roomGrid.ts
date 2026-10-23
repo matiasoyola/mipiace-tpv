@@ -79,6 +79,25 @@ export const ZONE_BORDER = 2;
  */
 export const BAR_COUNTER_HEIGHT = 26 + 16;
 
+/**
+ * n1-hosteleria-2 · lo mismo, EN LA MANO: **24 px**.
+ *
+ * `n1-hosteleria` dejó el mostrador compacto en el DOM —14 px de alto y
+ * `mb-2.5`, o sea 10 de separación— pero la aritmética siguió usando los
+ * 42 del terminal. O sea que `mesasALaVistaDeMano` contaba 18 px de más
+ * por la zona BARRA.
+ *
+ * El error iba hacia el lado seguro (contaba MENOS mesas de las que se
+ * ven, nunca más), y por eso nadie lo notó: el criterio de aquel bloque
+ * era «al menos 9» y salían 11 cuando en el aparato se veían 14. Pero
+ * este bloque gasta justo esos píxeles en la cabecera de zona del
+ * hallazgo 2, así que con el número viejo la cuenta decide mal: diría
+ * que la cabecera cuesta tres mesas cuando no cuesta ninguna.
+ *
+ * 14 + 10, y los dos salen del JSX de `BarZone`.
+ */
+export const BAR_COUNTER_HEIGHT_MANO = 14 + 10;
+
 // v2-H1 · aquí vivían `ROOM_TOP_CHROME = 212` y `ROOM_BOTTOM_CHROME`,
 // el chrome de la sala CLARA: barra de app (77), `p-7` del main, fila
 // «Sala · N abiertas…» con sus chips (64) y la leyenda intercalada (43).
@@ -354,6 +373,13 @@ export interface RoomZone {
   tables: number;
   /** La BARRA mide más de alto: lleva el mostrador dibujado encima. */
   isBar?: boolean;
+  /**
+   * n1-hosteleria-2 · el nombre de la zona («BARRA», «SALON»…), para
+   * poder decir cuáles están PLEGADAS. Opcional: todo lo que había antes
+   * de este bloque cuenta zonas sin nombrarlas, y sin nombre una zona
+   * nunca se considera plegada — que es el lado seguro.
+   */
+  name?: string;
 }
 
 /**
@@ -817,16 +843,57 @@ export function mesasALaVistaDeMano(
   availableHeight: number,
   cardSize: number = TABLE_SHAPE_MIN_MANO,
   zonePadding: number = ZONE_PADDING_MANO,
+  // n1-hosteleria-2 · hallazgo 2 · cada zona plegable paga su cabecera
+  // de `CABECERA_DE_ZONA_PX`, y una zona PLEGADA paga sólo eso.
+  //
+  // Entra por parámetro, con el valor «como antes» por defecto, porque
+  // este bloque necesita medir las dos cosas: lo que se ve con las tres
+  // zonas abiertas (que es lo que empeora, y hay que saber cuánto) y lo
+  // que se ve plegando las que no se están mirando (que es para lo que
+  // existe el hallazgo).
+  cabeceras: {
+    plegables: boolean;
+    plegadas?: ReadonlySet<string>;
+    /**
+     * El alto del mostrador de la BARRA. Por defecto el del terminal,
+     * para no mover nada de lo que ya llamaba a esta función; el camino
+     * de mano pasa `BAR_COUNTER_HEIGHT_MANO`.
+     */
+    barCounter?: number;
+  } = {
+    plegables: false,
+  },
 ): number {
   const maxColumns = roomColumnsFor(availableWidth - 2 * zonePadding, cardSize);
+  const barCounter = cabeceras.barCounter ?? BAR_COUNTER_HEIGHT;
   let y = 0;
   let vistas = 0;
   for (const zone of zones) {
+    const cabecera = cabeceras.plegables ? CABECERA_DE_ZONA_PX : 0;
+    // Una zona SIN NOMBRE nunca se considera plegada, y el nombre vacío
+    // tampoco cuenta: todo lo anterior a este bloque cuenta zonas sin
+    // nombrarlas, y el lado seguro es desplegada.
+    if (
+      zone.name != null &&
+      zone.name !== "" &&
+      cabeceras.plegadas?.has(zone.name) === true
+    ) {
+      // Plegada: ocupa su cabecera y ni una mesa. Si ni la cabecera
+      // cabe, lo que hay debajo tampoco.
+      if (y + cabecera > availableHeight) return vistas;
+      y += cabecera + ZONE_GAP;
+      continue;
+    }
     const columns = Math.max(1, Math.min(zone.tables, maxColumns));
     const rows = Math.max(1, Math.ceil(zone.tables / columns));
     // Lo que la zona mete por encima de su primera fila de mesas.
-    const chrome =
-      2 * zonePadding + ZONE_BORDER + (zone.isBar ? BAR_COUNTER_HEIGHT : 0);
+    //
+    // Con cabecera NO hay marco: el relleno de zona y el borde
+    // discontinuo se van, porque la cabecera sólida ya dice dónde
+    // empieza la zona. Es lo que paga los 48 px. Ver
+    // `CABECERA_DE_ZONA_PX`.
+    const marco = cabecera > 0 ? 0 : 2 * zonePadding + ZONE_BORDER;
+    const chrome = cabecera + marco + (zone.isBar ? barCounter : 0);
     for (let r = 0; r < rows; r += 1) {
       const bottom = y + chrome + (r + 1) * cardSize + r * ROOM_GRID_GAP;
       if (bottom > availableHeight) return vistas;
@@ -836,3 +903,42 @@ export function mesasALaVistaDeMano(
   }
   return vistas;
 }
+
+/**
+ * El alto de la cabecera de una zona plegable, en px: **48**.
+ *
+ * Los 48 que pide el hallazgo 2, y no los 56 de `MIN_TOUCH_PX` que este
+ * bloque le ha dado a todo lo demás (la X de la comanda, el botón de
+ * cobro, la etiqueta LISTO). Aquí la casa pierde, y pierde por una
+ * medida, no por gusto: **a 56 la cabecera cuesta tres mesas.**
+ *
+ * Con las 23 de Sirope a 360 × 720 (ancho útil 328, alto útil 521):
+ *
+ *   cabecera 48, sin marco   →  11 de 23 a la vista
+ *   cabecera 56, sin marco   →   8 de 23
+ *
+ * La razón está en que BARRA se lleva tres filas de 88 y deja a SALÓN
+ * asomando por abajo justo en el límite: los 8 px de más empujan la
+ * primera fila de SALÓN fuera de la pantalla y se van tres mesas de
+ * golpe. R3 pide ≥ 48 y 48 cumple R3, así que lo que había que decidir
+ * era si pagar tres mesas por 8 px de dedo — y no.
+ *
+ * **Y lo que paga la cabecera es el MARCO.** Sin esto el hallazgo 2
+ * sería un empeoramiento: una cabecera de 48 encima de cada zona baja de
+ * 11 mesas a 8 vean lo que vean. Lo que lo devuelve a 11 es que en la
+ * mano, con cabeceras, **el marco discontinuo y su rótulo flotante
+ * desaparecen**: el marco costaba 2 × 12 de relleno más 1,5 de borde por
+ * zona, y una cabecera sólida con el nombre de la zona dentro ya dice
+ * dónde empieza y dónde acaba. Dos cosas diciendo lo mismo, y la que se
+ * queda es la que además se toca.
+ *
+ * Va como literal y no importando la constante porque **este módulo no
+ * importa nada**: es aritmética pura, y lo es a propósito —así un banco
+ * lo recorre sin arrastrar el tema, y el tema no puede meter un ciclo—.
+ * Es el mismo patrón que `ROOM_HEADER_MANO`, que también cita
+ * `MIN_TOUCH_PX` en prosa y escribe el número.
+ *
+ * Vive aquí y no en `TableMapScreen` porque es un número que entra en la
+ * aritmética de lo que se ve: ver `mesasALaVistaDeMano`.
+ */
+export const CABECERA_DE_ZONA_PX = 48;

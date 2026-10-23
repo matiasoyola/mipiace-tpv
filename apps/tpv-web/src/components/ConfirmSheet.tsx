@@ -16,7 +16,37 @@
 //   - Objetivos táctiles de la escala `touch` (48 px), que es lo que
 //     mide un dedo con prisa.
 
+// n1-hosteleria-2 · hallazgo 8 · LAS OPCIONES DE UNA MESA, EN LA MANO.
+//
+// Matías, 23-10: «las opciones de una mesa por recoger, muy pequeñas».
+// Medido, eran tres cosas a la vez y ninguna era el alto del botón (ya
+// estaba en los 48 de la escala `touch`):
+//
+//   · la LETRA. Título a 18 px, cuerpo a 14 y los tres botones a 14,
+//     todos por debajo del suelo de R4 (15). El cuerpo es además donde
+//     va el dato que se consulta para decidir («se cobró hace 12 min»);
+//   · el ANCHO. `max-w-md` con `p-3` alrededor deja la hoja flotando con
+//     12 px de lienzo a cada lado, que a 360 se lee como una tarjeta
+//     pequeña en medio de la pantalla y no como la hoja de la mesa;
+//   · el ORDEN. La tercera salida (`altLabel`) se pintaba como texto
+//     gris, sin relleno y DEBAJO de la salida neutra. En la mesa por
+//     recoger esa tercera salida es «Dejar libre», que es justamente la
+//     acción más probable: durante el servicio el camarero mira el mapa
+//     para encontrar mesas que recoger. La acción más probable era la
+//     más pequeña y la última.
+//
+// Lo que cambia en la mano: la hoja va a todo el ancho pegada abajo, los
+// tres botones miden `MIN_TOUCH_PX` y llevan relleno propio, y el orden
+// pasa a ser acción · acción · salida, con la salida al final porque es
+// donde cae el pulgar y porque salir tiene que ser lo barato.
+//
+// Por encima del umbral de mano no se mueve nada: es la restricción del
+// bloque, y ahí esta hoja sale centrada como hasta ahora.
+
+import { useAparatoDeMano } from "../hooks/useAparatoDeMano.js";
 import { useBackGuard } from "../hooks/useBackGuard.js";
+import { MIN_TOUCH_PX } from "../lib/hospitalityTheme.js";
+import { SUELO_LETRA_MANO_PX } from "../lib/roomGrid.js";
 
 export function ConfirmSheet({
   title,
@@ -50,6 +80,82 @@ export function ConfirmSheet({
   // El Atrás del sistema equivale a la salida neutra, nunca a la
   // acción destructiva.
   useBackGuard(onCancel);
+  const deMano = useAparatoDeMano();
+
+  if (deMano) {
+    // El alto de los tres botones y el de la letra salen de las mismas
+    // constantes que la sala, no de números propios de este componente:
+    // es lo que impide que «la hoja de la mesa» y «la mesa» se separen.
+    const boton =
+      "w-full rounded-2xl font-semibold flex items-center justify-center";
+    const estiloBoton = {
+      height: MIN_TOUCH_PX,
+      fontSize: SUELO_LETRA_MANO_PX + 2,
+    };
+    return (
+      <div
+        className="fixed inset-0 z-[70] bg-mipiace-ink/50 flex items-end font-sans"
+        onClick={onCancel}
+        role="presentation"
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          data-testid="confirm-sheet"
+          data-de-mano="true"
+          onClick={(e) => e.stopPropagation()}
+          className="w-full bg-white rounded-t-3xl border-t border-slate-200 px-4 pt-5 pb-4"
+        >
+          <h2
+            className="font-semibold text-mipiace-ink tracking-tight mb-2"
+            style={{ fontSize: SUELO_LETRA_MANO_PX + 4 }}
+          >
+            {title}
+          </h2>
+          {body && (
+            <p
+              className="text-slate-500 leading-relaxed mb-5"
+              style={{ fontSize: SUELO_LETRA_MANO_PX }}
+            >
+              {body}
+            </p>
+          )}
+          {/* Acción · acción · salida. Las dos acciones llevan relleno
+              propio: la tercera salida dejó de ser texto gris, porque en
+              la mesa por recoger es la que más se toca. */}
+          <div className="flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={onConfirm}
+              className={`${boton} bg-mipiace-coral hover:bg-mipiace-coral-dark text-white`}
+              style={estiloBoton}
+            >
+              {confirmLabel}
+            </button>
+            {altLabel && onAlt && (
+              <button
+                type="button"
+                onClick={onAlt}
+                className={`${boton} border border-slate-300 hover:bg-slate-50 text-mipiace-ink`}
+                style={estiloBoton}
+              >
+                {altLabel}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onCancel}
+              className={`${boton} text-mipiace-ink-soft hover:bg-slate-50`}
+              style={estiloBoton}
+            >
+              {cancelLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -61,6 +167,8 @@ export function ConfirmSheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        data-testid="confirm-sheet"
+        data-de-mano="false"
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md bg-white rounded-3xl border border-slate-200 p-5 sm:p-6"
       >
