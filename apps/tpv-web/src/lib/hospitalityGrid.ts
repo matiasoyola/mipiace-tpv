@@ -507,6 +507,32 @@ export interface RepartoDelCatalogo {
   rejilla: boolean;
   /** ¿Se pinta la tira con la familia elegida y «Cambiar»? */
   tira: boolean;
+  /**
+   * ¿Se pinta la fila de cantidad 1–6?
+   *
+   * La añade la pasada del 23-10 en el N1. Buscando «tost» con el
+   * teclado abierto —ventana de 449 px— la rejilla de familias SÍ cedía
+   * su sitio, pero la fila de cantidad no, y en estrecho mide **120 px**
+   * porque `n1-vertical` la repartió en 3×2 (seis teclas de 56 en una
+   * fila piden 376 y a 360 no caben). Medido en el aparato:
+   *
+   *   cabecera de comanda   112 … 180   (68)
+   *   buscador              194 … 250   (56)
+   *   fila de cantidad      291 … 411   (120)  ← no cedía
+   *   primer resultado      425 … 493          ← fuera de 449
+   *
+   * El §2 del bloque pide que «los resultados van JUSTO DEBAJO del
+   * buscador», y con 120 px en medio no lo están. Cediendo, el primer
+   * resultado pasa a 291 … 359 —dentro— y caben dos.
+   *
+   * La cantidad no se pierde: se corrige sobre la propia línea con los
+   * `−`/`+` de 56 px, que es lo que manda `principio-venta-bajo-estres`
+   * (regla 6). Y en el terminal la fila no se mueve.
+   *
+   * En el banco no se vio porque su tenant no está en ensayo y no paga
+   * los 40 px de la banda.
+   */
+  cantidad: boolean;
 }
 
 /**
@@ -514,11 +540,13 @@ export interface RepartoDelCatalogo {
  *
  * Las dos reglas, que **sólo** aplican en un aparato de mano:
  *
- *   1. con texto en el buscador, NI rejilla ni tira. Buscando, las
- *      familias no sirven para nada —la lista de productos llega ya
- *      filtrada por la búsqueda, y filtrar además por familia dejaría
- *      «sin resultados» con el producto a la vista en otra— así que su
- *      sitio entero es de los resultados;
+ *   1. con texto en el buscador, NI rejilla, NI tira, NI fila de
+ *      cantidad. Buscando, las familias no sirven para nada —la lista de
+ *      productos llega ya filtrada por la búsqueda, y filtrar además por
+ *      familia dejaría «sin resultados» con el producto a la vista en
+ *      otra— así que su sitio entero es de los resultados. Lo de la fila
+ *      de cantidad lo encontró la pasada del 23-10 en el N1: ver la nota
+ *      de `cantidad`;
  *   2. con familia elegida, la rejilla se pliega a la tira, salvo que el
  *      camarero haya pedido verla otra vez (`rejillaAbierta`).
  *
@@ -531,10 +559,14 @@ export function repartoDelCatalogo(opts: {
   vista: VistaDelCatalogo;
   rejillaAbierta: boolean;
 }): RepartoDelCatalogo {
-  if (!opts.deMano) return { rejilla: true, tira: false };
-  if (opts.buscando) return { rejilla: false, tira: false };
+  if (!opts.deMano) return { rejilla: true, tira: false, cantidad: true };
+  // Buscando no se pinta NADA por encima de los resultados: ni familias
+  // ni tira ni la fila de cantidad. Ver la nota de `cantidad`.
+  if (opts.buscando) {
+    return { rejilla: false, tira: false, cantidad: false };
+  }
   const plegada = opts.vista.kind === "family" && !opts.rejillaAbierta;
-  return { rejilla: !plegada, tira: plegada };
+  return { rejilla: !plegada, tira: plegada, cantidad: true };
 }
 
 // ──────────────────────────────────────────────────────────────────────

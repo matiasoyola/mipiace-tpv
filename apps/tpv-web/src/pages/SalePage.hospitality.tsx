@@ -367,8 +367,11 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // Al borrar la búsqueda o volver a «Ahora», todo vuelve solo: son
   // derivadas de `searching` y `view`, no un estado que haya que
   // deshacer.
-  const { rejilla: mostrarRejillaDeFamilias, tira: familiaPlegada } =
-    repartoDelCatalogo({
+  const {
+    rejilla: mostrarRejillaDeFamilias,
+    tira: familiaPlegada,
+    cantidad: mostrarFilaDeCantidad,
+  } = repartoDelCatalogo({
       deMano: handheld,
       buscando: searching,
       vista: view,
@@ -605,6 +608,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             Lo encontró el bucle visual: las teclas 5 y 6 se salían de la
             pantalla por la derecha, que es scroll horizontal y está
             prohibido por `ux-principles` §1.8. */}
+        {mostrarFilaDeCantidad && (
         <div
           data-testid="qty-row"
           data-columns={handheld ? 3 : 6}
@@ -663,6 +667,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             </span>
           )}
         </div>
+        )}
 
         {/* La cuadrícula. §3b · NUNCA paginación: ni páginas, ni flechas,
             ni «Más (N)», ni scroll dentro de la rejilla. El reparto se
