@@ -920,10 +920,22 @@ las seis líneas.
 
 ### 9.5 Inventario para el «Resetear ensayo»
 
-**Nada.** Esta sesión no ha tocado producción: todo se ha medido contra la stack
-del banco, en la base desechable `mipiacetpv_n1_host2_e2e`. En Sirope-ensayo sigue
-lo que dejó la pasada del 23-10 (§9.5 de `n1-hosteleria-done`): la mesa T1 con
-9,00 € en DRAFT, la M3 por recoger, la T2 por recoger y el ticket TEST `000029`.
+Lo que **esta sesión** ha dejado en Sirope-ensayo:
+
+| qué | dónde | cuándo | de quién |
+|---|---|---|---|
+| **Mesa T2 abierta · 11,40 € · 1 línea** | TERRAZA | 23-10 **19:26** | un toque que aterrizó en la mesa al moverse la cabecera de zona bajo el dedo. Matías estaba usando el N1 a la vez, así que **no se puede afirmar de quién fue el toque** |
+
+**Ningún ticket cobrado y ningún `TEST` nuevo**: no se llegó a la parte del
+cobro. Nada subió a Holded ni generó registro fiscal — el tenant está en ensayo.
+
+Y lo que ya había de antes, que no es de esta sesión pero el reset se lleva
+igual: cuatro comandas de cocina pendientes en el KDS del AP11 (la más vieja de
+**7179 min**, cinco días) y dos en «LISTAS» (T6 y M5, de ~7.000 min). Se ven en
+`docs/qa/2026-10-23-n1-hosteleria-2/00-ap11-kds.png`.
+
+Todo lo demás se midió contra la stack del banco, en la base desechable
+`mipiacetpv_n1_host2_e2e`, que no toca producción.
 
 ---
 
