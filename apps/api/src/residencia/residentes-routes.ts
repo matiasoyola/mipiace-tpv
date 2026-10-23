@@ -36,8 +36,43 @@
 //
 // Lo que las pantallas reciben **no cambia**: los mismos campos con los
 // mismos nombres. Lo único nuevo que puede llegar es el texto del hueco.
+//
+// ── alta-minima · PARA CREAR UN RESIDENTE BASTA CON EL NOMBRE ───────
+//
+// `admissionDate`, `dependencyLevel` y `placeType` eran obligatorios.
+// Ya no, y es la decisión del bloque: el primer día de una residencia
+// real lo que hay es un listado de nombres. La señora ya vive allí y no
+// saber su fecha de ingreso no hace que necesite menos cuidados; lo que
+// hace obligarla a esperar es que **no esté en el programa** — no sale en
+// la puerta, no se le puede apuntar «algo no va bien» y el relevo no la
+// ve.
+//
+// Lo que falta pasa a ser **dato**: `datosQueFaltan` (paquete puro) lo
+// enumera y viaja en cada residente como `faltan`, para que la lista, la
+// ficha y el panel lo canten hasta que esté completa. Nada bloquea.
+//
+// Y tres consecuencias que no se ven desde el `schema`:
+//
+//   1. **Sin nivel no se precarga plan.** `aplicarPlantilla` necesita un
+//      nivel para saber qué plantilla aplicar, así que el residente nace
+//      sin plan y «Plan de cuidados» entra en lo que le falta. Al poner
+//      el nivel, la ficha lo OFRECE (`POST …/plan/plantilla`, en
+//      `plan-routes.ts`).
+//   2. **El PATCH toca también al `Client`.** Los apellidos son uno de
+//      los datos que faltan y viven en `clients`, no en el perfil: sin
+//      esto, el aviso «faltan apellidos» no tendría dónde arreglarse.
+//   3. **El alta pasa por `negativaClinica`.** Ver `POST
+//      /residencia/residentes`.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+
+import {
+  claveDeNombre,
+  datosQueFaltan,
+  lineasPegadas,
+  resumenDeFichas,
+  type DatoQueFalta,
+} from "@mipiacetpv/residencia-plan";
 
 import { getPrisma } from "../context.js";
 import {
@@ -45,6 +80,7 @@ import {
   requireOwnerOrManager,
 } from "../auth/middleware.js";
 import { ensureClinicaEnabled } from "../clinica/gate.js";
+import { negativaClinica } from "../clinica/contrato.js";
 import { conHistoria } from "../clinica/registro.js";
 // residencia-1b (D-63) · el cifrado de clinica-7, tal cual. `asegurarDek`
 // en las ESCRITURAS (crea la clave del centro la primera vez, dentro de la
@@ -129,6 +165,22 @@ async function consentimientoDeImagen(
   return null;
 }
 
+/**
+ * alta-minima · cuántos nombres entran en un pegado.
+ *
+ * **No es un número redondo.** La residencia más grande de la provincia
+ * tiene 180 plazas y el centro cero tiene 43; 300 deja sitio de sobra
+ * para el listado entero de cualquiera, con sus repetidos dentro.
+ *
+ * Lo que este límite protege no es la base —300 altas son 300
+ * transacciones cortas— sino el caso de pegar la columna equivocada: una
+ * hoja de 2.000 filas de registros de comida convertida en 2.000
+ * residentes es un centro que hay que limpiar a mano, fila por fila,
+ * porque un residente **no se borra** (las FKs son `RESTRICT` desde
+ * residencia-1). El mensaje dice qué hacer y que repetir no duplica.
+ */
+const MAXIMO_DE_UN_LOTE = 300;
+
 const NIVELES = ["VALIDO", "SEMIASISTIDO", "DEPENDIENTE"] as const;
 const GRADOS = ["I", "II", "III"] as const;
 const PLAZAS = ["PRIVADA", "CONCERTADA", "TEMPORAL"] as const;
@@ -167,6 +219,48 @@ const CAMA_VIGENTE = {
   },
 } as const;
 
+/**
+ * alta-minima · **LO QUE HACE FALTA PARA CONTAR LO QUE FALTA.**
+ *
+ * `datosQueFaltan` pregunta «¿tiene DNI?», no «¿cuál es?». Y la respuesta
+ * se puede dar **sin descifrar nada**: basta con saber si la columna es
+ * NULL (decisión 8 del bloque).
+ *
+ * Por eso estas cuatro columnas entran en el `select` de la LISTA, donde
+ * el DNI nunca ha entrado. La regla del fichero no se rompe porque la
+ * regla es **qué sale en la respuesta**, no qué se lee de la base: lo
+ * único que `vistaResidente` saca de aquí es un booleano. El valor no se
+ * descifra, no se serializa y no se registra — tampoco el ciphertext,
+ * que desde residencia-1b es dato con un candado que la casa sabe abrir.
+ */
+const PRESENCIA_CIFRADA_SELECT = {
+  dni: true,
+  nss: true,
+  dniCifrado: true,
+  nssCifrado: true,
+} as const;
+
+/**
+ * alta-minima · **¿TIENE PLAN?**, en el mismo `select` y sin una segunda
+ * consulta por residente.
+ *
+ * `toAt: null` y `take: 1`: lo que hace falta saber es si hay al menos
+ * una línea viva, y el motor corta en la primera. Es el mismo patrón que
+ * `loQueHayQueArreglar` en `panel.ts`.
+ *
+ * Y una diferencia con esa función, a propósito: ella exige además
+ * `fromAt <= ahora` porque pregunta **«¿hoy no le toca nada?»**. Aquí la
+ * pregunta es **«¿tiene plan?»**, y un residente que ingresa el lunes con
+ * su plan ya preparado SÍ lo tiene. Decirle a la dirección que le falta
+ * el plan de cuidados a quien ya se lo ha hecho es el aviso que enseña a
+ * no leer los avisos.
+ */
+const PLAN_VIVO_SELECT = {
+  where: { toAt: null },
+  select: { id: true },
+  take: 1,
+} as const;
+
 const PERFIL_SELECT = {
   clientId: true,
   admissionDate: true,
@@ -181,6 +275,8 @@ const PERFIL_SELECT = {
   responsibleName: true,
   responsiblePhone: true,
   responsibleRelation: true,
+  // alta-minima · presencia, no valor. Ver `PRESENCIA_CIFRADA_SELECT`.
+  ...PRESENCIA_CIFRADA_SELECT,
   client: {
     select: {
       id: true,
@@ -189,6 +285,8 @@ const PERFIL_SELECT = {
       phone: true,
       birthdate: true,
       bedAssignments: CAMA_VIGENTE,
+      // alta-minima · para «le falta el plan de cuidados».
+      carePlanItems: PLAN_VIVO_SELECT,
     },
   },
 } as const;
@@ -222,16 +320,23 @@ interface OcupacionVigente {
  */
 interface FilaResidente {
   clientId: string;
-  admissionDate: Date;
+  // alta-minima · los TRES que dejaron de ser obligatorios.
+  admissionDate: Date | null;
   dischargeDate: Date | null;
   dischargeReason: string | null;
   dischargeReasonCifrado: string | null;
-  dependencyLevel: string;
+  dependencyLevel: string | null;
   dependencyGrade: string | null;
-  placeType: string;
+  placeType: string | null;
   responsibleName: string | null;
   responsiblePhone: string | null;
   responsibleRelation: string | null;
+  // alta-minima · presencia de lo cifrado. `vistaResidente` saca de aquí
+  // un booleano y NADA MÁS: ni el valor ni el ciphertext salen.
+  dni: string | null;
+  nss: string | null;
+  dniCifrado: string | null;
+  nssCifrado: string | null;
   client: {
     id: string;
     firstName: string;
@@ -239,6 +344,8 @@ interface FilaResidente {
     phone: string | null;
     birthdate: Date | null;
     bedAssignments: OcupacionVigente[];
+    /** alta-minima · como mucho una, por el `take: 1`. */
+    carePlanItems: Array<{ id: string }>;
   };
 }
 
@@ -260,11 +367,40 @@ interface Sobre {
   dek: Buffer | null;
 }
 
+/**
+ * alta-minima · lo que le falta a una ficha, desde la fila de la base.
+ *
+ * Es un envoltorio de dos líneas sobre `datosQueFaltan` y existe para que
+ * la traducción fila → pregunta esté en UN sitio: la lista, la ficha, el
+ * alta, el PATCH y el panel la llaman todos, y cinco copias de
+ * `(p.dniCifrado ?? p.dni) != null` son cinco sitios donde mañana se
+ * olvida la columna clara de antes del cifrado.
+ */
+export function faltanDe(p: FilaResidente): DatoQueFalta[] {
+  return datosQueFaltan({
+    lastName: p.client.lastName,
+    admissionDate: p.admissionDate ? p.admissionDate.toISOString().slice(0, 10) : null,
+    dependencyLevel: p.dependencyLevel,
+    placeType: p.placeType,
+    dependencyGrade: p.dependencyGrade,
+    birthdate: p.client.birthdate ? p.client.birthdate.toISOString().slice(0, 10) : null,
+    responsibleName: p.responsibleName,
+    responsiblePhone: p.responsiblePhone,
+    // residencia-1b · la cifrada MANDA y la clara es el respaldo de las
+    // filas de antes del cifrado. Las dos cuentan como «lo tiene».
+    tieneDni: (p.dniCifrado ?? p.dni) != null,
+    tieneNss: (p.nssCifrado ?? p.nss) != null,
+    tieneCama: p.client.bedAssignments.length > 0,
+    tienePlan: p.client.carePlanItems.length > 0,
+  });
+}
+
 function vistaResidente(p: FilaResidente, sobre: Sobre) {
   // La VIGENTE. El `select` ya filtra `toAt: null`, así que como mucho hay
   // una — lo garantiza el índice parcial
   // `bed_assignments_one_live_per_client_key`.
   const cama = p.client.bedAssignments[0] ?? null;
+  const faltan = faltanDe(p);
   return {
     clientId: p.clientId,
     nombre: `${p.client.firstName} ${p.client.lastName}`.trim(),
@@ -274,7 +410,13 @@ function vistaResidente(p: FilaResidente, sobre: Sobre) {
     birthdate: p.client.birthdate
       ? p.client.birthdate.toISOString().slice(0, 10)
       : null,
-    admissionDate: p.admissionDate.toISOString().slice(0, 10),
+    // alta-minima · `null` cuando todavía no se sabe. **No una cadena
+    // vacía y no «hoy»**: una fecha inventada en la ficha de una persona
+    // acaba en un informe a la Consejería, y una cadena vacía sale como
+    // «Invalid Date» en la pantalla.
+    admissionDate: p.admissionDate
+      ? p.admissionDate.toISOString().slice(0, 10)
+      : null,
     dischargeDate: p.dischargeDate
       ? p.dischargeDate.toISOString().slice(0, 10)
       : null,
@@ -293,6 +435,12 @@ function vistaResidente(p: FilaResidente, sobre: Sobre) {
           relation: p.responsibleRelation,
         }
       : null,
+    // alta-minima · **LO QUE LE FALTA**, calculado en el servidor y no en
+    // la pantalla: lo leen cuatro sitios (la etiqueta de la fila, la banda
+    // de la ficha, la tarjeta del panel y la obligación del mes) y cuatro
+    // cuentas distintas del mismo número es la forma de que digan cosas
+    // distintas. La pantalla sólo lo pinta.
+    faltan,
     // `null` = **ingreso pendiente**, y está permitido (el prompt lo dice):
     // una residencia da de alta a alguien que llega el lunes. El admin lo
     // pinta como aviso, no como error.
@@ -396,11 +544,22 @@ export async function registerResidenciaResidentesRoutes(
         ],
       });
 
+      const residentes = perfiles.map((p) => vistaResidente(p, { tenantId, dek }));
       return {
-        residentes: perfiles.map((p) => vistaResidente(p, { tenantId, dek })),
+        residentes,
         // Para que la pantalla pueda decir «ves la planta 1» en vez de
         // dejar a una auxiliar pensando que faltan residentes.
         alcance: alcance.total ? "CENTRO" : "ZONA",
+        // ── alta-minima · «12 de 43 fichas incompletas» ──────────────
+        //
+        // Sale de los residentes que esta respuesta YA trae, así que no
+        // cuesta ni una consulta más. Y cuenta sólo a **los que viven
+        // aquí**: la ficha de quien se fue en 2019 no se va a completar
+        // nunca y contarla dejaría un número que no baja — un contador
+        // que no se puede llevar a cero enseña a no mirarlo.
+        resumen: resumenDeFichas(
+          residentes.filter((r) => r.dischargeDate == null).map((r) => r.faltan),
+        ),
       };
     },
   );
@@ -416,6 +575,22 @@ export async function registerResidenciaResidentesRoutes(
   // CRM porque vino de visita o porque la clínica le abrió historia. Ahí
   // NO se crea un cliente nuevo, se le pone perfil al que hay — duplicarla
   // partiría su historia en dos.
+  //
+  // ── alta-minima · SÓLO EL NOMBRE ES OBLIGATORIO ─────────────────
+  //
+  // `required` se queda vacío. Lo que sigue siendo obligatorio —o el
+  // nombre o un cliente que ya existe— **no se puede decir en JSON
+  // Schema** («uno de estos dos»), y por eso lo dice el handler con su
+  // `FALTA_NOMBRE`, como ya hacía.
+  //
+  // Y el alta pasa por `negativaClinica("ESCRIBIR")`, que antes no.
+  // **Esto es un agujero que el bloque cierra de paso**: crear un
+  // residente escribe su plan de cuidados con los motivos cifrados, o
+  // sea historia clínica, y hasta ahora era la única escritura de
+  // residencia que no mira el contrato de encargado — las demás lo miran
+  // porque pasan por `conHistoria`, y el alta no puede pasar (todavía no
+  // hay `clientId` sobre el que resolver el acceso). Con el contrato no
+  // vigente, 423 y no se crea nadie; tampoco en lote.
   app.post(
     "/residencia/residentes",
     {
@@ -423,7 +598,6 @@ export async function registerResidenciaResidentesRoutes(
       schema: {
         body: {
           type: "object",
-          required: ["admissionDate", "dependencyLevel", "placeType"],
           additionalProperties: false,
           properties: {
             // O uno o los otros dos: ver la validación del handler.
@@ -457,10 +631,10 @@ export async function registerResidenciaResidentesRoutes(
         lastName?: string;
         phone?: string;
         birthdate?: string;
-        admissionDate: string;
-        dependencyLevel: (typeof NIVELES)[number];
+        admissionDate?: string;
+        dependencyLevel?: (typeof NIVELES)[number];
         dependencyGrade?: (typeof GRADOS)[number];
-        placeType: (typeof PLAZAS)[number];
+        placeType?: (typeof PLAZAS)[number];
         responsibleName?: string;
         responsiblePhone?: string;
         responsibleRelation?: string;
@@ -470,11 +644,20 @@ export async function registerResidenciaResidentesRoutes(
       };
       const prisma = getPrisma();
 
-      if (!body.clientId && !body.firstName) {
+      if (!body.clientId && !body.firstName?.trim()) {
         return reply.code(400).send({
           error: "FALTA_NOMBRE",
           message: "Dime el nombre del residente, o el cliente que ya existe.",
         });
+      }
+
+      // alta-minima · el contrato de encargado. Ver la cabecera de la
+      // ruta: el alta escribe historia clínica (el plan y sus motivos
+      // cifrados) y es la única escritura de residencia que no puede
+      // llegar a `conHistoria`.
+      const negativa = await negativaClinica(auth.tenantId, "ESCRIBIR");
+      if (negativa) {
+        return reply.code(423).send(negativa);
       }
 
       // La cama, validada ANTES de crear nada: que la primera mitad del
@@ -519,7 +702,11 @@ export async function registerResidenciaResidentesRoutes(
         }
       }
 
-      const admissionDate = new Date(body.admissionDate);
+      // alta-minima · `null` cuando no se sabe. `new Date(undefined)` es
+      // `Invalid Date`, que Prisma acepta y Postgres rechaza con un error
+      // de driver ilegible: el `??` no es defensivo, es lo único que
+      // separa «no lo sé» de una 500.
+      const admissionDate = body.admissionDate ? new Date(body.admissionDate) : null;
 
       try {
         const perfil = await prisma.$transaction(async (tx) => {
@@ -554,9 +741,9 @@ export async function registerResidenciaResidentesRoutes(
               clientId,
               tenantId: auth.tenantId,
               admissionDate,
-              dependencyLevel: body.dependencyLevel,
+              dependencyLevel: body.dependencyLevel ?? null,
               dependencyGrade: body.dependencyGrade ?? null,
-              placeType: body.placeType,
+              placeType: body.placeType ?? null,
               responsibleName: body.responsibleName?.trim() || null,
               responsiblePhone: body.responsiblePhone?.trim() || null,
               responsibleRelation: body.responsibleRelation?.trim() || null,
@@ -591,7 +778,14 @@ export async function registerResidenciaResidentesRoutes(
                 tenantId: auth.tenantId,
                 bedId: body.bedId,
                 clientId,
-                fromAt: admissionDate,
+                // alta-minima · la fecha de ingreso si se sabe, y «ahora»
+                // si no. `bed_assignments.from_at` sigue siendo NOT NULL
+                // y tiene que seguirlo siendo: una ocupación sin fecha
+                // deja «¿dónde dormía doña Carmen en marzo?» sin
+                // respuesta, que es la pregunta por la que esta tabla
+                // existe. «Ahora» no es un dato inventado de la ficha: es
+                // cuándo el programa supo que estaba en esa cama.
+                fromAt: admissionDate ?? new Date(),
                 reason: null,
                 reasonCifrado: cifrarTexto(
                   "ingreso",
@@ -615,20 +809,39 @@ export async function registerResidenciaResidentesRoutes(
           // no le pide nada de antes de llegar al centro, que es el caso
           // del residente que ingresa a mediodía y no tiene el turno de
           // la mañana de ese día.
-          await aplicarPlantilla(tx, {
-            tenantId: auth.tenantId,
-            clientId,
-            nivel: body.dependencyLevel,
-            nivelAnterior: null,
-            desde: admissionDate,
-            userId: auth.userId,
-            motivo: "ingreso",
-            // residencia-1b · el motivo de cada línea del plan va cifrado,
-            // y la clave viaja hasta aquí en vez de pedirse otra vez: una
-            // segunda llamada dentro de la misma transacción sería la
-            // misma clave con una consulta más.
-            dek,
-          });
+          //
+          // ── alta-minima · SIN NIVEL NO HAY PLANTILLA ────────────
+          //
+          // `aplicarPlantilla` necesita un nivel para saber QUÉ plantilla
+          // aplicar: sin él no hay nada que precargar y el residente nace
+          // sin plan. Eso no lo deja fuera de nada —el parte ya sabe
+          // enseñar a un residente sin plan sin ruido (residencia-6 §4), y
+          // «como siempre» y «algo no va bien» funcionan igual porque las
+          // dimensiones OBS son del centro y no del plan—, pero **sí entra
+          // en lo que le falta** como imprescindible. Al poner el nivel, la
+          // ficha ofrece cargarlo (`POST …/plan/plantilla`).
+          //
+          // Lo que NO se hace es elegirle un nivel por defecto. «Válido»
+          // a quien nadie ha valorado es un dato falso en la ficha de una
+          // persona, y además le abriría el plan equivocado.
+          if (body.dependencyLevel) {
+            await aplicarPlantilla(tx, {
+              tenantId: auth.tenantId,
+              clientId,
+              nivel: body.dependencyLevel,
+              nivelAnterior: null,
+              // Sin fecha de ingreso, «ahora»: es cuándo empieza a
+              // tocarle, y es lo más temprano que se puede afirmar.
+              desde: admissionDate ?? new Date(),
+              userId: auth.userId,
+              motivo: "ingreso",
+              // residencia-1b · el motivo de cada línea del plan va
+              // cifrado, y la clave viaja hasta aquí en vez de pedirse
+              // otra vez: una segunda llamada dentro de la misma
+              // transacción sería la misma clave con una consulta más.
+              dek,
+            });
+          }
 
           const fila = await tx.residentProfile.findUniqueOrThrow({
             where: { clientId },
@@ -655,6 +868,268 @@ export async function registerResidenciaResidentesRoutes(
         }
         throw err;
       }
+    },
+  );
+
+  // ════════════════════════════════════════════════════════════════
+  //  alta-minima · EL ALTA RÁPIDA DE VARIOS
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Así se cargó el listado de Jardín de Gredos y así llegará el de
+  // cualquier residencia: una columna de nombres copiada de un Excel, un
+  // tipo de plaza opcional detrás de un tabulador, y «Crear 43
+  // residentes».
+  //
+  // ── IDEMPOTENTE POR NOMBRE NORMALIZADO ─────────────────────────
+  //
+  // Y es la decisión de la ruta. Quien pega 43 nombres y ve un error de
+  // red **vuelve a darle**, y entre los 43 puede haber tres que ya
+  // estaban de un alta de ayer. Sin idempotencia, el segundo intento
+  // crearía 43 duplicados: dos fichas de la misma señora, dos historias y
+  // dos planes, que es el daño que no se deshace con un botón.
+  //
+  // La clave la da `claveDeNombre` del paquete puro —sin tildes,
+  // mayúsculas ni dobles espacios— y es LA MISMA que usa la vista previa
+  // del admin. Si fueran dos, la vista previa diría «se crean 40» y el
+  // servidor crearía 41.
+  //
+  // Y mira a TODOS los residentes del centro, también a los que se
+  // fueron: una señora dada de alta en 2019 que vuelve a ingresar no
+  // necesita una ficha nueva (partiría su historia en dos), necesita que
+  // la dirección le quite la fecha de alta. El motivo lo dice la
+  // respuesta, para que se pueda arreglar sin adivinar.
+  //
+  // ── CADA RESIDENTE EN SU PROPIA TRANSACCIÓN ────────────────────
+  //
+  // Y no los 43 en una. Con una sola, un fallo en el residente 40 —un
+  // tipo de plaza que el enum no conoce, una carrera con otra sesión—
+  // dejaría al centro con cero residentes después de dos minutos de
+  // trabajo, y la dirección volvería a pegar la lista sin saber qué
+  // pasó. Con una por residente, lo que no entra se nombra y los demás
+  // están dentro.
+  //
+  // Es exactamente la decisión contraria a la del alta de uno (donde el
+  // `Client` y su perfil van juntos o no van), y por la misma razón: ahí
+  // la mitad sin la otra es basura, aquí cada línea es una persona
+  // entera.
+  app.post(
+    "/residencia/residentes/varios",
+    {
+      preHandler: PUERTAS_ESCRITURA,
+      schema: {
+        body: {
+          type: "object",
+          required: ["texto"],
+          additionalProperties: false,
+          properties: {
+            // El pegado tal cual. **No un array de nombres**: partirlo es
+            // trabajo del paquete puro, y así la pantalla y el servidor
+            // parten igual (los `\r\n` de Excel en Windows, el tabulador
+            // de la segunda columna, las líneas en blanco del final).
+            //
+            // El `maxLength` es el primer muro y el de verdad: 2.000
+            // líneas de 120 caracteres no llegan a entrar en el cuerpo.
+            texto: { type: "string", maxLength: 64000 },
+            // Qué plaza poner a las líneas que no la traen. Opcional: un
+            // centro concertado entero se carga con esto puesto una vez.
+            placeTypePorDefecto: {
+              type: "string",
+              enum: PLAZAS as unknown as string[],
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const body = request.body as {
+        texto: string;
+        placeTypePorDefecto?: (typeof PLAZAS)[number];
+      };
+      const prisma = getPrisma();
+
+      // El contrato, igual que en el alta de uno. «Tampoco en lote.»
+      const negativa = await negativaClinica(auth.tenantId, "ESCRIBIR");
+      if (negativa) {
+        return reply.code(423).send(negativa);
+      }
+
+      const pegado = lineasPegadas(body.texto);
+      if (pegado.lineas.length === 0 && pegado.rotas.length === 0) {
+        return reply.code(400).send({
+          error: "NADA_QUE_CREAR",
+          message:
+            "Pega los nombres, uno por línea. Si quieres, el tipo de plaza detrás de un tabulador.",
+        });
+      }
+      if (pegado.lineas.length > MAXIMO_DE_UN_LOTE) {
+        return reply.code(400).send({
+          error: "DEMASIADAS_LINEAS",
+          message: `Has pegado ${pegado.lineas.length} nombres distintos y de una vez caben ${MAXIMO_DE_UN_LOTE}. Pega el resto en un segundo lote: los que ya estén no se duplican.`,
+        });
+      }
+
+      // Las plazas que la línea trae, validadas AQUÍ y no en el parser:
+      // el paquete puro no conoce el enum de la base. Una plaza que no
+      // existe no tumba la línea —el residente se crea igual, que es lo
+      // que importa— y se dice en la respuesta.
+      const plazasValidas = new Set<string>(PLAZAS);
+
+      // Lo que YA HAY en el centro, en una consulta. Y de todos, también
+      // de los que se fueron: ver la cabecera.
+      const yaEstan = await prisma.residentProfile.findMany({
+        where: { tenantId: auth.tenantId },
+        select: {
+          clientId: true,
+          dischargeDate: true,
+          client: { select: { firstName: true, lastName: true } },
+        },
+      });
+      const porClave = new Map<string, (typeof yaEstan)[number]>();
+      for (const r of yaEstan) {
+        // La clave se calcula sobre el nombre COMPLETO, que es lo que el
+        // listado trae en una línea: en el alta rápida todo va a
+        // `firstName`, pero una ficha que la dirección ya corrigió tiene
+        // los apellidos aparte y hay que volver a juntarlos para
+        // comparar. Sin esto, el segundo pegado del mismo listado
+        // duplicaría a los que ya se habían completado.
+        const clave = claveDeNombre(
+          `${r.client.firstName} ${r.client.lastName}`.trim(),
+        );
+        // El primero manda: si ya hubiera dos con el mismo nombre
+        // normalizado (de antes de este bloque), se salta contra uno de
+        // los dos y es igual de correcto.
+        if (!porClave.has(clave)) porClave.set(clave, r);
+      }
+
+      const creados: Array<{ clientId: string; nombre: string }> = [];
+      const saltados: Array<{
+        numero: number;
+        nombre: string;
+        motivo: string;
+        clientId?: string;
+      }> = [];
+      const avisos: string[] = [];
+
+      for (const linea of pegado.lineas) {
+        const existe = porClave.get(linea.clave);
+        if (existe) {
+          saltados.push({
+            numero: linea.numero,
+            nombre: linea.nombre,
+            clientId: existe.clientId,
+            motivo:
+              existe.dischargeDate == null
+                ? "ya está dado de alta como residente"
+                : "ya tiene ficha, de cuando estuvo antes en el centro: quítale la fecha de alta en vez de crearlo otra vez",
+          });
+          continue;
+        }
+
+        let placeType: string | null = null;
+        if (linea.placeType != null) {
+          if (plazasValidas.has(linea.placeType)) {
+            placeType = linea.placeType;
+          } else {
+            avisos.push(
+              `Línea ${linea.numero}: «${linea.placeType}» no es un tipo de plaza. Se ha creado sin plaza — complétala en su ficha.`,
+            );
+          }
+        }
+        placeType ??= body.placeTypePorDefecto ?? null;
+
+        // Una transacción por residente. Ver la cabecera.
+        const clientId = await prisma.$transaction(async (tx) => {
+          const dek = await asegurarDek(auth.tenantId, tx);
+          const cliente = await tx.client.create({
+            data: {
+              tenantId: auth.tenantId,
+              // **Como viene.** Decisión 7: los nombres en mayúsculas se
+              // guardan tal cual y se ENSEÑAN en formato de nombre
+              // (`enFormatoDeNombre`, en la pantalla). Convertirlos al
+              // guardar perdería el original, que es lo que coincide con
+              // el papel que la dirección tiene delante.
+              firstName: linea.nombre,
+              // Vacío y a propósito: separar nombre y apellidos de una
+              // línea no es fiable, así que «apellidos» queda como dato
+              // que falta y la dirección lo corrige una vez. Es la
+              // decisión 7 entera.
+              lastName: "",
+            },
+            select: { id: true },
+          });
+          await tx.residentProfile.create({
+            data: {
+              clientId: cliente.id,
+              tenantId: auth.tenantId,
+              admissionDate: null,
+              dependencyLevel: null,
+              dependencyGrade: null,
+              placeType: placeType as (typeof PLAZAS)[number] | null,
+              // residencia-1b · nacen cifrados y vacíos, igual que en el
+              // alta de uno. `cifrarTexto(null, …)` devuelve `null`: no
+              // hay un ciphertext de la nada.
+              dni: null,
+              nss: null,
+              dniCifrado: cifrarTexto(
+                null,
+                dek,
+                sitioDniDeResidente(auth.tenantId, cliente.id),
+              ),
+              nssCifrado: cifrarTexto(
+                null,
+                dek,
+                sitioNssDeResidente(auth.tenantId, cliente.id),
+              ),
+            },
+          });
+          // Sin nivel no hay plantilla que aplicar: el residente nace sin
+          // plan y «Plan de cuidados» entra en lo que le falta. Ver el
+          // alta de uno.
+          return cliente.id;
+        });
+
+        creados.push({ clientId, nombre: linea.nombre });
+        // Para que un nombre repetido más abajo en el MISMO pegado se
+        // salte contra el que se acaba de crear. `lineasPegadas` ya quita
+        // los repetidos exactos, pero esto cubre el caso de que mañana
+        // cambie el parser: la idempotencia no depende de él.
+        porClave.set(linea.clave, {
+          clientId,
+          dischargeDate: null,
+          client: { firstName: linea.nombre, lastName: "" },
+        });
+      }
+
+      // Las que el parser descartó, con su número de línea real: así el
+      // mensaje manda a la dirección a la línea que ve en su Excel.
+      for (const rota of pegado.rotas) {
+        saltados.push({
+          numero: rota.numero,
+          nombre: rota.texto,
+          motivo: rota.motivo,
+        });
+      }
+      for (const rep of pegado.repetidasEnElPegado) {
+        saltados.push({
+          numero: rep.numero,
+          nombre: rep.nombre,
+          motivo: "repetido en lo que has pegado",
+        });
+      }
+      saltados.sort((a, b) => a.numero - b.numero);
+
+      // **201 aunque se hayan saltado todos**, y es a propósito: que el
+      // lote entero ya estuviera es el resultado correcto del segundo
+      // intento, no un error. El 400 está arriba y es para «no hay nada
+      // que crear» y «no caben tantos», que son las dos cosas que la
+      // dirección tiene que cambiar antes de volver a darle.
+      return reply.code(201).send({
+        creados: creados.length,
+        residentes: creados,
+        saltados,
+        avisos,
+      });
     },
   );
 
@@ -713,8 +1188,13 @@ export async function registerResidenciaResidentesRoutes(
             where: { clientId },
             select: {
               ...PERFIL_SELECT,
-              // El DNI y el NSS sólo aquí, en la ficha de uno y tras pasar
-              // la función de acceso. Nunca en la lista.
+              // alta-minima · las cuatro columnas ya vienen en
+              // `PERFIL_SELECT` desde este bloque, porque contar si el DNI
+              // falta no exige descifrarlo. Lo que sigue siendo **de aquí
+              // y sólo de aquí** es SERVIRLO: el valor descifrado se
+              // añade más abajo, en la ficha de uno y tras pasar la
+              // función de acceso. En la lista no sale, y eso no ha
+              // cambiado.
               dni: true,
               nss: true,
               dniCifrado: true,
@@ -811,6 +1291,26 @@ export async function registerResidenciaResidentesRoutes(
   );
 
   // ── Editar la ficha ────────────────────────────────────────────────
+  //
+  // ── alta-minima · Y AQUÍ SE COMPLETA LO QUE FALTABA ─────────────
+  //
+  // Esta ruta gana los cuatro campos que viven en `clients` y no en el
+  // perfil: `firstName`, `lastName`, `phone` y `birthdate`. Sin ellos el
+  // aviso «a esta ficha le faltan los apellidos» **no tendría dónde
+  // arreglarse** — los apellidos quedan vacíos a propósito en el alta
+  // rápida (decisión 7: separar nombre y apellidos de una línea de Excel
+  // no es fiable, así que todo va a `firstName` y la dirección lo corrige
+  // una vez).
+  //
+  // Van en la MISMA transacción que el perfil, y eso es la decisión: con
+  // dos escrituras sueltas, guardar la ficha podría dejar los apellidos
+  // puestos y el nivel sin poner, y la banda diría que falta algo que
+  // acaba de guardarse.
+  //
+  // Lo que `additionalProperties: false` hace aquí hay que recordarlo:
+  // **no da 400, da 200 y no hace nada**. Un campo mal escrito en la
+  // pantalla se borra del cuerpo y la respuesta dice que todo fue bien.
+  // Por eso cada nombre nuevo de aquí tiene su test.
   app.patch(
     "/residencia/residentes/:clientId",
     {
@@ -826,6 +1326,14 @@ export async function registerResidenciaResidentesRoutes(
           type: "object",
           additionalProperties: false,
           properties: {
+            // alta-minima · los del `Client`. `firstName` con
+            // `minLength: 1` porque el nombre sigue siendo obligatorio:
+            // esta ruta puede corregirlo, no vaciarlo.
+            firstName: { type: "string", minLength: 1, maxLength: 120 },
+            lastName: { type: "string", maxLength: 120 },
+            phone: { type: "string", maxLength: 32 },
+            birthdate: { type: "string", format: "date" },
+
             admissionDate: { type: "string", format: "date" },
             dependencyLevel: { type: "string", enum: NIVELES as unknown as string[] },
             // `null` para quitarle el grado al que lo tenía por error.
@@ -871,6 +1379,31 @@ export async function registerResidenciaResidentesRoutes(
           const data: Record<string, unknown> = {};
           if (body.admissionDate !== undefined) {
             data.admissionDate = new Date(body.admissionDate as string);
+          }
+          // ── alta-minima · lo que va al `Client` ──────────────────
+          //
+          // Aparte del `data` del perfil porque es otra tabla. Las cuatro
+          // con la misma regla que las del responsable: **cadena vacía →
+          // NULL**, porque lo que no se sabe va NULL y no en blanco (un
+          // apellido vacío hace que «tiene apellidos» sea una
+          // comprobación que miente) — salvo `firstName`, que no se puede
+          // vaciar y por eso sólo se escribe si trae algo.
+          const delCliente: Record<string, unknown> = {};
+          if (body.firstName !== undefined) {
+            const v = (body.firstName as string).trim();
+            if (v !== "") delCliente.firstName = v;
+          }
+          for (const campo of ["lastName", "phone"]) {
+            if (body[campo] === undefined) continue;
+            const v = (body[campo] as string).trim();
+            // `lastName` es NOT NULL en `clients` y su «no lo sé» es la
+            // cadena vacía (así nació en el alta); `phone` sí es
+            // nullable. Los dos se vacían, cada uno a lo suyo.
+            delCliente[campo] =
+              v === "" ? (campo === "lastName" ? "" : null) : v;
+          }
+          if (body.birthdate !== undefined) {
+            delCliente.birthdate = new Date(body.birthdate as string);
           }
           for (const campo of [
             "dependencyLevel",
@@ -943,6 +1476,26 @@ export async function registerResidenciaResidentesRoutes(
             | undefined;
           const cambiaElNivel =
             nivelNuevo !== undefined && nivelNuevo !== antes.dependencyLevel;
+          // ── alta-minima · EL NIVEL PUESTO POR PRIMERA VEZ ────────
+          //
+          // De `null` a «dependiente» **no recalcula nada**, y es lo que
+          // lo separa del cambio de nivel de residencia-2.
+          //
+          // La razón es lo que está pasando cuando ocurre: la dirección
+          // está corrigiendo cuarenta y tres fichas de golpe desde la
+          // tarjeta del panel. Abrirle a cada una el plan entero —ocho o
+          // veinte líneas, cada una una fila con su motivo cifrado— como
+          // efecto secundario de teclear un dato administrativo es una
+          // escritura grande y silenciosa que nadie pidió, y a quien la
+          // DUE ya le había puesto líneas a mano le cambiaría el plan sin
+          // decírselo.
+          //
+          // Así que se OFRECE: la respuesta dice `puedeCargarPlan` y la
+          // ficha pinta «Cargar el plan de cuidados de «dependiente»», que
+          // es un toque. Y mientras no se cargue, «Plan de cuidados» sigue
+          // en lo que le falta: no se puede olvidar.
+          const nivelPorPrimeraVez =
+            nivelNuevo !== undefined && antes.dependencyLevel == null;
 
           const { perfil, plan, dek } = await prisma.$transaction(async (tx) => {
             const dek = await asegurarDek(auth.tenantId, tx);
@@ -953,12 +1506,23 @@ export async function registerResidenciaResidentesRoutes(
                 sitioDe(auth.tenantId, clientId),
               );
             }
+            // alta-minima · el `Client`, en la MISMA transacción. Sólo si
+            // hay algo que escribir: un `update` vacío sería una ida a la
+            // base por cada guardado de la ficha que no toca al cliente.
+            if (Object.keys(delCliente).length > 0) {
+              await tx.client.update({
+                where: { id: clientId },
+                data: delCliente,
+              });
+            }
             const perfil = await tx.residentProfile.update({
               where: { clientId },
               data,
               select: PERFIL_SELECT,
             });
-            if (!cambiaElNivel) return { perfil, plan: null, dek };
+            if (!cambiaElNivel || nivelPorPrimeraVez) {
+              return { perfil, plan: null, dek };
+            }
             const plan = await aplicarPlantilla(tx, {
               tenantId: auth.tenantId,
               clientId,
@@ -978,6 +1542,16 @@ export async function registerResidenciaResidentesRoutes(
 
           return {
             residente: vistaResidente(perfil, { tenantId: auth.tenantId, dek }),
+            // alta-minima · `{ nivel }` cuando se acaba de poner el nivel
+            // por primera vez y el residente no tiene plan. Es lo que la
+            // ficha convierte en el botón «Cargar el plan de cuidados de
+            // «dependiente»». `null` en cualquier otro caso — incluido el
+            // residente al que la DUE ya le había puesto líneas a mano:
+            // ahí no hay nada que ofrecer.
+            puedeCargarPlan:
+              nivelPorPrimeraVez && perfil.client.carePlanItems.length === 0
+                ? { nivel: nivelNuevo! }
+                : null,
             // Lo que el recálculo hizo, para que la pantalla lo diga en
             // vez de dejar que la dirección lo descubra abriendo el plan.
             // `null` si el nivel no cambió.
@@ -1054,7 +1628,18 @@ export async function registerResidenciaResidentesRoutes(
         });
       }
       const dischargeDate = new Date(body.dischargeDate);
-      if (dischargeDate < perfil.admissionDate) {
+      // alta-minima · con `admissionDate` a NULL no hay nada que
+      // comparar, y el alta pasa. Es legítimo: el residente ya estaba
+      // aquí cuando el programa llegó y se va sin que nadie haya llegado
+      // a apuntar cuándo entró.
+      //
+      // El `!= null` va DELANTE y no detrás. Sin él, `dischargeDate <
+      // null` compara contra el 1 de enero de 1970 y **ninguna fecha de
+      // alta sería anterior**: la comprobación seguiría ahí, en verde, sin
+      // comprobar nada. Es el mismo accidente que un CHECK que da NULL, y
+      // el CHECK `resident_profiles_alta_coherente` lleva el mismo
+      // `IS NULL` por la misma razón.
+      if (perfil.admissionDate != null && dischargeDate < perfil.admissionDate) {
         return reply.code(400).send({
           error: "ALTA_ANTES_DEL_INGRESO",
           message: "La fecha de alta no puede ser anterior a la de ingreso.",

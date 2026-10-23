@@ -4,6 +4,10 @@
 // (residencia-4): cuatro pantallas comparten estos tipos y estas frases, y
 // cuatro copias de «Sigue abierta de antes» se separan a la cuarta.
 
+// alta-minima · lo que le falta a una ficha de residente. El tipo es el
+// del paquete puro: ver la cabecera de `lib.ts`.
+import type { DatoQueFalta } from "@mipiacetpv/residencia-plan";
+
 export interface LineaDelParte {
   clase: string;
   texto: string;
@@ -312,6 +316,22 @@ export interface Panel {
       clientId: string;
       nombre: string;
       habitacion: string | null;
+    }>;
+  };
+  /** alta-minima · las fichas de residente a las que les falta algo.
+   *  Opcional por lo mismo que `porArreglar`: un panel de una API
+   *  anterior a este bloque no lo trae, y la pantalla no puede caerse
+   *  por eso durante los minutos de un despliegue. */
+  fichasIncompletas?: {
+    total: number;
+    incompletas: number;
+    datosPendientes: number;
+    conImprescindibles: number;
+    primeras: Array<{
+      clientId: string;
+      nombre: string;
+      habitacion: string | null;
+      faltan: DatoQueFalta[];
     }>;
   };
   indicadores: ValorDeIndicador[];

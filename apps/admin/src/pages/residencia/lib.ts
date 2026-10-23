@@ -5,6 +5,22 @@
 // `puestoVisible` vive en la API: si cada pantalla tradujera
 // `SEMIASISTIDO` por su cuenta, dos acabarían llamando distinto a lo mismo
 // y el personal lo notaría antes que nosotros.
+//
+// ── alta-minima · LO QUE LE FALTA A UNA FICHA ────────────────────────
+//
+// Los tipos vienen del paquete puro (`@mipiacetpv/residencia-plan`) y no
+// se vuelven a declarar aquí: con dos listas de campos, el día que
+// historia-1 añada uno a su checklist la pantalla no lo sabría. Lo que SÍ
+// vive aquí es a qué input lleva cada campo, que es cosa de la pantalla.
+
+import { enFormatoDeNombre } from "@mipiacetpv/residencia-plan";
+import type { CampoDeFicha, DatoQueFalta } from "@mipiacetpv/residencia-plan";
+
+export type {
+  CampoDeFicha,
+  DatoQueFalta,
+  PesoDelDato,
+} from "@mipiacetpv/residencia-plan";
 
 export interface ResidenteCama {
   assignmentId: string;
@@ -25,15 +41,20 @@ export interface ResidenteFila {
   lastName: string;
   phone: string | null;
   birthdate: string | null;
-  admissionDate: string;
+  /** alta-minima · `null` cuando todavía no se sabe. Ver `fechaCorta`. */
+  admissionDate: string | null;
   dischargeDate: string | null;
   dischargeReason: string | null;
-  dependencyLevel: NivelDependencia;
+  /** alta-minima · `null` = sin valorar. Entonces NO tiene plan precargado. */
+  dependencyLevel: NivelDependencia | null;
   dependencyGrade: "I" | "II" | "III" | null;
-  placeType: TipoDePlaza;
+  /** alta-minima · `null` = sin poner. */
+  placeType: TipoDePlaza | null;
   responsible: { name: string; phone: string | null; relation: string | null } | null;
   /** `null` = ingreso pendiente. Se pinta como aviso, no como error. */
   cama: ResidenteCama | null;
+  /** alta-minima · lo que le falta, calculado en el servidor. */
+  faltan: DatoQueFalta[];
 }
 
 export interface ResidenteFicha extends ResidenteFila {
@@ -60,6 +81,78 @@ export interface ResidenteFicha extends ResidenteFila {
     cama: string;
     planta: string;
   }>;
+}
+
+/**
+ * **El `id` del input al que lleva cada dato que falta.**
+ *
+ * Es la mitad que hace que el aviso sirva para algo: «le falta el DNI» que
+ * no se puede tocar es un aviso que obliga a buscar el campo a mano, y el
+ * filtro «¿y qué?» del bloque pide lo contrario — el aviso lleva a
+ * completar el dato con un toque.
+ *
+ * Un `Record` completo y no un `?.`: si mañana llega un campo nuevo del
+ * paquete y nadie le pone ancla, **lo dice el compilador** en vez de
+ * dejar un enlace que no va a ninguna parte.
+ */
+export const ANCLA_DEL_CAMPO: Record<CampoDeFicha, string> = {
+  apellidos: "ficha-apellidos",
+  fechaDeIngreso: "ficha-ingreso",
+  nivelDeDependencia: "ficha-nivel",
+  tipoDePlaza: "ficha-plaza",
+  dni: "ficha-dni",
+  familiarResponsable: "ficha-responsable",
+  telefonoDelFamiliar: "ficha-responsable-tel",
+  // El plan no se teclea: se carga de la plantilla del nivel con un
+  // botón, y ese botón está en el bloque del plan de la ficha.
+  planDeCuidados: "ficha-plan",
+  nss: "ficha-nss",
+  fechaDeNacimiento: "ficha-nacimiento",
+  gradoReconocido: "ficha-grado",
+  cama: "ficha-cama",
+};
+
+/** El resumen del centro, tal y como lo manda la API. */
+export interface ResumenDeFichas {
+  total: number;
+  incompletas: number;
+  datosPendientes: number;
+  conImprescindibles: number;
+}
+
+/**
+ * «Faltan 4 datos» / «Falta 1 dato».
+ *
+ * Una función y no un literal en la pantalla porque lo dicen la fila de la
+ * lista y la tarjeta del panel, y «Faltan 1 datos» es la clase de detalle
+ * que se cuela en una de las dos.
+ */
+export function faltanEnPalabras(faltan: DatoQueFalta[]): string {
+  return faltan.length === 1 ? "Falta 1 dato" : `Faltan ${faltan.length} datos`;
+}
+
+/**
+ * alta-minima · **EL NOMBRE DE UN RESIDENTE, PARA ENSEÑARLO.**
+ *
+ * «ABEL RAMOS DOBLADO» → «Abel Ramos Doblado». Es la decisión 7 del
+ * bloque: los nombres **se guardan como vienen** —el listado del centro
+ * está en mayúsculas y el original es lo que coincide con el papel que la
+ * dirección tiene delante— y **se enseñan en formato de nombre**, porque
+ * una lista de cuarenta y tres residentes a gritos es ilegible.
+ *
+ * Un nombre escrito a mano no se toca: ver `enFormatoDeNombre`.
+ *
+ * Vive aquí, al lado de `NIVEL_LABEL`, por lo mismo: si cada pantalla lo
+ * hiciera por su cuenta, dos acabarían enseñando el mismo nombre distinto
+ * — y la lista y la ficha se miran seguidas.
+ */
+export function nombreVisible(nombre: string | null | undefined): string {
+  // El `?? ""` no es por si la API falla: es porque esto se llama una vez
+  // por fila y **una fila mal formada no puede dejar la lista en blanco**.
+  // La pantalla de Residentes es donde vive la dirección; que un campo
+  // que falta tumbe el `render` entero convierte un dato raro en un
+  // centro sin residentes. Lo encontró el merge con primer-acceso.
+  return enFormatoDeNombre(nombre ?? "");
 }
 
 export type NivelDependencia = "VALIDO" | "SEMIASISTIDO" | "DEPENDIENTE";
@@ -124,7 +217,13 @@ export interface RolDeCuidado {
   fullScope: boolean;
 }
 
-/** `DD/MM/AAAA` desde un `YYYY-MM-DD`, sin pasar por `Date`. */
+/**
+ * `DD/MM/AAAA` desde un `YYYY-MM-DD`, sin pasar por `Date`.
+ *
+ * El `if (!iso)` llevaba aquí desde residencia-1 para la fecha de alta.
+ * Desde alta-minima **la de ingreso también llega `null`**, y es lo que
+ * separa un «—» honesto de un «Invalid Date» en la ficha de una persona.
+ */
 export function fechaCorta(iso: string | null): string {
   if (!iso) return "—";
   const [y, m, d] = iso.slice(0, 10).split("-");

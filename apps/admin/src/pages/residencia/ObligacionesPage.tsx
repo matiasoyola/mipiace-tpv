@@ -31,7 +31,7 @@
 // que se arregle, no para bloquear.
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 
 import { AdminShell } from "../../AdminShell.js";
@@ -62,11 +62,32 @@ const FAMILIAS: FamiliaDeObligacion[] = [
   "CALIDAD",
 ];
 
+/**
+ * alta-minima · **UNA OBLIGACIÓN VIVA DEL CENTRO, SIN FECHA.**
+ *
+ * Hoy sólo hay una: las fichas de residente incompletas. No tiene `dueOn`
+ * ni se marca hecha —se apaga sola cuando el último dato entra—, y por
+ * eso no es una `DutyOccurrence`: ver el comentario de `delCentro` en
+ * `obligaciones-routes.ts`.
+ */
+interface ObligacionDelCentro {
+  code: string;
+  nombre: string;
+  family: string;
+  consequence: string;
+  cuantas: number;
+  datosPendientes: number;
+  conImprescindibles: number;
+  detalle: string;
+}
+
 interface Respuesta {
   obligaciones: Obligacion[];
   hoy: OcurrenciaPintada[];
   vencidas: OcurrenciaPintada[];
   proximas: OcurrenciaPintada[];
+  /** alta-minima · opcional: una API anterior a este bloque no lo trae. */
+  delCentro?: ObligacionDelCentro[];
   plantilla: number;
 }
 
@@ -243,6 +264,58 @@ export function ObligacionesPage() {
           </PrimaryButton>
         </div>
       )}
+
+      {/* ── alta-minima · LAS OBLIGACIONES VIVAS DEL CENTRO ───────
+          Delante de lo vencido y con el mismo peso visual, porque es lo
+          mismo: una obligación del centro que no está cumplida. Lo que no
+          lleva es fecha — no se le ha inventado ninguna— ni botón de
+          «hecho»: se apaga sola cuando el último dato entra.
+
+          Y el enlace lleva a Residentes, no a una lista propia: ahí está
+          el filtro «Sólo incompletas» y el formulario que las cierra. Una
+          segunda lista aquí sería un sitio más que mirar y un sitio menos
+          donde arreglarlo. */}
+      {(datos.delCentro ?? []).map((o) => (
+        <section
+          key={o.code}
+          className="mb-5 rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4"
+        >
+          <h2 className="text-[15px] font-semibold text-amber-900">
+            {o.nombre}
+          </h2>
+          <p className="mt-1 text-[13.5px] text-amber-900">
+            <span
+              className={`mr-2 inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${colorDeLaConsecuencia(
+                o.consequence,
+              )}`}
+            >
+              {NOMBRE_DE_LA_CONSECUENCIA[
+                o.consequence as keyof typeof NOMBRE_DE_LA_CONSECUENCIA
+              ] ?? o.consequence}
+            </span>
+            {o.detalle}
+            {" · "}
+            {o.datosPendientes === 1
+              ? "1 dato pendiente"
+              : `${o.datosPendientes} datos pendientes`}
+            {o.conImprescindibles > 0 &&
+              (o.conImprescindibles === 1
+                ? ", 1 con algo imprescindible"
+                : `, ${o.conImprescindibles} con algo imprescindible`)}
+            .
+          </p>
+          <p className="mt-1 text-[13px] text-amber-900">
+            <strong>No tiene fecha de vencimiento</strong> porque nadie se la
+            ha puesto: se apaga sola cuando las fichas estén completas.
+          </p>
+          <Link
+            to="/admin/residencia/residentes"
+            className="mt-3 inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-[13.5px] font-medium text-mipiace-ink hover:bg-slate-50"
+          >
+            Completar las fichas
+          </Link>
+        </section>
+      ))}
 
       {/* ── Lo vencido y lo de hoy ────────────────────────────────── */}
       {datos.vencidas.length > 0 && (

@@ -173,6 +173,16 @@ const turnos = [
   { id: "t-n", code: "N", name: "Noche", startsAt: "22:00", endsAt: "08:00", sortOrder: 3 },
 ];
 
+/**
+ * alta-minima · las líneas de plan VIVAS de un residente en el doble.
+ *
+ * El `select` de las rutas pide `client.carePlanItems` con `take: 1` para
+ * saber si le falta el plan de cuidados. Sin esto, el doble devuelve
+ * `undefined` y la ruta contesta 500 leyendo `.length` — que es
+ * exactamente lo que pasó al añadirlo.
+ */
+const lineasDePlan: Array<{ id: string; clientId: string; toAt: Date | null }> = [];
+
 function vistaPerfil(clientId: string, conOcupacion: boolean) {
   const p = perfiles.get(clientId)!;
   const c = clientes.get(clientId)!;
@@ -207,6 +217,11 @@ function vistaPerfil(clientId: string, conOcupacion: boolean) {
               },
             ]
           : [],
+      // alta-minima · `toAt: null` y `take: 1`, como el `select`.
+      carePlanItems: lineasDePlan
+        .filter((l) => l.clientId === clientId && l.toAt == null)
+        .slice(0, 1)
+        .map((l) => ({ id: l.id })),
     },
   };
 }

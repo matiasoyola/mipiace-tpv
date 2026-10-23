@@ -55,13 +55,30 @@ vi.mock("../src/api.js", async () => {
         };
       }
       if (path.startsWith("/residencia/residentes") && init?.method == null) {
-        return { residentes, alcance: "CENTRO" };
+        // alta-minima · la lista trae además el RESUMEN del centro. Con
+        // los residentes de este doble completos, es cero.
+        return {
+          residentes,
+          alcance: "CENTRO",
+          resumen: {
+            total: residentes.length,
+            incompletas: 0,
+            datosPendientes: 0,
+            conImprescindibles: 0,
+          },
+        };
       }
       if (init?.method === "POST") {
         residentes = [
           ...residentes,
           {
             clientId: `c-${residentes.length + 1}`,
+            // alta-minima · `nombre` y `faltan` los manda SIEMPRE la API
+            // (`vistaResidente`), y la lista los pinta: sin ellos el
+            // doble no se parece a lo que la pantalla recibe.
+            nombre: [init.body.firstName, init.body.lastName]
+              .filter(Boolean)
+              .join(" "),
             firstName: init.body.firstName,
             lastName: init.body.lastName ?? null,
             admissionDate: init.body.admissionDate,
@@ -70,6 +87,7 @@ vi.mock("../src/api.js", async () => {
             dependencyGrade: null,
             placeType: init.body.placeType,
             cama: null,
+            faltan: [],
           },
         ];
         return {};

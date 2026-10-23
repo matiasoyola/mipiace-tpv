@@ -34,6 +34,7 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import {
   addDays,
   calcularIndicadores,
+  datosQueFaltan,
   pinPorRenovar,
   cuantoVaHecho,
   diaDelTurno,
@@ -43,10 +44,13 @@ import {
   turnoDe,
   utcToWallDate,
   wallTimeToUtc,
+  resumenDeFichas,
   zonasSinConfirmar,
   type ControlParaNoHecho,
+  type DatoQueFalta,
   type DatosDelMes,
   type RegistroHecho,
+  type ResumenDeFichas,
   type ValorDeIndicador,
 } from "@mipiacetpv/residencia-plan";
 
@@ -142,6 +146,38 @@ export interface PorArreglar {
   }>;
 }
 
+/**
+ * alta-minima · **LAS FICHAS DE RESIDENTE INCOMPLETAS.**
+ *
+ * La tarjeta del panel: «12 fichas de residentes incompletas · 31 datos
+ * pendientes», con el botón «Completar» que abre la primera y, al
+ * guardar, «Siguiente incompleta». Recorrer las 43 no obliga a volver a
+ * la lista.
+ *
+ * Va en el panel y **no en `porArreglar`** aunque tenga la misma forma, y
+ * es a propósito: `porArreglar` son cosas que dejan el centro a medio
+ * CONFIGURAR (un PIN corto, un residente sin plan) y se arreglan una vez.
+ * Esto es trabajo de oficina que dura semanas y baja de doce a cero, así
+ * que necesita su propia cifra y su propio recorrido — mezclarlo con los
+ * PIN haría que la sección no bajara nunca a cero y una sección que no
+ * baja a cero enseña a no mirarla.
+ *
+ * `primeras` y no la lista entera: la tarjeta enseña unos cuantos nombres
+ * y el botón recorre. Mandar los 43 con lo que le falta a cada uno sería
+ * engordar el panel para pintar un número.
+ */
+export interface FichasIncompletas extends ResumenDeFichas {
+  primeras: Array<{
+    clientId: string;
+    nombre: string;
+    habitacion: string | null;
+    faltan: DatoQueFalta[];
+  }>;
+}
+
+/** Cuántos nombres lleva la tarjeta. El resto los recorre el botón. */
+const NOMBRES_EN_LA_TARJETA = 5;
+
 export interface Panel {
   abierto: QueHayAbierto;
   relevos: RelevosDelPanel;
@@ -153,6 +189,8 @@ export interface Panel {
   turno: TurnoEnCurso;
   /** residencia-6 · lo que está mal puesto y se arregla configurando. */
   porArreglar: PorArreglar;
+  /** alta-minima · las fichas de residente a las que les falta algo. */
+  fichasIncompletas: FichasIncompletas;
   indicadores: ValorDeIndicador[];
   /** El mes de los indicadores, «YYYY-MM». */
   mes: string;
@@ -186,6 +224,7 @@ export async function construirPanel(
     obligaciones,
     turno,
     porArreglar,
+    fichasIncompletas,
     indicadores,
     cuantosResidentes,
   ] = await Promise.all([
@@ -194,10 +233,22 @@ export async function construirPanel(
     obligacionesDelPanel(prisma, { tenantId, ahora }),
     turnoEnCurso(prisma, tenantId, ahora),
     loQueHayQueArreglar(prisma, tenantId, ahora),
+    // alta-minima · entra en el MISMO `Promise.all`: es una consulta y
+    // una función pura, así que no mueve el presupuesto de los 10 s
+    // (bloque C §1). Lo que la habría movido es pedirla aparte desde el
+    // navegador, que es una ida más en serie.
+    lasFichasIncompletas(prisma, tenantId),
     indicadoresDelMes(prisma, tenantId, mes, ahora),
-    // Dentro del mismo `Promise.all`: un `count` sobre un índice de
-    // tenant no mueve el presupuesto de los 10 segundos, y fuera habría
-    // sido una ida más a la base en serie.
+    // primer-acceso · dentro del mismo `Promise.all`: un `count` sobre un
+    // índice de tenant no mueve el presupuesto de los 10 segundos, y
+    // fuera habría sido una ida más a la base en serie.
+    //
+    // Cuenta TODOS los perfiles, también los de quien se fue, y eso lo
+    // separa de `lasFichasIncompletas` —que mira sólo a los que viven
+    // aquí—: las dos preguntas son distintas. «¿Está el centro vacío?»
+    // se contesta con el histórico (un centro del que se han ido los 48
+    // no está empezando); «¿cuántas fichas hay a medias?» sólo con los
+    // vivos, porque la de quien se fue no se va a completar nunca.
     prisma.residentProfile.count({ where: { tenantId } }),
   ]);
 
@@ -207,10 +258,106 @@ export async function construirPanel(
     obligaciones,
     turno,
     porArreglar,
+    fichasIncompletas,
     indicadores,
     mes,
     centroVacio: cuantosResidentes === 0,
     generadoEn: ahora.toISOString(),
+  };
+}
+
+// ── alta-minima · LAS FICHAS DE RESIDENTE INCOMPLETAS ────────────────
+//
+// UNA consulta y una función pura. Ni recorre el plan ni cruza registros,
+// igual que `loQueHayQueArreglar`, y por eso entra en el `Promise.all`
+// del panel sin costar nada.
+//
+// ── SÓLO LOS QUE VIVEN AQUÍ ─────────────────────────────────────────
+//
+// `dischargeDate: null`. La ficha de quien se fue en 2019 no se va a
+// completar nunca, y contarla dejaría un número que no baja a cero — un
+// contador que no se puede llevar a cero enseña a no mirarlo, que es
+// exactamente lo contrario de lo que esta tarjeta existe para conseguir.
+//
+// ── LO CIFRADO SE CUENTA SIN DESCIFRARLO ───────────────────────────
+//
+// El `select` pide `dni_cifrado` y `nss_cifrado` para saber si son NULL, y
+// **ni los descifra ni los devuelve**: `dekONada` no se llama aquí porque
+// no hace falta ninguna clave (decisión 8 del bloque). Un residente
+// incompleto con el DNI puesto se cuenta igual de bien con la clave
+// perdida.
+
+export async function lasFichasIncompletas(
+  prisma: PrismaClient,
+  tenantId: string,
+): Promise<FichasIncompletas> {
+  const perfiles = await prisma.residentProfile.findMany({
+    where: { tenantId, dischargeDate: null },
+    select: {
+      clientId: true,
+      admissionDate: true,
+      dependencyLevel: true,
+      dependencyGrade: true,
+      placeType: true,
+      responsibleName: true,
+      responsiblePhone: true,
+      dni: true,
+      nss: true,
+      dniCifrado: true,
+      nssCifrado: true,
+      client: {
+        select: {
+          firstName: true,
+          lastName: true,
+          birthdate: true,
+          bedAssignments: {
+            where: { toAt: null },
+            take: 1,
+            select: { bed: { select: { room: { select: { number: true } } } } },
+          },
+          // `toAt: null` y no `fromAt <= ahora`: la pregunta es «¿tiene
+          // plan?», y un residente que ingresa el lunes con su plan ya
+          // preparado sí lo tiene. Es la diferencia con
+          // `residentesSinPlan` de arriba, que pregunta «¿hoy no le toca
+          // nada?» — ver `PLAN_VIVO_SELECT` en `residentes-routes.ts`.
+          carePlanItems: { where: { toAt: null }, take: 1, select: { id: true } },
+        },
+      },
+    },
+    orderBy: [{ client: { lastName: "asc" } }, { client: { firstName: "asc" } }],
+  });
+
+  const conFaltas = perfiles.map((p) => ({
+    clientId: p.clientId,
+    nombre: `${p.client.firstName} ${p.client.lastName}`.trim(),
+    habitacion:
+      p.client.bedAssignments[0]?.bed.room.number ?? null,
+    faltan: datosQueFaltan({
+      lastName: p.client.lastName,
+      admissionDate: p.admissionDate?.toISOString().slice(0, 10) ?? null,
+      dependencyLevel: p.dependencyLevel,
+      placeType: p.placeType,
+      dependencyGrade: p.dependencyGrade,
+      birthdate: p.client.birthdate?.toISOString().slice(0, 10) ?? null,
+      responsibleName: p.responsibleName,
+      responsiblePhone: p.responsiblePhone,
+      tieneDni: (p.dniCifrado ?? p.dni) != null,
+      tieneNss: (p.nssCifrado ?? p.nss) != null,
+      tieneCama: p.client.bedAssignments.length > 0,
+      tienePlan: p.client.carePlanItems.length > 0,
+    }),
+  }));
+
+  const incompletas = conFaltas.filter((r) => r.faltan.length > 0);
+  return {
+    ...resumenDeFichas(conFaltas.map((r) => r.faltan)),
+    // Las que tienen algún IMPRESCINDIBLE primero: es el orden en que la
+    // dirección las va a cerrar, y es el orden que «Siguiente
+    // incompleta» recorre.
+    primeras: [
+      ...incompletas.filter((r) => r.faltan.some((f) => f.peso === "IMPRESCINDIBLE")),
+      ...incompletas.filter((r) => !r.faltan.some((f) => f.peso === "IMPRESCINDIBLE")),
+    ].slice(0, NOMBRES_EN_LA_TARJETA),
   };
 }
 
