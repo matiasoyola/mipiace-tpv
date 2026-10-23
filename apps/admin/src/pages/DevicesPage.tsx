@@ -9,6 +9,7 @@ import { Calculator, Check, ChevronDown, Copy } from "lucide-react";
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens } from "../api.js";
 import { useTenantCapabilities } from "../capabilities.js";
+import { nombreDeDispositivo } from "../lib/nombre-de-dispositivo.js";
 import {
   CenteredLoader,
   FieldError,
@@ -274,8 +275,11 @@ function DeviceRow({
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-[14px] font-medium text-mipiace-ink truncate flex items-center gap-2">
-          <span className="truncate">
-            {device.name ?? device.userAgent ?? "Dispositivo sin nombre"}
+          {/* clinica-8 (fase B, 18) · el user-agent crudo deja de ser el
+              nombre. El `title` lo conserva entero: lo que se quita de
+              delante es el ruido, no el dato. */}
+          <span className="truncate" title={device.userAgent ?? undefined}>
+            {nombreDeDispositivo(device)}
           </span>
           {/* kds-1-cocina · que una pantalla de cocina se distinga del
               terminal de la caja ES el aviso: las dos conviven en la misma

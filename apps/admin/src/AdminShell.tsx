@@ -96,7 +96,10 @@ interface NavItem {
     // clinica-7 · la sección del contrato de encargado. La capability ya
     // existía (`clinica-1` la trajo para la sección clínica de Personal);
     // lo que es nuevo es que una entrada del menú la use.
-    | "clinica";
+    | "clinica"
+    // clinica-8 (fase B, 18) · no es una capability del tenant: es su
+    // VERTICAL. Lo usa «Comanderas», que sólo existe en hostelería.
+    | "hosteleria";
   // F1 · el activo se calcula por prefijo, y "Control horario"
   // (`/admin/fichaje`) es prefijo de sus dos hermanas. Sin esto, las tres
   // entradas se pintarían activas a la vez en cualquiera de ellas.
@@ -319,7 +322,20 @@ const NAV_ITEMS: NavItem[] = [
   // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
   // Sólo lo usan los tenants HOSPITALITY; en otros verticales queda
   // visible pero vacío sin perjudicar la operativa.
-  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "caja" },
+  // clinica-8 (fase B, 18) · la capability pasa de `caja` a
+  // `hosteleria`, y es la misma corrección que el addendum 3 le hizo a
+  // «Sync Holded»: una sección cuyo contenido no existe en este negocio.
+  //
+  // «Comanderas» reparte las etiquetas del catálogo entre las impresoras
+  // de barra y de cocina. En una clínica no hay barra, no hay cocina y
+  // no hay comanda; lo que hay es una podóloga mirando una entrada del
+  // menú que no sabe qué es (auditoría del 18-10, en los menores:
+  // «"Comanderas" en el menú de una clínica»).
+  //
+  // El comentario de arriba decía «en otros verticales queda visible
+  // pero vacío sin perjudicar la operativa». Perjudica: una pantalla
+  // vacía que no se entiende es una llamada de teléfono.
+  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "hosteleria" },
   // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
   // con Holded sin pasar por super-admin.
   //
@@ -786,6 +802,12 @@ function NavList({
     // residencia-1 · `=== true` como las demás: mientras `caps` es `null`
     // la entrada NO se pinta, para no parpadear.
     if (item.capability === "residencia") return caps?.residencia === true;
+    // clinica-8 (fase B, 18) · y además caja: una comandera se imprime
+    // desde el TPV. `=== "HOSPITALITY"` y no `!== null`, así que
+    // mientras no se sabe el vertical no se pinta.
+    if (item.capability === "hosteleria") {
+      return caps?.caja === true && caps?.businessType === "HOSPITALITY";
+    }
     return true;
   });
   return (

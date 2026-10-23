@@ -28,7 +28,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { api } from "./api.js";
+import { api, ApiError } from "./api.js";
 
 export interface TenantCapabilities {
   caja: boolean;
@@ -178,8 +178,25 @@ async function pedir(): Promise<void> {
       // las cuentas antes de este bloque.
       enEnsayo: me.tenant.facturaDesde === null,
     };
-  } catch {
-    cache = POR_DEFECTO;
+  } catch (err) {
+    // clinica-8 (fase B, 18) · UN 401 NO ES «no se pudo leer»: es que no
+    // hay sesión.
+    //
+    // `POR_DEFECTO` asume caja y Holded porque es el caso de casi todos
+    // y porque un fallo de red no puede dejar el panel sin menú. Pero
+    // con la sesión caída esas dos peticiones dan 401 las dos, y el
+    // resultado era una barra lateral con «Comanderas» y con las
+    // secciones de Holded encima de una clínica que no tiene ninguna de
+    // las dos — lo que la auditoría del 18-10 llamó «un menú
+    // equivocado» (punto 20).
+    //
+    // Con 401 se apaga todo. `api()` ya está mandando al login; lo que
+    // esto evita es el parpadeo del menú de otro comercio mientras llega
+    // la navegación.
+    cache =
+      err instanceof ApiError && err.status === 401
+        ? { ...POR_DEFECTO, caja: false, holded: false, holdedEnabled: false }
+        : POR_DEFECTO;
   }
   avisar();
 }

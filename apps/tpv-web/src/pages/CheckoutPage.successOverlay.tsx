@@ -39,6 +39,7 @@ import {
 } from "../lib/catalog.js";
 import type { BusinessType } from "../lib/catalog.js";
 import { formatEur } from "../lib/money.js";
+import { puedeEnseñarPdfIncrustado } from "../lib/pdf-en-pantalla.js";
 import { subscribeOutbox } from "../lib/outbox.js";
 import { pairUsbPrinter } from "../lib/escposPrint.js";
 // v1.10.2-impresion-honesta · la decisión de "¿hay impresora?" y "¿ha
@@ -475,7 +476,19 @@ export function SuccessOverlay({
               <span className="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10.5px] font-semibold uppercase tracking-wider">
                 Prueba
               </span>
-              No se sube a Holded ni se envía email.
+              {/* clinica-8 (fase B, 18) · «El éxito del cobro habla de
+                  Holded en una cuenta sin Holded» (auditoría del 18-10,
+                  punto 19). La «Clínica demo» está EN ENSAYO y no tiene
+                  Holded, así que cada cobro de la auditoría acabó
+                  nombrándole un ERP que no ha comprado. El caso sin
+                  Holded ya estaba resuelto para `PAID` (N4); esta rama
+                  es la de prueba, y se le había escapado.
+                  Lo que hay que decir es lo mismo en los dos casos: que
+                  no se emite nada. Qué no se emite depende de lo que el
+                  comercio tenga. */}
+              {holdedEnabled
+                ? "No se sube a Holded ni se envía email."
+                : "No se emite nada ni se envía email."}
             </div>
           ) : !holdedEnabled ? (
             // N4 · La Maestranza (y todo comercio sin Holded) veía aquí
@@ -948,6 +961,116 @@ function QrModal({
   );
 }
 
+/**
+ * clinica-8 (fase B, 18) · EL TICKET LEÍDO EN PANTALLA.
+ *
+ * Donde el navegador no sabe pintar un PDF (el WebView de Android), lo
+ * que se enseña es ESTE MISMO `TicketDocument` en DOM. Importa lo que
+ * NO es: no es otro documento ni otro cálculo. Los importes que salen
+ * aquí son los campos que el renderer del PDF imprime —`totalGross` por
+ * línea, `totals.total` abajo—, no una suma que esta pantalla haga: dos
+ * sitios sumando serían dos tickets.
+ *
+ * Y lo dice en la cabecera: es una lectura, y el papel/PDF sigue siendo
+ * el documento. Quien lo necesite en PDF lo tiene en el histórico desde
+ * un aparato que sepa abrirlo.
+ */
+function LecturaDelTicket({ document }: { document: TicketDocument }) {
+  const { ticket, store, lines, totals, payment } = document;
+  return (
+    <div
+      data-testid="ticket-lectura"
+      className="h-[70vh] overflow-y-auto rounded-xl bg-mipiace-stone px-4 py-4 text-left"
+    >
+      <div className="text-[12px] text-slate-500 mb-3">
+        Este aparato no sabe abrir PDF dentro de la app, así que el ticket
+        se enseña leído. El PDF se puede abrir desde el histórico en un
+        ordenador.
+      </div>
+      <div className="text-[15px] font-semibold text-mipiace-ink">
+        {store.name}
+      </div>
+      <div className="text-[12.5px] text-slate-500">
+        Nº <span className="tabular-nums">{ticket.internalNumber}</span>
+        {" · "}
+        {ticket.issuedAt.toLocaleString("es-ES", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </div>
+      {ticket.attendedBy && (
+        <div className="text-[12.5px] text-slate-500">
+          Atiende {ticket.attendedBy}
+        </div>
+      )}
+
+      <ul className="list-none p-0 mt-3 space-y-1.5">
+        {lines.map((l, i) => (
+          <li
+            key={`${l.sku ?? l.description}-${i}`}
+            className="flex items-start justify-between gap-3 text-[13.5px] text-mipiace-ink"
+          >
+            <span className="leading-tight">
+              {l.quantity > 1 && (
+                <span className="tabular-nums text-slate-500">
+                  {l.quantity}×{" "}
+                </span>
+              )}
+              {l.description}
+            </span>
+            <span className="tabular-nums shrink-0">
+              {formatEur(l.totalGross)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="border-t border-slate-300 mt-3 pt-2 space-y-1">
+        {totals.taxBreakdown.map((t) => (
+          <div
+            key={`${t.rate}-${t.exemptionCause ?? ""}`}
+            className="flex justify-between text-[12.5px] text-slate-500"
+          >
+            {/* Un tramo EXENTO no es un tramo al 0 %: lo dice la causa,
+                igual que en el papel. En Rosario los 17 servicios son
+                `E1`, así que esta es la línea que se lee todos los
+                días. */}
+            <span>
+              {t.exemptionCause ? `Exento (${t.exemptionCause})` : `IVA ${t.rate} %`}
+            </span>
+            <span className="tabular-nums">{formatEur(t.tax)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between text-[16px] font-semibold text-mipiace-ink">
+          <span>Total</span>
+          <span className="tabular-nums">{formatEur(totals.total)}</span>
+        </div>
+        <div className="flex justify-between text-[12.5px] text-slate-500">
+          <span>{METODO_EN_PANTALLA[payment.method]}</span>
+          <span className="tabular-nums">{formatEur(payment.paid)}</span>
+        </div>
+        {payment.change != null && payment.change > 0 && (
+          <div className="flex justify-between text-[12.5px] text-slate-500">
+            <span>Cambio</span>
+            <span className="tabular-nums">{formatEur(payment.change)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const METODO_EN_PANTALLA: Record<TicketDocument["payment"]["method"], string> =
+  {
+    CASH: "Efectivo",
+    CARD: "Tarjeta",
+    TRANSFER: "Transferencia",
+    OTHER: "Otro",
+  };
+
 function ViewModal({
   document,
   onClose,
@@ -965,6 +1088,10 @@ function ViewModal({
   useEffect(() => {
     let cancelled = false;
     let url: string | null = null;
+    // clinica-8 (fase B, 18) · si no se va a poder enseñar, no se
+    // genera: en una tablet de 200 € armar el PDF cuesta casi un
+    // segundo de CPU para no pintar nada.
+    if (!puedeEnseñarPdfIncrustado()) return;
     (async () => {
       try {
         const bytes = await renderTicketPdf(document, {
@@ -1010,7 +1137,18 @@ function ViewModal({
             <X className="w-4 h-4" />
           </button>
         </div>
-        {blobUrl ? (
+        {/* clinica-8 (fase B, 18) · EN ANDROID, «Ver ticket» SE ABRÍA EN
+            BLANCO (auditoría del 18-10, punto 19).
+            El WebView de Android no trae visor de PDF: el `<embed>` no
+            falla, se queda en un rectángulo blanco de 70vh. Donde el
+            navegador sí sabe (escritorio, iPad) no cambia nada — se
+            sigue viendo el PDF, que es el documento de verdad.
+            Donde no sabe, se LEE el mismo `TicketDocument` con el que
+            se habría pintado el PDF. No es otro documento: es el mismo
+            dato, puesto en pantalla, y lo dice. */}
+        {!puedeEnseñarPdfIncrustado() ? (
+          <LecturaDelTicket document={document} />
+        ) : blobUrl ? (
           <embed
             data-testid="ticket-preview"
             src={blobUrl}

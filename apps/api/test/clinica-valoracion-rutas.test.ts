@@ -276,9 +276,11 @@ const fakePrisma = {
   // clinica-8 (fase B, 14) · los tipos de visita que el centro declara,
   // de donde sale la ESPECIALIDAD que el test del paciente nombra.
   tagVisitType: {
-    findMany: vi.fn(async () => [
-      { slug: "quiropodia", visitType: "QUIROPODIA" },
-    ]),
+    findMany: vi.fn(
+      async (): Promise<Array<{ slug: string; visitType: string }>> => [
+        { slug: "quiropodia", visitType: "QUIROPODIA" },
+      ],
+    ),
   },
   user: {
     findFirst: vi.fn(async ({ where }: any) => {
@@ -864,16 +866,13 @@ describe("clinica-2 · EL ENLACE caduca y es de un solo uso", () => {
   it("con la tabla de tipos de visita ilegible, el test abre sin especialidad", async () => {
     const token = conEnlace();
     const app = await buildApp();
-    fakePrisma.tagVisitType.findMany = vi.fn(async () => {
+    fakePrisma.tagVisitType.findMany.mockImplementationOnce(async () => {
       throw new Error("boom");
     });
     const res = await app.inject({ method: "GET", url: `/valoracion/${token}` });
     expect(res.statusCode).toBe(200);
     expect(res.json().especialidad).toBeNull();
     expect(res.json().cuestionario).toBeTruthy();
-    fakePrisma.tagVisitType.findMany = vi.fn(async () => [
-      { slug: "quiropodia", visitType: "QUIROPODIA" },
-    ]);
     await app.close();
   });
 
