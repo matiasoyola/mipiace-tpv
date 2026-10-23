@@ -703,24 +703,46 @@ de cambio que no es del código.
 
 Construida y firmada. **Sin publicar.**
 
+**La 1.29.1 es la que hay que probar**: lleva dentro el hallazgo 9 y el arreglo
+de la etiqueta que tapaba el nombre.
+
+```
+fichero   apps/tpv-android/build-releases/mipiacetpv-1.29.1-12901.apk
+versión   1.29.1 (versionCode 12901)
+commit    caa64a5
+tamaño    8.745.945 bytes
+SHA-256   1db9145805da2463b1bdc0fa10e4909cd01eb2b70e16123163e11a323859d644
+firma     Signer #1 · CN=mipiacetpv · SHA-1 1256a71efff3008b7be57ad28bcda3a7fae10290
+```
+
+La **1.29.0** —`4d05b6e`, SHA-256 `7434214f…`— es la que se instaló en el N1 a
+las 19:19 y con la que se midió el §9.2-bis, y es la que está puesta **ahora
+mismo en el aparato**. Sigue en `build-releases/`.
+
 ```
 fichero   apps/tpv-android/build-releases/mipiacetpv-1.29.0-12900.apk
 versión   1.29.0 (versionCode 12900)
 commit    4d05b6e
 tamaño    8.744.373 bytes
 SHA-256   7434214fd68149bf0436a7819a9392048c57673418a87fb9a22970c4a0db8fdd
-firma     Signer #1 · CN=mipiacetpv · SHA-1 1256a71efff3008b7be57ad28bcda3a7fae10290
 ```
 
 Los cuatro chequeos del guion, en verde: `VITE_API_URL` a
 `https://api.mipiacetpv.com`, sin Service Worker, origen del WebView correcto y
 APK firmada.
 
-Instalar por cable:
+Instalar por cable (**avisando antes a Matías**: el N1 lo está usando él, y una
+instalación le reinicia la app a media prueba):
 
 ```bash
-adb install -r apps/tpv-android/build-releases/mipiacetpv-1.29.0-12900.apk
+adb -s 192.168.5.144:<puerto> install -r \
+  apps/tpv-android/build-releases/mipiacetpv-1.29.1-12901.apk
 ```
+
+Y detrás, un reinicio del aparato: **el N1 sólo abre la app una vez por
+arranque** (a la segunda sale en blanco). Ojo, que el reinicio **cambia el
+puerto** de la depuración inalámbrica — pasó en esta pasada: de `42911` a
+`39221`.
 
 ---
 
