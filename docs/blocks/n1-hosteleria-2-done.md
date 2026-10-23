@@ -637,17 +637,60 @@ adb install -r apps/tpv-android/build-releases/mipiacetpv-1.29.0-12900.apk
 
 ## 9 · La pasada en el hierro — **PENDIENTE**
 
-### 9.1 Lo que impidió hacerla
+### 9.1 Lo que impidió hacerla · **el bloqueo de red local de macOS**
 
-El N1 y el AP11 estaban en adb al empezar la sesión:
+Y no era que los aparatos estuvieran dormidos, que es lo que parecía. Medido:
 
-```
-192.168.5.144:42911    device   product:N1     model:N1
-192.168.5.75:5555      device   product:AP11-1006
-```
+| | resultado |
+|---|---|
+| `ping 192.168.5.144` (N1) | **responde**, 0 % de pérdida |
+| `ping 192.168.5.75` (AP11) | **responde**, 0 % de pérdida |
+| `adb connect` a cualquiera de los dos | `Operation timed out` |
+| `adb mdns services` | anuncia dos aparatos, y los dos también dan timeout |
+| servidor de adb | **PID 82146, arrancado el 18-oct**, PPID 1 (huérfano) |
 
-y al llegar a este punto los **tres** transportes daban `offline`. El prompt ya lo
-advierte: «la depuración se corta si se bloquea la pantalla».
+Los dos aparatos están **vivos y en la red**; lo que no llega es **adb**. Es
+exactamente el bloqueo que documenta la cabecera de `infra/terminal.sh`:
+
+> macOS bloquea la red local al proceso que arranca el servidor de adb si ese
+> proceso no tiene el permiso concedido. El síntoma NO es un error de permisos:
+> es `No route to host` o `Operation timed out` contra TODA la LAN, incluidas IPs
+> que responden al ping desde la misma máquina.
+
+Al empezar la sesión los transportes se veían como `device` (el servidor del
+18-oct tenía el permiso), luego pasaron a `offline` y después desaparecieron. Lo
+que queda es un servidor de hace cinco días que ya no alcanza la LAN.
+
+**Lo que NO se hizo, a propósito: reiniciar el servidor de adb.** La sesión de
+`clinica-8` está conduciendo el Lenovo por adb y **comparte ese servidor**
+(uno por máquina, `tcp:5037`): matarlo le rompe la pasada a media tarea. Y el
+servidor nuevo, arrancado desde un agente, heredaría el mismo bloqueo — el propio
+script lo dice: «un `adb start-server` lanzado desde un editor, desde un agente o
+desde un cron hereda el bloqueo y NO funciona, aunque `adb` sea el mismo
+binario».
+
+### 9.1-bis · Las dos cosas que desbloquean la pasada, y son de Matías
+
+1. **Arrancar el servidor de adb desde Terminal.app** (o iTerm), a mano, y
+   conceder el permiso cuando macOS lo pregunte — Ajustes → Privacidad y
+   seguridad → **Red local**. Mejor cuando la sesión de `clinica-8` haya acabado
+   con el Lenovo, porque el servidor es compartido:
+
+   ```bash
+   adb kill-server && adb start-server && adb devices -l
+   ```
+
+2. **El puerto del N1.** La depuración inalámbrica lo cambia en cada
+   reconexión, y el anterior (`42911`) ya caducó. Con el permiso concedido
+   normalmente **no hace falta teclearlo**: sale solo con
+
+   ```bash
+   adb mdns services | grep _adb-tls-connect
+   adb connect 192.168.5.144:<puerto>
+   ```
+
+   y si el inventario de super-admin está a mano, `infra/terminal.sh` lo resuelve
+   por nombre (necesita `MIPIACETPV_SA_TOKEN`, que es de Matías).
 
 ### 9.2 Lo que hace falta, y es de Matías
 
@@ -663,10 +706,54 @@ advierte: «la depuración se corta si se bloquea la pantalla».
 
 ### 9.3 El guion, con el servicio encima
 
-El mismo que el banco: mesa abierta con seis líneas, dos avisos de cocina
-entrando de verdad desde el AP11, un urgente con alergia mientras la comanda está
-abierta, zonas plegándose, mesa por recoger con sus opciones, y cobro. Capturas
-numeradas en `docs/qa/2026-10-XX-n1-hosteleria-2/`.
+Mecánico en cuanto haya adb. El orden importa: **el KDS se comprueba ANTES de
+enviar**, porque una comanda que sale y no llega es lo que cortó la pasada del
+23-10 (§9.2-ter de `n1-hosteleria-done`).
+
+```bash
+N1=192.168.5.144:<puerto>
+APK=apps/tpv-android/build-releases/mipiacetpv-1.29.0-12900.apk
+
+# 0 · que es el N1 y no otro aparato
+adb -s $N1 shell getprop ro.product.model          # -> N1
+adb -s $N1 shell dumpsys package com.mipiace.tpv | grep versionName
+
+# 1 · instalar la 1.29.0 y verificar la huella contra la construida
+shasum -a 256 "$APK"   # 7434214fd68149bf0436a7819a9392048c57673418a87fb9a22970c4a0db8fdd
+adb -s $N1 install -r "$APK"
+
+# 2 · y SOLO UNA apertura por arranque: a la segunda la app sale en blanco
+#     (ver la memoria «el N1 sólo abre la app una vez por arranque»)
+adb -s $N1 reboot && sleep 60
+```
+
+**El KDS del AP11, sin necesidad de la base de producción.** El propio TPV lo
+dice en pantalla: con el módulo encendido y sin camino, la comanda pinta
+«Cocina no recibe · al enviar saldrá en papel» (`data-testid="cocina-no-recibe"`),
+y hay un «Probar cocina por wifi» (`probar-cocina-wifi`) en la venta. Si no sale
+el aviso rojo y la prueba contesta, el KDS está vinculado. Esto se mira **antes**
+de tocar «Enviar».
+
+El recorrido, el mismo que el banco y con el servicio encima:
+
+| paso | qué se mira |
+|---|---|
+| 1 · mapa a 360 | `innerWidth` 360, sin desborde, cabecera de 2 filas, mesa de 88 |
+| 2 · plegar Salón y Terraza | las 8 de Barra enteras, y las dos cabeceras diciendo su resumen |
+| 3 · plegar las tres | la sala entera de un vistazo, sin desplazar |
+| 4 · reiniciar la app | el pliegue **se recuerda** |
+| 5 · mesa por recoger | la hoja a todo el ancho, «Dejar libre» primero, letra legible |
+| 6 · abrir mesa, 6 líneas | **3 enteras y desplazar** — el §2.8, que es lo que hay que juzgar |
+| 7 · dos avisos de cocina reales | el contador de alto fijo, y que NO empuje la comanda |
+| 8 · urgente con alergia encima | **una sola capa**: la de debajo no asoma |
+| 9 · buscar «tost» con teclado | sin fila de cantidad, primer resultado pegado al buscador |
+| 10 · la X y el atrás | las dos cierran la hoja y **no** sacan de la mesa |
+| 11 · enviar a cocina | verla llegar al AP11 |
+| 12 · cobrar en efectivo | y que la mesa quede POR RECOGER, legible |
+
+Capturas numeradas en `docs/qa/2026-10-23-n1-hosteleria-2/`, y **los toques con
+el driver táctil (`input tap`) sobre las coordenadas del CDP, no sobre el
+espejo** (memoria «medir toques en el D8»).
 
 ### 9.4 Y lo que de verdad cierra el bloque
 
