@@ -24,6 +24,14 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+// clinica-8 subió el contrato de encargado a la versión 2, y una
+// aceptación de una versión vieja **no está vigente**: el centro entra en
+// solo lectura. Por eso la versión se lee del paquete y no se teclea —
+// con un `1` a pelo, este fichero se pone rojo entero el día que alguien
+// publique la 3, y el error («CONTRATO_ENCARGADO_NO_VIGENTE» en cada
+// escritura) no dice que el motivo sea la versión.
+import { VERSION_VIGENTE } from "@mipiacetpv/contrato-encargado";
+
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -162,7 +170,7 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
     // clinica-7 · EL CONTRATO DE ENCARGADO, ACEPTADO.
     await prisma.$executeRawUnsafe(
       `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-       VALUES ('${randomUUID()}', '${tenantId}', 1, '${"a".repeat(64)}', '${directoraId}', now())`,
+       VALUES ('${randomUUID()}', '${tenantId}', ${VERSION_VIGENTE}, '${"a".repeat(64)}', '${directoraId}', now())`,
     );
     olvidarEstado();
 
@@ -245,7 +253,7 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
     );
     await prisma.$executeRawUnsafe(
       `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-       VALUES ('${randomUUID()}', '${centroSinContrato}', 1, '${"d".repeat(64)}', '${directoraSinContrato}', now())`,
+       VALUES ('${randomUUID()}', '${centroSinContrato}', ${VERSION_VIGENTE}, '${"d".repeat(64)}', '${directoraSinContrato}', now())`,
     );
     olvidarEstado();
 
@@ -589,7 +597,7 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
       // clinica-7 §2: nadie pone un booleano a `false`.
       await prisma.$executeRawUnsafe(
         `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at, revokes_agreement_id)
-         SELECT '${randomUUID()}', '${centroSinContrato}', 1, '${"b".repeat(64)}', '${directoraSinContrato}', now(), id
+         SELECT '${randomUUID()}', '${centroSinContrato}', ${VERSION_VIGENTE}, '${"b".repeat(64)}', '${directoraSinContrato}', now(), id
          FROM clinical_processor_agreements
          WHERE tenant_id = '${centroSinContrato}' AND revokes_agreement_id IS NULL
          LIMIT 1`,
@@ -631,7 +639,7 @@ describe.skipIf(!e2eEnabled)("e2e · alta-minima", () => {
     it("y al volver a aceptarlo, se vuelve a poder", async () => {
       await prisma.$executeRawUnsafe(
         `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-         VALUES ('${randomUUID()}', '${centroSinContrato}', 1, '${"c".repeat(64)}', '${directoraSinContrato}', now())`,
+         VALUES ('${randomUUID()}', '${centroSinContrato}', ${VERSION_VIGENTE}, '${"c".repeat(64)}', '${directoraSinContrato}', now())`,
       );
       olvidarEstado(centroSinContrato);
       const otra = await app.inject({

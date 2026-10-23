@@ -439,6 +439,11 @@ días. Este bloque es la parte mínima que hacía falta **ya**, y está preparad
   guarda el último valor que pintó y descarta el evento si el `value` del nodo coincide: la
   asignación directa se pierde en silencio y el test falla diciendo que el botón sigue
   deshabilitado.
+- **La versión del contrato se lee, no se teclea.** clinica-8 subió el contrato de encargado a la
+  **versión 2**, y una aceptación de una versión vieja **no está vigente**: el centro entra en solo
+  lectura. Este fichero sembraba `version, 1` a pelo y se puso rojo entero al mergear, con
+  `CONTRATO_ENCARGADO_NO_VIGENTE` en cada escritura — un error que no dice que el motivo sea la
+  versión. Ahora sale de `VERSION_VIGENTE`, como el resto de la suite.
 - **Una prueba que apaga el centro no puede compartir centro.** §3 revoca el contrato de encargado
   para comprobar el 423, y el estado del contrato **se cachea 30 s por tenant** (`contrato.ts`):
   mientras está revocado, toda escritura del centro contesta 423. Con un solo tenant eso convierte
