@@ -188,6 +188,14 @@ export interface VistaDeLaSesion {
     faltan: Array<{ id: string; titulo: string }>;
     mensaje: string;
   };
+  /** clinica-9 (4) · el día de la cita. Lo decide el servidor con la
+   *  misma función que rechaza el cierre: ver `sePuedeCerrarLaSesion`. */
+  dia?: {
+    delaCita: string;
+    esHoy: boolean;
+    sePuedeCerrar: boolean;
+    mensaje: string | null;
+  };
   tratamientos: ServicioEnPantalla[];
   tiposSugeridos: TipoDeVisita[];
   pendientes: PendienteCreado[];
@@ -849,6 +857,22 @@ function SesionPodologiaDentro(props: {
           arreglarlo —«Firmar ahora», que lleva a su pestaña—, y no un
           error rojo: es la decisión 7 del prompt. El botón de cerrar sale
           desactivado abajo y el servidor se niega igual. */}
+      {/* clinica-9 (4) · LA CITA NO ES DE HOY.
+          La pasada del 24-10 abrió la cita del lunes 26 desde la agenda y
+          la pantalla la llamó «Cita de hoy»; al firmarla, la sesión quedó
+          con la fecha del sábado. Lo primero de la pantalla, encima de
+          todo, y con el día de la cita escrito: lo que hay que entender
+          es qué día es esta cita, no que algo ha fallado. */}
+      {vista.dia && !vista.dia.sePuedeCerrar && (
+        <div
+          data-test="cita-de-otro-dia"
+          className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-[14px] text-amber-900 leading-snug"
+        >
+          <b className="font-semibold">{vista.dia.mensaje}</b> Puedes mirar la
+          historia y la exploración; lo de hoy se anota en la cita de hoy.
+        </div>
+      )}
+
       {!vista.consentimientos.puede && (
         <FaltaConsentimiento
           mensaje={vista.consentimientos.mensaje}
@@ -1300,7 +1324,11 @@ function SesionPodologiaDentro(props: {
               // clinica-4 · y sin los consentimientos que pide el
               // servicio tampoco se cierra (decisión 7). El motivo lo
               // dice la banda de arriba, no este botón.
-              !vista.consentimientos.puede
+              !vista.consentimientos.puede ||
+              // clinica-9 (4) · ni fuera del día de la cita. Igual que
+              // las dos de arriba: el botón se apaga y el motivo lo dice
+              // la banda, y quien GARANTIZA es `cerrarSesion`.
+              vista.dia?.sePuedeCerrar === false
             }
             className="h-touch-lg px-7 rounded-[18px] bg-mipiace-coral text-white font-medium text-[16px] disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.98] transition-transform motion-reduce:transform-none"
           >
@@ -1699,7 +1727,16 @@ function Cabecera(props: { vista: VistaDeLaSesion }) {
             {c.paciente.edad != null && (
               <Ficha titulo="Edad">{c.paciente.edad} años</Ficha>
             )}
-            <Ficha titulo="Cita de hoy">
+            {/* clinica-9 (4) · «Cita de hoy» sólo si lo es. Con la cita
+                de otro día la ficha dice QUÉ día, que es lo que la
+                pasada del 24-10 no tuvo delante. */}
+            <Ficha
+              titulo={
+                props.vista.dia && !props.vista.dia.esHoy
+                  ? `Cita del ${diaCorto(c.citaDeHoy.empieza)}`
+                  : "Cita de hoy"
+              }
+            >
               {hora(c.citaDeHoy.empieza)}
               {c.citaDeHoy.servicios.length > 0 &&
                 ` · ${c.citaDeHoy.servicios.join(" + ")}`}

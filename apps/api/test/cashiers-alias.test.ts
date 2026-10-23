@@ -97,6 +97,13 @@ const fakePrisma = {
       return u;
     }),
   },
+  // clinica-9 (5) · renombrar en Cajeros escribe también el «Nombre en
+  // la agenda» de quien tenga perfil de profesional. En este banco nadie
+  // lo tiene, así que el `updateMany` no toca nada; sin el método, el
+  // handler reventaba con un 500 y el rojo sería del fake.
+  staffProfile: {
+    updateMany: vi.fn(async () => ({ count: 0 })),
+  },
 } as const;
 
 vi.mock("../src/context.js", () => ({

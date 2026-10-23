@@ -76,6 +76,7 @@ import {
   serviciosDeSesionConTipo,
   tratamientosPorId,
 } from "./tratamientos.js";
+import { utcToWallDate, utcToWallTime } from "../agenda/time.js";
 import { tiposDeLosServicios } from "./tipos-de-visita.js";
 import { vistaDeLaValoracion } from "./valoracion.js";
 
@@ -106,6 +107,91 @@ export interface CitaDeLaSesion {
    *  profesional (no debería darse en una clínica, y no se inventa). */
   atiende: { userId: string; nombre: string } | null;
   ticketId: string | null;
+}
+
+// ── clinica-9 (4) · LA SESIÓN SE ABRE EL DÍA DE LA CITA ───────────────
+//
+// La pasada en hierro del 24-10 abrió desde la agenda la cita del LUNES
+// 26 y la pantalla dijo «Cita de hoy · 10:00», y al firmarla la sesión
+// quedó con fecha del sábado 24 (capturas 22 y 33). Una historia clínica
+// en la que la fecha de la visita no es el día en que se hizo no es un
+// detalle de pantalla: es el dato que sostiene todo lo demás.
+//
+// La regla, en una frase: **la sesión de una cita se escribe el día de
+// esa cita.** Fuera de ese día no se cierra — ni por la agenda, ni por la
+// URL, ni por un reintento tardío.
+//
+// Lo que SÍ se puede siempre es LEER: una sesión ya cerrada se abre
+// cualquier día desde la cita, que es lo que clinica-2 dejó escrito («una
+// cita completada sigue siendo el sitio desde el que se revisa lo que se
+// escribió ese día, y la historia no se cierra con la cita»). Por eso el
+// corte está en `cerrarSesion` y no en la carga de la vista: cerrar es
+// ESCRIBIR, y es lo único que la fecha puede estropear.
+//
+// El día es el de pared del centro (`utcToWallDate`), no el UTC: una cita
+// de las 00:30 de Madrid es del 26 aunque en UTC sea del 25.
+
+/** El día de pared del centro en el que cae esta cita. */
+export function diaDeLaCita(cita: { empieza: string }): string {
+  return utcToWallDate(new Date(cita.empieza));
+}
+
+/** ¿Hoy es el día de esta cita? `ahora` entra como dato para los tests. */
+export function esElDiaDeLaCita(
+  cita: { empieza: string },
+  ahora: Date = new Date(),
+): boolean {
+  return diaDeLaCita(cita) === utcToWallDate(ahora);
+}
+
+/**
+ * Hasta qué hora del día siguiente se puede cerrar la sesión de ayer.
+ *
+ * Porque la medianoche no cierra una consulta: una visita de las 21:30
+ * que se alarga se firma a las 00:10, y a esa hora la sanitaria tiene la
+ * sesión A MEDIO ESCRIBIR EN LA PANTALLA (no hay borrador: el estado vive
+ * en memoria hasta que se firma). Negarle el cierre ahí no protege
+ * ninguna fecha: tira el trabajo de la visita.
+ *
+ * Lo que la regla impide sigue impidiéndolo igual: la cita del lunes no
+ * se puede firmar el sábado, ni la del sábado el lunes. Seis horas no
+ * llegan nunca al día siguiente de trabajo.
+ *
+ * La FECHA DE LA VISITA sigue siendo la de la cita —está en la cita— y la
+ * de la firma es la de verdad, la de las 00:10. Las dos son ciertas.
+ */
+const HORA_LIMITE_DEL_DIA_SIGUIENTE = 6;
+
+/**
+ * ¿Se puede firmar HOY la sesión de esta cita?
+ *
+ * El día de la cita, y la madrugada siguiente hasta las 6. Ver
+ * `HORA_LIMITE_DEL_DIA_SIGUIENTE`.
+ */
+export function sePuedeCerrarLaSesion(
+  cita: { empieza: string },
+  ahora: Date = new Date(),
+): boolean {
+  if (esElDiaDeLaCita(cita, ahora)) return true;
+  // El día de pared de ayer, restando 24 h al instante y volviendo a
+  // preguntar la zona: así el cambio de hora no lo mueve.
+  const ayer = utcToWallDate(new Date(ahora.getTime() - 24 * 3600 * 1000));
+  if (diaDeLaCita(cita) !== ayer) return false;
+  const hora = Number(utcToWallTime(ahora).slice(0, 2));
+  return hora < HORA_LIMITE_DEL_DIA_SIGUIENTE;
+}
+
+/** «sábado, 24 de octubre», para decirlo en la pantalla. */
+export function diaEnPalabras(dia: string): string {
+  // `dia` es YYYY-MM-DD de pared; se lee al mediodía para que ningún
+  // desplazamiento de zona lo mueva de día.
+  const d = new Date(`${dia}T12:00:00.000Z`);
+  return new Intl.DateTimeFormat("es-ES", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(d);
 }
 
 /**
@@ -546,6 +632,21 @@ export interface VistaDeLaSesion {
    * garantiza.
    */
   consentimientos: PuertaDeConsentimientos;
+  /**
+   * clinica-9 (4) · EL DÍA. Viaja con la vista por lo mismo que la puerta
+   * de los consentimientos: para que la pantalla pueda decirlo con sus
+   * palabras y no enseñe un botón que el servidor va a rechazar. Quien
+   * garantiza sigue siendo `cerrarSesion`.
+   */
+  dia: {
+    /** «2026-10-26», el día de pared del centro en el que cae la cita. */
+    delaCita: string;
+    esHoy: boolean;
+    /** El día de la cita, o la madrugada siguiente. */
+    sePuedeCerrar: boolean;
+    /** Qué decir cuando no se puede. `null` cuando sí. */
+    mensaje: string | null;
+  };
   /** Los botones de tratamiento, del catálogo, cada uno con su TIPO DE
    *  VISITA y su nivel de quiropodia si lo es (clinica-5). Sin importes
    *  para quien no los ve — lo quita la serialización de la ruta. */
@@ -704,6 +805,7 @@ export async function vistaDeLaSesion(
     },
     puerta,
     consentimientos,
+    dia: diaDeLaVista(cita),
     tratamientos: catalogo,
     // En el orden de la lista de tipos y sin repetidos: una cita con
     // «Quiropodia» y «Cura» marca los dos, una vez cada uno.
@@ -734,6 +836,23 @@ export async function vistaDeLaSesion(
       versiones: versionesDeHoy(),
       fuenteDelRiesgo: FUENTE_DEL_RIESGO,
     },
+  };
+}
+
+/** El bloque `dia` de la vista, con la MISMA función que decide el
+ *  cierre: una pantalla que calculara el día por su cuenta sería un
+ *  segundo criterio, y el día que los dos no coincidan la sanitaria ve un
+ *  botón que la API rechaza. */
+function diaDeLaVista(cita: CitaDeLaSesion): VistaDeLaSesion["dia"] {
+  const dia = diaDeLaCita(cita);
+  const sePuedeCerrar = sePuedeCerrarLaSesion(cita);
+  return {
+    delaCita: dia,
+    esHoy: esElDiaDeLaCita(cita),
+    sePuedeCerrar,
+    mensaje: sePuedeCerrar
+      ? null
+      : `Esta cita es del ${diaEnPalabras(dia)}. La sesión se abre el día de la cita.`,
   };
 }
 
@@ -875,6 +994,9 @@ export type CierreDeSesion =
         // clinica-4 · la sesión no empieza si su servicio pide un
         // consentimiento que no está firmado y vigente (decisión 7).
         | "SIN_CONSENTIMIENTO"
+        // clinica-9 · la cita no es de hoy: la sesión se firma el día de
+        // la cita y no cualquier día (ver `esElDiaDeLaCita`).
+        | "FUERA_DEL_DIA"
         | "FALTA_DOLOR"
         | "SIN_TIPOS";
       mensaje: string;
@@ -959,6 +1081,23 @@ export async function cerrarSesion(
   },
 ): Promise<CierreDeSesion> {
   const { tenantId, cita } = input;
+
+  // 0 · clinica-9 (4) · ¿ES HOY? Lo primero, y antes de leer nada: lo que
+  // esta ruta escribe lleva la fecha de hoy dentro (`firma.firmadaEn`), y
+  // una sesión firmada el sábado contra la cita del lunes es una historia
+  // clínica con la fecha cambiada.
+  //
+  // Va antes que la valoración y los consentimientos a propósito: las dos
+  // puertas de arriba dicen «falta un trámite», y ésta dice «hoy no es el
+  // día». Contestar «falta el consentimiento» sobre una cita de la semana
+  // que viene mandaría a firmar algo que todavía no toca.
+  if (!sePuedeCerrarLaSesion(cita)) {
+    return {
+      ok: false,
+      motivo: "FUERA_DEL_DIA",
+      mensaje: `Esta cita es del ${diaEnPalabras(diaDeLaCita(cita))}. La sesión se abre el día de la cita.`,
+    };
+  }
 
   // 1 · LA PUERTA. Sin valoración validada no hay sesión.
   const puerta = await resolverPrimerTratamiento(prisma, {

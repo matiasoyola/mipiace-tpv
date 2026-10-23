@@ -1551,6 +1551,12 @@ export function AgendaPage({
               detail.clientId ? () => setSesionDe(detail.id) : undefined
             }
             sesionPorCobrar={(day?.sesionesPorCobrar ?? []).includes(detail.id)}
+            // clinica-9 (4) · ¿es HOY esta cita? La pasada del 24-10 abrió
+            // la del lunes 26 desde la agenda del sábado y la sesión se
+            // firmó con la fecha del sábado. El día sale de la MISMA
+            // función que pinta la agenda (`centerWallDate`), que es la
+            // zona de pared del centro.
+            citaEsDeHoy={centerWallDate(detail.start) === centerToday()}
             // clinica-8 · en una clínica se entra por la agenda y el orden
             // de la cita cambia: primero la sesión, después el cobro.
             clinicaEncendida={clinicaEncendida}
@@ -3047,6 +3053,19 @@ function DetailPanel(props: {
    *  dice nada de lo que se le hizo— así que la ve también la recepción. */
   sesionPorCobrar: boolean;
   /**
+   * clinica-9 (4) · ¿la cita es de hoy?
+   *
+   * La sesión de una cita se escribe el día de esa cita. Fuera de ese día
+   * el botón no dice «Sesión de hoy» —porque no lo es— y lleva a la misma
+   * pantalla en modo lectura: la historia y la exploración se miran
+   * cualquier día; lo que no se hace es firmar hoy la visita del lunes.
+   *
+   * Con la sesión YA CERRADA el botón sigue siendo el camino para leerla,
+   * y eso no cambia: clinica-2 dejó escrito que una cita pasada sigue
+   * siendo el sitio desde el que se revisa lo que se escribió ese día.
+   */
+  citaEsDeHoy: boolean;
+  /**
    * clinica-8 · ¿es un centro con historia clínica?
    *
    * Cambia el ORDEN de la cita, no lo que se puede hacer: «Sesión de hoy»
@@ -3164,14 +3183,29 @@ function DetailPanel(props: {
               onClick={props.onAbrirSesion}
               className={
                 "w-full min-h-touch rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 " +
-                (props.clinicaEncendida && !props.sesionPorCobrar
+                (props.clinicaEncendida &&
+                !props.sesionPorCobrar &&
+                props.citaEsDeHoy
                   ? "bg-mipiace-coral hover:bg-mipiace-coral-dark text-white"
                   : "bg-mipiace-coral-soft text-mipiace-coral-dark")
               }
             >
               <Footprints className="w-4 h-4" strokeWidth={2.25} />
-              Sesión de hoy
+              {/* clinica-9 (4) · y no dice «de hoy» si no es de hoy. */}
+              {props.citaEsDeHoy ? "Sesión de hoy" : "Ver la sesión"}
             </button>
+          )}
+          {/* clinica-9 (4) · POR QUÉ el botón no es el de siempre. Una
+              línea debajo y no un tooltip: lo que hay que entender es que
+              la visita de otro día se anota el día que se hace, no que el
+              botón esté «apagado». */}
+          {props.onAbrirSesion && !props.citaEsDeHoy && (
+            <p
+              data-test="sesion-fuera-del-dia"
+              className="text-[12.5px] text-slate-500 leading-snug"
+            >
+              La sesión se abre el día de la cita.
+            </p>
           )}
           {/* clinica-6 · LA HISTORIA, encima de la valoración: desde aquí
               se ve todo de un vistazo —incluida la valoración, que tiene

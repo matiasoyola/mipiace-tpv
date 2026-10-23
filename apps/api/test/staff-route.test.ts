@@ -25,6 +25,8 @@ interface FakeUser {
   role: "OWNER" | "MANAGER" | "CASHIER";
   deletedAt: Date | null;
   isTestCashier: boolean;
+  /** clinica-9 (6) · «Paciente (por enlace)», el actor de sistema. */
+  isSystemActor?: boolean;
 }
 interface FakeProfile {
   userId: string;
@@ -70,22 +72,65 @@ const fakePrisma: any = {
     findUnique: vi.fn(async () => ({ agendaEnabled })),
   },
   user: {
-    findFirst: vi.fn(async ({ where }: any) =>
-      userStore.find(
-        (u) =>
-          u.id === where.id &&
-          u.tenantId === where.tenantId &&
-          u.deletedAt === null &&
-          u.isTestCashier === false,
-      ) ?? null,
-    ),
+    // clinica-9 (5) · este `findFirst` lo usan DOS cosas: cargar el
+    // usuario del tenant (por `id`) y preguntar si otro ya se llama así
+    // (`otroConEseNombre`, por `alias`). El fake mira los dos, y mira
+    // `isSystemActor`: uno que lo ignorara saldría verde con el filtro
+    // quitado.
+    findFirst: vi.fn(async ({ where }: any) => {
+      const casa = (u: FakeUser) => {
+        if (where.id && u.id !== where.id) return false;
+        if (where.tenantId && u.tenantId !== where.tenantId) return false;
+        if (where.role?.in && !where.role.in.includes(u.role)) return false;
+        if (where.deletedAt === null && u.deletedAt !== null) return false;
+        if (where.isTestCashier === false && u.isTestCashier) return false;
+        if (where.isSystemActor === false && u.isSystemActor === true)
+          return false;
+        if (where.alias?.equals !== undefined) {
+          if (u.alias == null) return false;
+          const ins = where.alias.mode === "insensitive";
+          const a = ins ? u.alias.toLowerCase() : u.alias;
+          const b = ins
+            ? String(where.alias.equals).toLowerCase()
+            : String(where.alias.equals);
+          if (a !== b) return false;
+        }
+        for (const n of Array.isArray(where.NOT)
+          ? where.NOT
+          : where.NOT
+            ? [where.NOT]
+            : []) {
+          if (n.email?.endsWith && u.email.endsWith(n.email.endsWith))
+            return false;
+          if (n.id && u.id === n.id) return false;
+        }
+        return true;
+      };
+      // La carga por id no exige `deletedAt`/`isTestCashier` en el where
+      // real: los pone el handler. Se conserva el criterio de antes.
+      if (where.id) {
+        return (
+          userStore.find(
+            (u) =>
+              casa(u) && u.deletedAt === null && u.isTestCashier === false,
+          ) ?? null
+        );
+      }
+      return userStore.find(casa) ?? null;
+    }),
+    update: vi.fn(async ({ where, data }: any) => {
+      const u = userStore.find((x) => x.id === where.id)!;
+      if (data.alias !== undefined) u.alias = data.alias;
+      return { id: u.id, email: u.email, alias: u.alias, role: u.role };
+    }),
     findMany: vi.fn(async ({ where }: any) => {
       const rows = userStore.filter(
         (u) =>
           u.tenantId === where.tenantId &&
           where.role.in.includes(u.role) &&
           u.deletedAt === null &&
-          u.isTestCashier === false,
+          u.isTestCashier === false &&
+          (where.isSystemActor === false ? u.isSystemActor !== true : true),
       );
       return rows.map((u) => ({
         id: u.id,
@@ -123,6 +168,11 @@ const fakePrisma: any = {
     findFirst: vi.fn(async ({ where }: any) => {
       const p = profileStore.get(where.userId);
       return p && p.tenantId === where.tenantId ? p : null;
+    }),
+    findUniqueOrThrow: vi.fn(async ({ where }: any) => {
+      const p = profileStore.get(where.userId);
+      if (!p) throw new Error("no hay perfil");
+      return p;
     }),
     upsert: vi.fn(async ({ where, create, update }: any) => {
       const existing = profileStore.get(where.userId);
@@ -264,6 +314,7 @@ function seedUser(opts: Partial<FakeUser>): FakeUser {
     role: opts.role ?? "CASHIER",
     deletedAt: opts.deletedAt ?? null,
     isTestCashier: opts.isTestCashier ?? false,
+    isSystemActor: opts.isSystemActor ?? false,
   };
   userStore.push(row);
   return row;
@@ -624,6 +675,101 @@ describe("GET /staff/:userId/availability-template", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("RANGE_TOO_LARGE");
+    await app.close();
+  });
+});
+
+// ── clinica-9 (5) · UN SOLO NOMBRE, Y QUE LLEGUE A LA DUEÑA ─────────
+//
+// La pasada en hierro del 24-10 leyó `m.oyola+clinica-demo` en seis
+// superficies de la «Clínica demo» teniendo Personal un «Nombre en la
+// agenda» puesto: Rosario. Son dos columnas —`users.alias` y
+// `staff_profiles.display_name`— y no había puente, y la propietaria no
+// sale en Cajeros, que era la única pantalla que escribía el alias.
+//
+// Sabotaje: quita la llamada a `escribirElNombre` del PUT y caen los
+// tres primeros.
+describe("clinica-9 · guardar el nombre en Personal lo escribe también como alias", () => {
+  it("la dueña se pone «Rosario» y el TPV deja de pintar su email", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PUT",
+      url: `/staff/${OWNER_ID}`,
+      headers: auth,
+      payload: { displayName: "Rosario" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profile.displayName).toBe("Rosario");
+    // Y LA OTRA COLUMNA, que es la que leen las seis superficies.
+    expect(userStore.find((u) => u.id === OWNER_ID)!.alias).toBe("Rosario");
+    await app.close();
+  });
+
+  it("renombrar después vuelve a escribir las dos", async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: "PUT",
+      url: `/staff/${PRO_ID}`,
+      headers: auth,
+      payload: { displayName: "María" },
+    });
+    await app.inject({
+      method: "PUT",
+      url: `/staff/${PRO_ID}`,
+      headers: auth,
+      payload: { displayName: "María R." },
+    });
+    expect(userStore.find((u) => u.id === PRO_ID)!.alias).toBe("María R.");
+    await app.close();
+  });
+
+  it("dos personas con el MISMO nombre: 409 y no se guarda a medias", async () => {
+    // Dos «María» en el TPV es la recepcionista eligiendo a ciegas en la
+    // pantalla del PIN.
+    const otra = seedUser({ alias: "Rosario" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PUT",
+      url: `/staff/${PRO_ID}`,
+      headers: auth,
+      payload: { displayName: "rosario" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("ALIAS_TAKEN");
+    expect(userStore.find((u) => u.id === PRO_ID)!.alias).not.toBe("rosario");
+    expect(otra.alias).toBe("Rosario");
+    await app.close();
+  });
+
+  it("un nombre que son espacios no se guarda", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PUT",
+      url: `/staff/${PRO_ID}`,
+      headers: auth,
+      payload: { displayName: "   " },
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
+// ── clinica-9 (6) · EL ACTOR DE SISTEMA NO ES PERSONAL ──────────────
+//
+// `clinica/actor-paciente.ts` promete desde clinica-2 que «Paciente (por
+// enlace)» no sale en `GET /staff`. No lo filtraba nadie, y la pasada
+// del 24-10 lo encontró en la pantalla de Personal.
+//
+// Sabotaje: quita `isSystemActor: false` del `where` de `GET /staff`.
+describe("clinica-9 · «Paciente (por enlace)» no sale en Personal", () => {
+  it("la lista no lo trae", async () => {
+    seedUser({ alias: "Paciente (por enlace)", isSystemActor: true });
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/staff", headers: auth });
+    const body = res.json();
+    expect(JSON.stringify(body)).not.toContain("Paciente (por enlace)");
+    // Y los de verdad siguen estando: el filtro no se lleva a nadie más.
+    expect(body.staff.length).toBeGreaterThanOrEqual(2);
     await app.close();
   });
 });
