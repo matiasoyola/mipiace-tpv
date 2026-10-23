@@ -725,6 +725,142 @@ describe.skipIf(!e2eEnabled)("e2e · kds-1 · la cocina, contra Postgres", () =>
       expect(aviso.tableName).toBe("M5");
     });
 
+    // ── n1-hosteleria-2 · hallazgo 9 · LA COMPATIBILIDAD HACIA ATRÁS ──
+    //
+    // El bloque añade `lines` a esta ruta para que el aviso pueda abrir
+    // una hoja con lo que hay que recoger. Y la API se despliega para
+    // TODOS: el AP12 de Sole y el D8 de Sirope llevan **versiones
+    // viejas** del front, que no saben nada de `lines`.
+    //
+    // Así que hay que demostrar dos cosas, no afirmarlas:
+    //
+    //   1. que el cambio es **sólo aditivo**: ninguna clave vieja
+    //      desaparece ni cambia de nombre ni de significado;
+    //   2. que un cliente **1.27.0 / 1.28.x** contra la API nueva sigue
+    //      funcionando **igual**.
+    //
+    // Las filas de la tabla de sabotajes:
+    //   | Se renombra una clave vieja de /kitchen/listas | el cliente viejo la pierde
+    //   | Se quita una clave vieja                        | el cliente viejo la pierde
+    //   | El cliente viejo depende de `lines`             | no puede: no la lee
+
+    /** Las SIETE claves que la ruta devolvía antes de este bloque. */
+    const CLAVES_DE_ANTES = [
+      "orderId",
+      "ticketId",
+      "tableId",
+      "tableName",
+      "section",
+      "number",
+      "readyAt",
+    ] as const;
+
+    /**
+     * El cliente VIEJO, tal cual: `useAvisosListo` de 1.27.0 / 1.28.x
+     * construía su `ComandaLista` con estas siete claves y nada más.
+     * Lo que no conoce, ni lo mira.
+     */
+    const comoLoLeeUnFrontViejo = (r: Record<string, unknown>) => ({
+      orderId: r.orderId,
+      ticketId: r.ticketId,
+      tableId: r.tableId,
+      tableName: r.tableName,
+      section: r.section,
+      number: r.number,
+      readyAt: r.readyAt,
+    });
+
+    const avisoDeLaLista = async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/kitchen/listas",
+        headers: { authorization: `Bearer ${sesionCajero()}` },
+      });
+      expect(res.statusCode).toBe(200);
+      return res
+        .json()
+        .ready.find((r: { orderId: string }) => r.orderId === orderId) as Record<
+        string,
+        unknown
+      >;
+    };
+
+    it("ADITIVO · están las siete claves de antes, y la nueva es `lines`", async () => {
+      const aviso = await avisoDeLaLista();
+      // Ninguna de las de antes falta.
+      for (const k of CLAVES_DE_ANTES) {
+        expect(Object.keys(aviso)).toContain(k);
+        expect(aviso[k]).not.toBeUndefined();
+      }
+      // Y lo ÚNICO que se ha añadido es `lines`. Si alguien mete otro
+      // campo sin pensarlo, este banco lo dice: un campo nuevo en una
+      // ruta que consumen terminales viejos se mira dos veces.
+      const nuevas = Object.keys(aviso).filter(
+        (k) => !CLAVES_DE_ANTES.includes(k as (typeof CLAVES_DE_ANTES)[number]),
+      );
+      expect(nuevas).toEqual(["lines"]);
+    });
+
+    it("ADITIVO · las claves de antes significan lo mismo que antes", async () => {
+      const aviso = await avisoDeLaLista();
+      expect(aviso.orderId).toBe(orderId);
+      expect(aviso.ticketId).toBe(ticketId);
+      expect(aviso.tableName).toBe("M5");
+      expect(typeof aviso.section).toBe("string");
+      expect(typeof aviso.number).toBe("number");
+      // `readyAt` sigue siendo un ISO que `Date.parse` entiende: de eso
+      // depende el ORDEN de la banda en el front viejo.
+      expect(typeof aviso.readyAt).toBe("string");
+      expect(Number.isFinite(Date.parse(String(aviso.readyAt)))).toBe(true);
+    });
+
+    it("UN FRONT VIEJO (1.27.0 / 1.28.x) lee lo mismo con la API nueva", async () => {
+      const aviso = await avisoDeLaLista();
+      const leido = comoLoLeeUnFrontViejo(aviso);
+      // Nada de lo que el front viejo lee sale `undefined`.
+      for (const [k, valor] of Object.entries(leido)) {
+        expect(valor, `el front viejo se queda sin ${k}`).not.toBeUndefined();
+      }
+      // Y lo que construye es EXACTAMENTE lo que construiría con la
+      // respuesta de antes: quitarle `lines` no le cambia nada.
+      const sinLines = { ...aviso };
+      delete sinLines.lines;
+      expect(comoLoLeeUnFrontViejo(sinLines)).toEqual(leido);
+    });
+
+    it("SABOTAJE · renombrar o quitar una clave vieja rompe al front viejo", async () => {
+      const aviso = await avisoDeLaLista();
+      // Lo que pasaría si alguien renombrara `tableName` a `mesa`.
+      const renombrada: Record<string, unknown> = { ...aviso, mesa: aviso.tableName };
+      delete renombrada.tableName;
+      expect(comoLoLeeUnFrontViejo(renombrada).tableName).toBeUndefined();
+      // O si quitara `number`, que es el número de comanda del papel.
+      const sinNumero: Record<string, unknown> = { ...aviso };
+      delete sinNumero.number;
+      expect(comoLoLeeUnFrontViejo(sinNumero).number).toBeUndefined();
+      // Y lo que NO pasa hoy: con la respuesta de verdad, ninguna falta.
+      expect(
+        Object.values(comoLoLeeUnFrontViejo(aviso)).some((v) => v === undefined),
+      ).toBe(false);
+    });
+
+    it("`lines` trae lo que la hoja necesita, y sin lo anulado", async () => {
+      const aviso = await avisoDeLaLista();
+      const lines = aviso.lines as Array<Record<string, unknown>>;
+      expect(Array.isArray(lines)).toBe(true);
+      expect(lines.length).toBeGreaterThan(0);
+      for (const l of lines) {
+        expect(Object.keys(l).sort()).toEqual(
+          ["allergens", "id", "name", "units"].sort(),
+        );
+        // Unidades que QUEDAN: lo anulado no está en el pase.
+        expect(Number(l.units)).toBeGreaterThan(0);
+        expect(typeof l.name).toBe("string");
+        expect(String(l.name).length).toBeGreaterThan(0);
+        expect(Array.isArray(l.allergens)).toBe(true);
+      }
+    });
+
     it("«Servido» la saca de la lista y deja la marca de tiempo", async () => {
       const res = await app.inject({
         method: "POST",
