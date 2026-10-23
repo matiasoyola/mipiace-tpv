@@ -881,7 +881,7 @@ Hecha ya con el N1 en **puerto fijo 5555** y «Pantalla siempre encendida».
 | cobro en efectivo | 19,40 €, «Pagado · cuadra», vuelve **solo** al mapa y T2 queda **POR RECOGER** | 🟢 |
 | mesa POR RECOGER | lado 88, tinta `rgb(22,32,42)` sobre `rgb(157,180,200)`, nombre 20 px y **«Por recoger» a 15 px**, SIN los minutos | 🟢 (7) |
 | hoja de opciones | **x=0, ancho 360 = todo el ancho**, título 19, cuerpo 15, **tres botones de 56 px**, orden **«Dejar libre» → «Abrir cuenta nueva» → «Volver»**; el atrás la cierra **sin decidir** | 🟢 (8) |
-| envío a cocina | la comanda sale del N1 y **NO llega al AP11** | 🔴 ver abajo |
+| envío a cocina | **la comanda SÍ llega**: «T2 · 2ª COMANDA» con los cinco cafés en el AP11 | 🟢 ver §9.2-sexies |
 | hallazgo 9 en el hierro | **no se pudo probar**: hace falta un aviso «listo», y para eso la comanda tiene que llegar | ⬜ |
 
 Capturas en `docs/qa/2026-10-23-n1-hosteleria-2/`.
@@ -909,25 +909,73 @@ tiene algo ya en cocina**, así que 2 es la cifra honesta, y refuerza lo que dic
 el §2.8: el criterio de las seis no se cumple y no se puede cumplir sin tocar
 una de las dos piezas intocables.
 
-#### El 🔴 de cocina: la comanda sale y no llega
+#### §9.2-sexies · «La comanda no llega» · **era mi propio depurador**
 
-Es el mismo corte que la pasada del 23-10 (§9.2-ter de `n1-hosteleria-done`), y
-esta vez con mejores datos. Los tres hechos, que no cuadran entre sí:
+Lo di por un corte de cocina y **me equivoqué**. Matías lo paró a tiempo: a las
+12:36 del 23-10, con la 1.28.1 en el N1 y el mismo AP11, la comanda llegó en
+7 s; con la 1.29.1 no. Hasta demostrar lo contrario, eso es una regresión de este
+bloque. No lo era, y ésta es la prueba.
 
-| | qué dice |
-|---|---|
-| `GET /kitchen/estado` | la pantalla del AP11 está **`alive: true`**, secciones `[COCINA, BARRA]` |
-| el TPV del N1 | **«Cocina no recibe · al enviar saldrá en papel»**, antes y después de enviar |
-| el KDS del AP11 | **«Sin comandas pendientes»**, `LISTAS · 0`, dos capturas idénticas byte a byte |
+**1 · La comanda SÍ llegó.** En el AP11 está la tarjeta **«T2 · 2ª COMANDA»** con
+los cinco cafés exactos del envío —Americano, Bombón, Solo, con leche, cortado—
+y su botón «Lista». Captura `33-ap11-comanda-visible.png`. No hubo fallo de
+entrega: hubo fallo de observación.
 
-O sea: el servidor cree que la pantalla está viva, el TPV cree que no recibe, y
-la pantalla no enseña nada. **No es de este bloque** —no se ha tocado nada del
-envío— pero bloquea el último paso del guion y, con él, la prueba del hallazgo 9
-en el aparato: sin comanda que llegue no hay nada que cocina pueda marcar
-«Lista», y sin eso no hay aviso que tocar.
+**2 · Lo que hice mal, en dos pasos.** Primero capturé el AP11 **seis segundos**
+después de enviar y leí «Sin comandas pendientes» como «no ha llegado», cuando
+el KDS aún no había refrescado. Y luego lo rematé: enganché Playwright por CDP
+al WebView del AP11, el `connectOverCDP` **agotó los 30 s** y dejó un depurador
+a medio enganchar que **congeló el renderer**. La segunda captura salió idéntica
+byte a byte, y la leí como confirmación. Era la misma pantalla helada.
 
-Queda como lo más urgente de lo que sale de esta pasada, por delante del propio
-hallazgo 1: **una comanda que sale y no llega es una mesa sin servir.**
+Al soltar el reenvío (`adb forward --remove-all`) la pantalla pintó **un
+fotograma** y ahí apareció la comanda.
+
+**3 · El AP11 está degradado, y de antes.** Su reloj marcaba **00:18 con 00:34 en
+la pared**, y tras descongelarse se quedó en **00:31 con 00:38**: pinta cuando se
+le toca y se vuelve a parar. El latido murió a las **22:24:56Z** con una ventana
+de 90 s y no ha vuelto. Y arrastra tarjetas de hace **cinco días** (una de
+7179 min, visible en `00-ap11-kds.png`). Lleva la **1.27.0** del 18-10. Es de la
+familia del [[el-renderer-del-webview-es-un-proceso-aislado]], no del envío.
+
+**4 · Y este bloque no puede ser la causa, por construcción.** Dos hechos de
+`git`, no de opinión:
+
+```
+git diff --stat 0bb7d9f..HEAD -- apps/tpv-web/src/kitchen     apps/tpv-web/src/lib/kitchenComanda.ts apps/tpv-web/src/lib/outbox.ts     apps/tpv-web/src/api.ts apps/tpv-web/src/lib/escposPrint.ts
+  → sólo HojaDeListo.tsx y ListoBanner.tsx, que PINTAN avisos y no envían nada
+```
+
+`useKitchen` —quien manda la comanda y quien calcula «Cocina no recibe»—,
+`useCaminoDirecto` —la wifi—, `kitchenComanda`, `outbox`, `api.ts` y
+`escposPrint` son **idénticos byte a byte** entre la APK que funcionaba
+(1.28.1, `0bb7d9f`) y la 1.29.1. De `SalePage.tsx` sólo cambia un `onServidas`
+aditivo.
+
+Y el único cambio de API del bloque **no está desplegado**:
+
+```
+git ls-remote --heads origin n1-hosteleria-2   → vacío
+git branch -r --contains HEAD                  → 0 ramas
+```
+
+La rama nunca se ha empujado, así que `api.mipiacetpv.com` no puede estar
+corriendo mi `/kitchen/listas`. Producción va por `master`.
+
+**Conclusión: no es una regresión de este bloque, y no hay nada que arreglar
+aquí.** Lo que sí queda, y es de hierro:
+
+> **Pendiente · el KDS del AP11 está congelado.** Pinta cuando se le toca y se
+> para; no late desde las 22:24:56Z; arrastra tarjetas de cinco días. Hace falta
+> recargarlo o reiniciar el aparato —y mirar por qué se queda así, que es lo que
+> hizo que la pasada del 23-10 también se cortara aquí (§9.2-ter de
+> `n1-hosteleria-done`)—. **No lo toco yo**: es hardware de producción.
+
+**Y la lección de método, que vale más que el hallazgo:** enganchar el CDP a un
+aparato **lo cambia**. Un depurador a medio enganchar congela el renderer y deja
+una pantalla que parece estar diciendo algo cuando no dice nada. Para observar un
+KDS, `screencap` y esperar su ciclo de refresco; el CDP, sólo en el aparato que
+se conduce, y nunca en el que se observa.
 
 #### Y un fallo de texto que sólo sale en la hoja del hallazgo 8
 
