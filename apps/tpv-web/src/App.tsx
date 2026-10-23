@@ -745,14 +745,15 @@ export function TpvHome(props: {
     moduloEncendido: props.kitchenDisplayEnabled === true,
     camino,
   });
-  const comandaListaPorMesa = new Map<string, string>();
-  for (const l of avisosListo.listas) {
-    // La más ANTIGUA de cada mesa, que es la primera de la lista (viene
-    // ordenada por `readyAt` ascendente): tocar la etiqueta sirve lo que
-    // lleva más tiempo en el pase.
-    if (l.tableId && !comandaListaPorMesa.has(l.tableId)) {
-      comandaListaPorMesa.set(l.tableId, l.orderId);
-    }
+  // hierro-sirope (D) · TOCAR LA ETIQUETA VERDE SIRVE LA MESA ENTERA.
+  //
+  // Antes servía sólo la comanda más antigua de esa mesa, así que con
+  // cocina y barra listas había que tocar dos veces y entre toque y toque
+  // la mesa seguía diciendo LISTO. El camarero fue UNA vez y recogió lo
+  // que había: la etiqueta hace lo mismo que la banda.
+  const comandaListaPorMesa = new Map<string, string[]>();
+  for (const g of avisosListo.agrupados) {
+    if (g.tableId) comandaListaPorMesa.set(g.tableId, g.orderIds);
   }
   const [hasTables, setHasTables] = useState<boolean | null>(
     skipTables ? false : null,
@@ -979,7 +980,7 @@ export function TpvHome(props: {
         pickError={openTableError}
         mesasListas={avisosListo.mesasListas}
         comandaListaPorMesa={comandaListaPorMesa}
-        onServido={(orderId) => void avisosListo.marcarServido(orderId)}
+        onServido={(orderIds) => void avisosListo.marcarServido(orderIds)}
         onLogoutCashier={props.onLogoutCashier}
         onCloseShift={props.onCloseShift}
       />
@@ -1044,8 +1045,8 @@ export function TpvHome(props: {
         kitchenSettings={props.kitchenSettings ?? null}
         // La banda «M4 · listo para servir» de TODA la tienda, no sólo de
         // la mesa abierta: se entera cualquier camarero (decisión 5).
-        avisosListo={avisosListo.listas}
-        onServido={(orderId) => void avisosListo.marcarServido(orderId)}
+        avisosListo={avisosListo.agrupados}
+        onServido={(orderIds) => void avisosListo.marcarServido(orderIds)}
         appointmentContext={view.appointmentContext ?? null}
         // Salir del cobro de una cita devuelve a la agenda, que es de
         // donde se vino. En SERVICES no hay mapa al que caer.

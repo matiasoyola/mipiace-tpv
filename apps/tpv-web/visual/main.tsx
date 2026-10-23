@@ -63,7 +63,7 @@
 //     "Fiado" en el cobro) y `?fiado=1` enciende la venta a crédito, que
 //     nace apagada y hace falta para ver que el botón desaparece.
 
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "../src/index.css";
@@ -71,6 +71,7 @@ import "../src/index.css";
 import type { CartLine, CartTotals } from "../src/lib/cart.js";
 import type { ApiTable } from "../src/pages/TableMapScreen.js";
 import type { AppointmentContext } from "../src/pages/SalePage.js";
+import { agruparAvisos } from "../src/kitchen/tpv/agruparAvisos.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────
 
@@ -1180,11 +1181,104 @@ const VISTA_COCINA = {
   sections: ["COCINA", "BARRA"],
   orders: [
     comandaDeCocina("o1", "COCINA", "T6", "Tostada con tomate", 4),
-    comandaDeCocina("o2", "BARRA", "Mostrador nº 3", "Café con leche", 1),
+    // hierro-sirope (E) · el caso de la captura 11: el título más largo
+    // que la pantalla puede recibir, en una tarjeta de cuatro columnas.
+    comandaDeCocina("o2", "BARRA", "Mostrador nº 1", "Café con leche", 1),
     comandaDeCocina("o3", "COCINA", "T3", "Croissant a la plancha", 13),
   ],
-  ready: [],
+  // hierro-sirope (D, E) · la columna «Listas» con el caso que falló:
+  // «Mostrador nº 1» en 160 px, y la MISMA mesa en las dos secciones.
+  ready: [
+    { ...comandaDeCocina("r1", "BARRA", "Mostrador nº 1", "Café Americano", 3), readyAt: KDS_AHORA },
+    { ...comandaDeCocina("r2", "COCINA", "M3", "Croissant Mixto", 5), readyAt: KDS_AHORA },
+    { ...comandaDeCocina("r3", "BARRA", "M3", "Café Americano", 6), readyAt: KDS_AHORA },
+  ],
 };
+
+/**
+ * hierro-sirope (D) · lo que el TPV tiene listo, para la pila de bandas.
+ *
+ * `?bandas=N` monta N mesas listas. Con 1 sale el texto de siempre, con 2
+ * salen las dos enteras y a partir de 3 la pila se pliega: es lo que hay
+ * que medir a 1442 × 811 (el ticket y sus botones, siempre visibles).
+ *
+ * La primera mesa lleva SIEMPRE cocina y barra, que es el caso de la
+ * captura 25 —dos bandas idénticas— y el que tiene que salir en una.
+ */
+function listasDelBanco(): { ready: unknown[]; pending: unknown[] } {
+  const cuantas = Number(benchParam("bandas") ?? "0");
+  if (!Number.isFinite(cuantas) || cuantas <= 0) {
+    return { ready: [], pending: [] };
+  }
+  const ready: unknown[] = [
+    {
+      orderId: "lista-m3-cocina",
+      ticketId: "tk-m1",
+      tableId: "t3",
+      tableName: "M1",
+      section: "COCINA",
+      number: 1,
+      readyAt: new Date(Date.parse(KDS_AHORA) - 6 * 60_000).toISOString(),
+    },
+    {
+      orderId: "lista-m3-barra",
+      ticketId: "tk-m1",
+      tableId: "t3",
+      tableName: "M1",
+      section: "BARRA",
+      number: 1,
+      readyAt: new Date(Date.parse(KDS_AHORA) - 5 * 60_000).toISOString(),
+    },
+  ];
+  for (let i = 2; i <= cuantas; i += 1) {
+    ready.push({
+      orderId: `lista-${i}`,
+      ticketId: `tk-${i}`,
+      tableId: `mesa-${i}`,
+      tableName: `T${i}`,
+      section: "COCINA",
+      number: i,
+      readyAt: new Date(Date.parse(KDS_AHORA) - (6 - i) * 60_000).toISOString(),
+    });
+  }
+  // Y una mesa a medias: la barra lista y la cocina todavía en marcha.
+  const pending =
+    benchParam("en-marcha") === "1"
+      ? [{ orderId: "p1", ticketId: "tk-m1", tableId: "t3", section: "SALON" }]
+      : [];
+  return { ready, pending };
+}
+
+/**
+ * hierro-sirope (D) · las bandas ya agrupadas, como las baja `TpvHome`.
+ */
+function bandasDelBanco() {
+  const { ready, pending } = listasDelBanco();
+  return agruparAvisos(ready as never, pending as never);
+}
+
+/**
+ * hierro-sirope (H1) · EL FONDO DEL QUE HEREDAN ESTAS PANTALLAS.
+ *
+ * El histórico y la devolución se abren DESDE la pantalla de venta de
+ * hostelería, que es oscura y fija `color: #F1F3F5` (`DARK_TEXT`) en su
+ * contenedor. Sus hojas son blancas pero no se ponen color propio, así
+ * que lo heredan: por eso en el D8 los importes de línea salían en
+ * blanco roto sobre blanco (captura 31) y el «0» del casillero de la
+ * devolución no se veía (captura 32). Medido en el PNG de la pasada: el
+ * píxel más oscuro de «1,50 €» es exactamente (241, 243, 245).
+ *
+ * Montarlas sueltas en el banco las pinta sobre el `color` del `body`
+ * (#1f2937) y el fallo NO se reproduce. Este envoltorio devuelve la
+ * herencia real.
+ */
+function EnLaSalaOscura({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ background: "#0E1013", color: "#F1F3F5", minHeight: "100vh" }}>
+      {children}
+    </div>
+  );
+}
 
 /** ¿La venta del banco lleva el módulo «Cocina» encendido? */
 function conCocina(): boolean {
@@ -1213,6 +1307,76 @@ function estadoCocinaDelBanco(lineas: Array<Record<string, unknown>>) {
       COCINA: { screen: true, printer: false, canCorrectSent: true },
       SALON: { screen: false, printer: false, canCorrectSent: false },
     },
+  };
+}
+
+/**
+ * hierro-sirope (G, H1) · el histórico del 18-10: la Caja 2 empezando en
+ * #000001 mientras la Caja 1 va por el #000028, en la misma lista
+ * (captura 30). Y con las líneas dentro, que es donde los importes se
+ * volvían invisibles (captura 31).
+ */
+function ticketsDelBanco() {
+  const linea = (id: string, nombre: string, total: number) => ({
+    id,
+    productId: null,
+    variantId: null,
+    holdedProductId: null,
+    sku: "X",
+    nameSnapshot: nombre,
+    units: 1,
+    unitPrice: total,
+    taxRate: 10,
+    discount: 0,
+    subtotal: total,
+    total,
+    modifiers: [],
+    exemptionCause: null,
+  });
+  const ticket = (
+    id: string,
+    numero: string,
+    caja: { id: string; name: string; cajaEtiqueta: string },
+    total: number,
+  ) => ({
+    id,
+    internalNumber: numero,
+    externalId: id,
+    status: "TEST",
+    creditPending: null,
+    total,
+    totalTax: 0,
+    totalDiscount: 0,
+    holdedDocumentId: null,
+    holdedDocNumber: null,
+    contactHoldedId: null,
+    emailIntent: null,
+    email: null,
+    attendedBy: null,
+    notes: null,
+    createdAt: KDS_AHORA,
+    paidAt: KDS_AHORA,
+    syncedAt: null,
+    syncError: null,
+    register: { ...caja, storeName: "Cafetería Sirope" },
+    lines: [linea(`${id}-a`, "Café Americano", 1.5), linea(`${id}-b`, "Croissant Mixto", 3)],
+    payments: [{ id: `${id}-p`, method: "CARD", amount: total }],
+    refunds: [],
+    partialPayments: [],
+  });
+  const C2 = { id: "reg-2", name: "Caja 2", cajaEtiqueta: "C2" };
+  const C1 = { id: "reg-1", name: "Caja 1", cajaEtiqueta: "C1" };
+  return {
+    items: [
+      ticket("tk-2", "000002", C2, 4.5),
+      ticket("tk-1", "000001", C2, 1.5),
+      ticket("tk-28", "000028", C1, 2.5),
+      ticket("tk-27", "000027", C1, 1.5),
+    ],
+    nextCursor: null,
+    // `?una-caja=1` apaga el prefijo: es el 95 % de los comercios y tiene
+    // que salir exactamente igual que antes del bloque.
+    multiCaja: benchParam("una-caja") !== "1",
   };
 }
 
@@ -1302,7 +1466,7 @@ function stubFetch(): void {
         },
       ],
     },
-    "/kitchen/listas": { ready: [] },
+    "/kitchen/listas": listasDelBanco(),
     "/tpv/catalog/wildcards": { items: [] },
     "/tpv/catalog/modifier-groups": { groups: [] },
     "/tickets": {
@@ -1608,6 +1772,15 @@ function stubFetch(): void {
     // de rutas peladas.
     // auditoria-sirope · el estado de cocina de la mesa del banco. Va
     // aquí y no en `routes` porque el id del ticket viaja en la ruta.
+    // hierro-sirope (G, H1) · el histórico. Va aquí y no en `routes`
+    // porque `/tickets` ya está ocupado por el POST del cobro: lo que
+    // distingue a los dos es el MÉTODO.
+    if (path === "/tickets" && (init?.method ?? "GET") === "GET") {
+      return new Response(JSON.stringify(ticketsDelBanco()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (/^\/tickets\/[^/]+\/kitchen$/.test(path)) {
       return new Response(JSON.stringify(estadoCocinaDelBanco(draftLines)), {
         status: 200,
@@ -1718,6 +1891,9 @@ function Bench() {
     AgendaSkillMatrix: typeof import("../src/pages/AgendaSkillMatrix.js")["AgendaSkillMatrix"];
     ClientsPage: typeof import("../src/pages/ClientsPage.js")["ClientsPage"];
     KitchenScreen: typeof import("../src/kitchen/KitchenScreen.js")["KitchenScreen"];
+    TicketsHistoryPage: typeof import("../src/pages/TicketsHistoryPage.js")["TicketsHistoryPage"];
+    TicketDetailDrawer: typeof import("../src/pages/TicketsHistoryPage.js")["TicketDetailDrawer"];
+    RefundOverlay: typeof import("../src/pages/RefundPage.js")["RefundOverlay"];
   }>(null);
 
   useEffect(() => {
@@ -1735,6 +1911,8 @@ function Bench() {
         matriz,
         clientes,
         cocina,
+        tickets,
+        devolucion,
       ] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
         import("../src/pages/CheckoutPage.successOverlay.js"),
@@ -1748,6 +1926,10 @@ function Bench() {
         import("../src/pages/AgendaSkillMatrix.js"),
         import("../src/pages/ClientsPage.js"),
         import("../src/kitchen/KitchenScreen.js"),
+        // hierro-sirope (G, H1) · el histórico y su ficha: el prefijo de
+        // caja y los importes de línea que en el D8 no se veían.
+        import("../src/pages/TicketsHistoryPage.js"),
+        import("../src/pages/RefundPage.js"),
       ]);
       // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
       // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
@@ -1776,6 +1958,9 @@ function Bench() {
         AgendaSkillMatrix: matriz.AgendaSkillMatrix,
         ClientsPage: clientes.ClientsPage,
         KitchenScreen: cocina.KitchenScreen,
+        TicketsHistoryPage: tickets.TicketsHistoryPage,
+        TicketDetailDrawer: tickets.TicketDetailDrawer,
+        RefundOverlay: devolucion.RefundOverlay,
       });
     })();
   }, []);
@@ -1902,6 +2087,12 @@ function Bench() {
                 amberMaxMin: 20,
                 readyBeep: false,
               },
+              // hierro-sirope (D) · las bandas las baja `TpvHome` en la
+              // app de verdad; aquí se arman con la MISMA función
+              // (`agruparAvisos`) para que lo que se mide sea lo que se
+              // pinta y no una maqueta parecida.
+              avisosListo: bandasDelBanco(),
+              onServido: () => {},
             }
           : {})}
       />
@@ -1963,6 +2154,41 @@ function Bench() {
           settings: { greenMaxMin: 10, amberMaxMin: 20, readyBeep: false },
         }}
       />
+    );
+  }
+
+  // ── hierro-sirope (G, H1) · el histórico y su ficha ───────────────
+  if (screen === "hierro-tickets") {
+    return <Screens.TicketsHistoryPage onClose={() => {}} />;
+  }
+
+  if (screen === "hierro-ticket-detalle") {
+    const t = ticketsDelBanco();
+    return (
+      <EnLaSalaOscura>
+        <Screens.TicketDetailDrawer
+          ticket={t.items[1] as never}
+          multiCaja={t.multiCaja}
+          businessType="HOSPITALITY"
+          onClose={() => {}}
+          onRefund={() => {}}
+          onChanged={() => {}}
+        />
+      </EnLaSalaOscura>
+    );
+  }
+
+  // hierro-sirope (H1) · el casillero de la devolución (captura 32).
+  if (screen === "hierro-devolucion") {
+    const t = ticketsDelBanco();
+    return (
+      <EnLaSalaOscura>
+        <Screens.RefundOverlay
+          ticket={t.items[1] as never}
+          onClose={() => {}}
+          onConfirmed={() => {}}
+        />
+      </EnLaSalaOscura>
     );
   }
 

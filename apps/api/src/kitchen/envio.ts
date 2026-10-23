@@ -103,6 +103,7 @@ import {
 } from "./destinos.js";
 import { emitirComandaCreada } from "./eventos.js";
 import { aplicarMarcasPendientes } from "./lan.js";
+import { avisarComandasServidas } from "./servir.js";
 
 export interface EnvioCtx {
   tenantId: string;
@@ -657,7 +658,11 @@ export async function enviarComanda(
   // vuelve a intentar en la siguiente subida de la tablet.
   if (clientSendId && paraEmitir.length > 0) {
     try {
-      await aplicarMarcasPendientes(clientSendId, prisma);
+      const pendientes = await aplicarMarcasPendientes(clientSendId, prisma);
+      // hierro-sirope (A) · si alguna de esas marcas era un «Lista» sobre
+      // un ticket ya muerto, se sirvió sola y hay que apagarla en el mapa
+      // y en las bandas.
+      avisarComandasServidas(pendientes.servidas, new Date());
     } catch (err) {
       // El envío ya está hecho y no se puede tumbar por esto; la marca
       // espera a la siguiente subida de la tablet. Pero se DICE: un

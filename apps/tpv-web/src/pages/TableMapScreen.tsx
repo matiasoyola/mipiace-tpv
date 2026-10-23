@@ -57,6 +57,7 @@ import { apiWithCashier, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
 import { useElapsedTime, useElapsedMinutes } from "../hooks/useElapsedTime.js";
 import { avisarAjustesCambiados } from "../hooks/useDeviceBootstrap.js";
+import { avisarCambioEnCocina } from "../kitchen/tpv/avisoCocina.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import {
   getCachedBusinessType,
@@ -234,9 +235,9 @@ export interface TableMapScreenProps {
    * TPV. Un toque en la etiqueta marca «Servido», igual que la banda.
    */
   mesasListas?: Set<string>;
-  onServido?: (orderId: string) => void;
+  onServido?: (orderIds: string[]) => void;
   /** `tableId → orderId` de la comanda más antigua lista de esa mesa. */
-  comandaListaPorMesa?: Map<string, string>;
+  comandaListaPorMesa?: Map<string, string[]>;
 }
 
 // v1.9.3-mapa-visual · estado del cobro directo desde tarjeta: mesa +
@@ -362,6 +363,11 @@ export function TableMapScreen(props: TableMapScreenProps) {
       avisarAjustesCambiados();
       return;
     }
+    // hierro-sirope (H4) · la etiqueta LISTO de la mesa sale de
+    // `useAvisosListo`, que vive en `TpvHome`: recargar el mapa no la
+    // apaga. Por eso tras cobrar la M3 el LISTO seguía puesto 30 s
+    // (capturas 27→29).
+    if (ev.type.startsWith("kitchen.")) avisarCambioEnCocina();
     void load();
   });
   useEffect(() => {
@@ -496,8 +502,10 @@ export function TableMapScreen(props: TableMapScreenProps) {
         amountFontPx={reparto.amountFontPx}
         onRecogida={setPorRecoger}
         onServido={() => {
-          const orderId = props.comandaListaPorMesa?.get(t.id);
-          if (orderId && props.onServido) props.onServido(orderId);
+          // hierro-sirope (D) · la mesa entera, no la comanda más
+          // antigua: un viaje, un toque.
+          const orderIds = props.comandaListaPorMesa?.get(t.id);
+          if (orderIds?.length && props.onServido) props.onServido(orderIds);
         }}
         onPick={props.onPickTable}
         onCobrar={openCobro}

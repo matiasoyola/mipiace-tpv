@@ -19,7 +19,8 @@
     "alergenos:maestranza": "tsx src/scripts/importar-alergenos-maestranza.ts",
     "clinica:cifrar": "tsx src/scripts/cifrar-lo-existente.ts",
     "barrer-huerfanos": "tsx src/scripts/barrer-huerfanos.ts",
-    "clinica:rotar-kek": "tsx src/scripts/rotar-kek.ts"
+    "clinica:rotar-kek": "tsx src/scripts/rotar-kek.ts",
+    "huerfanas": "tsx src/scripts/servir-comandas-huerfanas.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

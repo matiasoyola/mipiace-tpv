@@ -120,6 +120,7 @@ import { clientFullName } from "../lib/clients.js";
 import { urlDeclaracionResponsable } from "../lib/declaracionResponsable.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { avisarAjustesCambiados } from "../hooks/useDeviceBootstrap.js";
+import { avisarCambioEnCocina } from "../kitchen/tpv/avisoCocina.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 import type { ModifierSelection } from "../lib/cart.js";
@@ -456,11 +457,16 @@ export interface SalePageProps {
    * encendida sobre una mesa sin etiqueta.
    */
   avisosListo?: Array<{
-    orderId: string;
-    tableName: string | null;
+    /** hierro-sirope (D) · una banda por MESA, no por comanda. */
+    clave: string;
+    texto: string;
+    orderIds: string[];
+    ticketIds: string[];
+    secciones: string[];
+    enMarcha: string[];
     readyAt: string;
   }>;
-  onServido?: (orderId: string) => void;
+  onServido?: (orderIds: string[]) => void;
   /** Los ajustes de cocina de ESTA tienda. `null` con el módulo apagado. */
   kitchenSettings?: {
     courseMode: "ESPERA" | "TIEMPOS";
@@ -1457,6 +1463,10 @@ export function SalePage(props: SalePageProps) {
     // refresca `useAvisosListo` en `TpvHome`, que es de la tienda.
     if (ev.type.startsWith("kitchen.")) {
       kitchen.recargar();
+      // hierro-sirope (H4) · y la banda «listo para servir», que vive en
+      // `TpvHome` y no estaba suscrita a nada: sin esto sólo se enteraba
+      // por el repaso de 30 s.
+      avisarCambioEnCocina();
       return;
     }
     // ── Eventos ticket-level (contador cross-caja) ──────────────────
@@ -3093,8 +3103,20 @@ export function SalePage(props: SalePageProps) {
                 onAnularEnviado: anularEnviadoConTotal,
                 onAbrirAlergias: () => setAlergiasAbiertas(true),
                 avisosListo: props.avisosListo ?? [],
-                onServido: (orderId) => {
-                  props.onServido?.(orderId);
+                // hierro-sirope (H3) · lo que la cocina tiene de ESTA
+                // cuenta. Se cruza por `ticketIds` y no por el nombre de
+                // la mesa: dos cuentas partidas de la misma mesa tienen
+                // el mismo nombre y no el mismo estado.
+                estadoDeLoEnviado: (() => {
+                  const tid = tableContext?.activeTicketId;
+                  if (!tid) return null;
+                  const g = (props.avisosListo ?? []).find((a) =>
+                    a.ticketIds.includes(tid),
+                  );
+                  return g ? { listas: g.secciones, enMarcha: g.enMarcha } : null;
+                })(),
+                onServido: (orderIds) => {
+                  props.onServido?.(orderIds);
                   kitchen.recargar();
                 },
                 anulaciones: kitchen.anulaciones,

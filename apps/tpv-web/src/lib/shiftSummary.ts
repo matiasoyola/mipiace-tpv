@@ -35,6 +35,20 @@ export interface ZBreakdownPayload {
   creditCollectionsTotal?: number;
 }
 
+/** Espejo de `MesasVaciadasPayload` de `api/src/shift/summary.ts`. La
+ *  etiqueta («Invitación») la manda el servidor: misma palabra en la
+ *  pantalla y en el PDF del Z. */
+export interface MesasVaciadasPayload {
+  count: number;
+  total: number;
+  porMotivo: Array<{
+    motivo: string | null;
+    label: string;
+    count: number;
+    total: number;
+  }>;
+}
+
 export interface ShiftDaySummary {
   shift: {
     id: string;
@@ -56,6 +70,11 @@ export interface ShiftDaySummary {
   };
   ticketsCount: number;
   refundsCount: number;
+  // hierro-sirope (C) · las mesas que se vaciaron con consumo. Opcional
+  // porque un terminal con la APK nueva puede hablar con una API que
+  // todavía no lo manda: entonces no se pinta, que es lo que pasaba
+  // antes, y no se cae la tarjeta de cierre.
+  mesasVaciadas?: MesasVaciadasPayload;
   breakdown: ZBreakdownPayload;
   cashTheoretical: number;
   descuadre: number | null;

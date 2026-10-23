@@ -262,12 +262,69 @@ export function partirComanda<T extends { id: string; units: number }>(
  * de cocina, que es quien tiene que decidir qué sacar primero.
  */
 export function etiquetaEnCocina(lastSentAt: string | null): string {
-  if (!lastSentAt) return "EN COCINA";
+  const hora = horaDeEnvio(lastSentAt);
+  return hora ? `EN COCINA · ${hora}` : "EN COCINA";
+}
+
+function horaDeEnvio(lastSentAt: string | null): string | null {
+  if (!lastSentAt) return null;
   const d = new Date(lastSentAt);
-  if (Number.isNaN(d.getTime())) return "EN COCINA";
+  if (Number.isNaN(d.getTime())) return null;
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
-  return `EN COCINA · ${hh}:${mm}`;
+  return `${hh}:${mm}`;
+}
+
+/** Cómo se nombra una sección en el rótulo del ticket. */
+const SECCION_ROTULO: Record<string, string> = {
+  BARRA: "BARRA",
+  COCINA: "COCINA",
+  SALON: "SALA",
+};
+
+export interface EstadoDeLoEnviado {
+  /** Secciones de esta cuenta que ya están LISTAS. */
+  listas: readonly string[];
+  /** Secciones de esta cuenta que siguen en marcha. */
+  enMarcha: readonly string[];
+}
+
+/**
+ * hierro-sirope (H3) · EL RÓTULO DICE EL ESTADO REAL.
+ *
+ * El 18-10 la cocina marcó «Lista», la banda verde salió arriba del TPV
+ * … y la línea del ticket seguía diciendo «EN COCINA · 23:34» (captura
+ * 13b). Dos rótulos de la misma pantalla contando cosas distintas de la
+ * misma comanda: el camarero que mira el ticket —que es donde está
+ * mirando mientras cobra— no se entera de que la comida ya salió.
+ *
+ * Tres casos y tres rótulos:
+ *
+ *   · nada listo          → «EN COCINA · 23:34», el de siempre.
+ *   · todo listo          → «LISTO · 23:34».
+ *   · parte               → «BARRA LISTA · COCINA EN MARCHA», por
+ *                           sección, porque ahí la hora del envío ya no
+ *                           dice nada útil y lo que hace falta saber es
+ *                           qué se puede llevar ya.
+ *
+ * `estado` nulo o vacío = el módulo de cocina no sabe nada de esta
+ * cuenta, y entonces el rótulo es el de siempre.
+ */
+export function etiquetaDeLoEnviado(
+  lastSentAt: string | null,
+  estado: EstadoDeLoEnviado | null,
+): string {
+  const hora = horaDeEnvio(lastSentAt);
+  const cola = hora ? ` · ${hora}` : "";
+  if (!estado || estado.listas.length === 0) return `EN COCINA${cola}`;
+  if (estado.enMarcha.length === 0) return `LISTO${cola}`;
+  const listas = estado.listas
+    .map((s) => `${SECCION_ROTULO[s] ?? s} LISTA`)
+    .join(" · ");
+  const marcha = estado.enMarcha
+    .map((s) => `${SECCION_ROTULO[s] ?? s} EN MARCHA`)
+    .join(" · ");
+  return `${listas} · ${marcha}`;
 }
 
 /**

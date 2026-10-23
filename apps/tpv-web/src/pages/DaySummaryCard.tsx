@@ -76,6 +76,8 @@ export function DaySummaryCard({
 }) {
   const [showDetail, setShowDetail] = useState(false);
   const { shift, breakdown } = summary;
+  // hierro-sirope (C) · puede no venir si la API es anterior al bloque.
+  const vaciadas = summary.mesasVaciadas;
 
   const byMethod = new Map(breakdown.methods.map((m) => [m.method, m]));
   const headline = HEADLINE_METHODS.map((m) => ({
@@ -139,11 +141,26 @@ export function DaySummaryCard({
         <div className="text-[34px] sm:text-[38px] leading-none font-semibold tabular-nums text-mipiace-ink whitespace-nowrap">
           {formatEur(breakdown.netSales)}
         </div>
-        <div className="mt-1.5 text-[12.5px] text-slate-500 tabular-nums">
+        {/* hierro-sirope (C) · LAS MESAS VACIADAS, EN EL MISMO GOLPE DE
+            VISTA. Vaciar una mesa con platos dentro es comida que salió
+            y no se cobró, igual que una devolución es dinero que salió:
+            va en la misma línea y con el mismo peso. Si es 0 no sale —
+            llenar la línea de ceros esconde el día en que no lo es. */}
+        <div
+          data-testid="resumen-recuentos"
+          className="mt-1.5 text-[12.5px] text-slate-500 tabular-nums"
+        >
           {summary.ticketsCount} {summary.ticketsCount === 1 ? "ticket" : "tickets"}
           {summary.refundsCount > 0
             ? ` · ${summary.refundsCount} ${summary.refundsCount === 1 ? "devolución" : "devoluciones"}`
             : ""}
+          {vaciadas && vaciadas.count > 0 && (
+            <span data-testid="resumen-mesas-vaciadas">
+              {` · ${vaciadas.count} ${
+                vaciadas.count === 1 ? "mesa vaciada" : "mesas vaciadas"
+              } (${formatEur(vaciadas.total)})`}
+            </span>
+          )}
         </div>
       </div>
 
@@ -283,6 +300,38 @@ export function DaySummaryCard({
               </tr>
             </tfoot>
           </table>
+          {/* hierro-sirope (C) · el desglose por motivo, con los mismos
+              números y las mismas palabras que el PDF del Z (el servidor
+              manda la etiqueta ya resuelta). */}
+          {vaciadas && vaciadas.count > 0 && (
+            <div
+              data-testid="detalle-mesas-vaciadas"
+              className="px-2.5 py-2.5 text-[12px] border-t border-slate-200 space-y-0.5 tabular-nums"
+            >
+              <div className="flex justify-between gap-3 font-medium text-mipiace-ink">
+                <span>
+                  Mesas vaciadas ({vaciadas.count}) · comida que salió y no se
+                  cobró
+                </span>
+                <span className="shrink-0 whitespace-nowrap">
+                  {formatEur(vaciadas.total)}
+                </span>
+              </div>
+              {vaciadas.porMotivo.map((m) => (
+                <div
+                  key={m.motivo ?? "sin-motivo"}
+                  className="flex justify-between gap-3 text-slate-600"
+                >
+                  <span className="min-w-0">
+                    {m.label} ({m.count})
+                  </span>
+                  <span className="shrink-0 whitespace-nowrap">
+                    {formatEur(m.total)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="px-2.5 py-2.5 text-[11.5px] text-slate-500 border-t border-slate-200 space-y-0.5 tabular-nums">
             <div>Fondo de caja al abrir: {formatEur(shift.cashOpening)}</div>
             <div>Turno de {shift.cashierLabel}</div>

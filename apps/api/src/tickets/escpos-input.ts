@@ -15,7 +15,13 @@ import {
   type TicketPaymentEscpos,
   type TicketReceiptInput,
 } from "@mipiacetpv/escpos-builder";
-import { changeFromCash, esCausaExencion, netToGross } from "@mipiacetpv/ticket-model";
+import {
+  changeFromCash,
+  esCausaExencion,
+  etiquetaDeCaja,
+  netToGross,
+  numeroConCaja,
+} from "@mipiacetpv/ticket-model";
 import type {
   CausaExencion,
   TicketTotals,
@@ -44,6 +50,10 @@ export interface TicketForPrint {
   user: { email: string; alias: string | null };
   register: {
     name: string;
+    /** hierro-sirope (G) · «C2». NULL mientras la caja no ha emitido. */
+    fiscalSeries?: string | null;
+    /** hierro-sirope (G) · para contar las cajas de la tienda. */
+    storeId?: string;
     store: {
       name: string;
       fiscalAddress: unknown;
@@ -95,6 +105,10 @@ export function ticketToEscposInput(
   // comercio que factura con Holded: su papel sale EXACTAMENTE igual que
   // antes de este bloque.
   verifactu: TicketVerifactu | null = null,
+  // hierro-sirope (G) · la tienda tiene más de una caja, así que el
+  // número lleva la suya delante («C2·000001»). Con una sola caja el
+  // papel sale exactamente igual que antes del bloque.
+  multiCaja = false,
 ): TicketReceiptInput {
   const lines: TicketLineEscpos[] = ticket.lines.map((l) => {
     const baseUnit = Number(l.unitPrice.toString());
@@ -191,7 +205,13 @@ export function ticketToEscposInput(
         ? ticket.register.store.name
         : ticket.tenant.name,
     businessAddress: formatAddress(ticket.register.store.fiscalAddress),
-    internalNumber: ticket.internalNumber,
+    // hierro-sirope (G) · la referencia operativa dice de qué caja es
+    // cuando hay más de una. NO toca la numeración —el correlativo por
+    // caja es fiscal, ADR-019—: sólo cómo se escribe.
+    internalNumber: numeroConCaja(
+      ticket.internalNumber,
+      multiCaja ? etiquetaDeCaja(ticket.register) : null,
+    ),
     issuedAt,
     isCopy,
     // puesta-en-marcha (ADR-021) · la marca del ensayo sale del ESTADO del

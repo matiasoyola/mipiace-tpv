@@ -88,6 +88,8 @@ import {
   VISTO_HEIGHT_PX,
 } from "../lib/kitchenTheme.js";
 import { etiquetaMinutos, minutosDesdeMarchado, tonoSemaforo } from "../lib/kitchenSemaforo.js";
+import { tituloDeComandaEnPantalla } from "@mipiacetpv/ticket-model";
+
 import { ETIQUETA_SECCION } from "./secciones.js";
 import type { AjustesCocina, Comanda, LineaComanda } from "./types.js";
 
@@ -273,14 +275,26 @@ export function ComandaCard(props: ComandaCardProps) {
       >
         <span className="flex flex-col min-w-0 flex-1">
           <span
+            data-testid="kds-titulo"
             // auditoria-sirope (#25) · el título puede ser «Mostrador
             // nº 3» y no sólo «T6»: tiene que caber y partir sin
             // pisar la pastilla del tiempo, que es `shrink-0`. Lo vio
             // el bucle visual de este bloque.
-            className="font-bold leading-tight break-words min-w-0"
+            //
+            // hierro-sirope (E) · y NUNCA a mitad de palabra. En el
+            // hierro salió «Mostra / dor nº 1» (captura 11): a 34 px en
+            // una tarjeta de cuatro columnas «Mostrador» no cabe en una
+            // línea, y `break-words` parte por donde sea.
+            //
+            // Dos cosas a la vez: el título que se pinta es el CORTO
+            // («Mostr. 1», lo decide `tituloDeComandaEnPantalla`) y el
+            // salto vuelve a ser `break-normal` — entre palabras o nada.
+            // Un nombre de mesa larguísimo que no quepa se recorta con
+            // puntos suspensivos, que se lee; partido por la mitad, no.
+            className="font-bold leading-tight break-normal min-w-0 truncate"
             style={{ fontSize: MESA_PX, letterSpacing: "-0.02em" }}
           >
-            {c.tableName ?? `#${c.number}`}
+            {tituloDeComandaEnPantalla(c.tableName, c.number)}
           </span>
           {eyebrow.length > 0 && (
             <span

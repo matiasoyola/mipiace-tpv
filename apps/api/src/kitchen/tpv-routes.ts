@@ -828,7 +828,7 @@ export async function registerKitchenTpvRoutes(
       // arranque y un 403 por ciclo ensuciaría los logs del terminal de un
       // bar que nunca compró la pantalla.
       if (!tenant.kitchenDisplayEnabled) {
-        return { ready: [] };
+        return { ready: [], pending: [] };
       }
       const listas = await prisma.kitchenOrder.findMany({
         where: {
@@ -850,6 +850,30 @@ export async function registerKitchenTpvRoutes(
           readyAt: true,
         },
       });
+      // hierro-sirope (D) · LO QUE TODAVÍA SE ESTÁ HACIENDO.
+      //
+      // Con cocina y barra en la misma mesa salían DOS bandas idénticas
+      // «M3 · listo para servir» (captura 25), y ninguna decía qué estaba
+      // listo. Una banda por mesa necesita saber las dos mitades: lo que
+      // está listo y lo que sigue en marcha, para poder decir «M3 · barra
+      // lista (cocina en marcha)» en vez de mentir con un «listo» a secas
+      // sobre una mesa a la que todavía le falta el plato.
+      //
+      // Va en el MISMO GET y no en otro: son la misma pregunta («¿qué
+      // tengo que saber de la cocina ahora mismo?») y dos peticiones
+      // podrían contestar estados de instantes distintos, que es
+      // exactamente la banda que parpadea.
+      //
+      // Sólo lo imprescindible para agrupar: ni nombre ni hora. Lo que se
+      // pinta sale siempre de `ready`.
+      const enMarcha = await prisma.kitchenOrder.findMany({
+        where: {
+          storeId: register.storeId,
+          readyAt: null,
+          servedAt: null,
+        },
+        select: { id: true, ticketId: true, tableId: true, section: true },
+      });
       return {
         ready: listas.map((o) => ({
           orderId: o.id,
@@ -859,6 +883,12 @@ export async function registerKitchenTpvRoutes(
           section: o.section,
           number: o.number,
           readyAt: o.readyAt!.toISOString(),
+        })),
+        pending: enMarcha.map((o) => ({
+          orderId: o.id,
+          ticketId: o.ticketId,
+          tableId: o.tableId,
+          section: o.section,
         })),
       };
     },
