@@ -104,6 +104,7 @@ export {
 } from "./ficha.js";
 
 export {
+  DE_DONDE_VOLVIO,
   NOMBRE_CORTO_DE_LA_AUSENCIA,
   NOMBRE_DE_LA_AUSENCIA,
   ausenciaEn,

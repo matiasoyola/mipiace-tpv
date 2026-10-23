@@ -32,7 +32,7 @@
 
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
-  NOMBRE_DE_LA_AUSENCIA,
+  DE_DONDE_VOLVIO,
   addDays,
   calcularIndicadores,
   pinPorRenovar,
@@ -378,7 +378,7 @@ export async function loQueHayQueArreglar(
     absenceId: v.id,
     nombre: `${v.client.firstName} ${v.client.lastName}`.trim(),
     habitacion: habitacionPorCliente.get(v.clientId) ?? null,
-    deDonde: NOMBRE_DE_LA_AUSENCIA[v.kind],
+    deDonde: DE_DONDE_VOLVIO[v.kind],
     volvioEn: v.endedAt!.toISOString(),
     // Días de CALENDARIO del centro y no horas: «lleva 2 días» es lo que
     // se entiende, y «lleva 38 horas» obliga a dividir.

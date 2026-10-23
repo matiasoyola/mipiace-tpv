@@ -120,6 +120,27 @@ export const NOMBRE_DE_LA_AUSENCIA: Record<TipoDeAusencia, string> = {
   SALIDA_NO_CONTROLADA: "salida no controlada",
 };
 
+/**
+ * **DE DÓNDE VOLVIÓ**, que es otra frase y no la misma al revés.
+ *
+ * El panel de la DUE dice «Isabel · volvió **del hospital**, pendiente de
+ * revisar». Con `NOMBRE_DE_LA_AUSENCIA` saldría «volvió de ingresado en
+ * el hospital», que es el participio de la otra frase pegado con una
+ * preposición — y en una lista que alguien lee cuarenta veces al mes eso
+ * se nota.
+ *
+ * Tres diccionarios y no uno, por lo mismo que las dos texturas de la
+ * dieta: cada frase concuerda con lo que la rodea, y una sola forma leería
+ * mal en dos de las tres pantallas.
+ */
+export const DE_DONDE_VOLVIO: Record<TipoDeAusencia, string> = {
+  INGRESO_HOSPITALARIO: "del hospital",
+  URGENCIAS: "de urgencias",
+  VACACIONES_FAMILIA: "de su salida con la familia",
+  CONSULTA_EXTERNA: "de la consulta",
+  SALIDA_NO_CONTROLADA: "de una salida no controlada",
+};
+
 /** Y la versión corta, la que cabe en la tarjeta de la puerta. */
 export const NOMBRE_CORTO_DE_LA_AUSENCIA: Record<TipoDeAusencia, string> = {
   INGRESO_HOSPITALARIO: "En el hospital",

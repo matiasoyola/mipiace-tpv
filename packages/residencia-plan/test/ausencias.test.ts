@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DE_DONDE_VOLVIO,
   NOMBRE_CORTO_DE_LA_AUSENCIA,
   NOMBRE_DE_LA_AUSENCIA,
   ausenciaEn,
@@ -218,6 +219,9 @@ describe("la frase de la ausencia", () => {
   it("cada tipo tiene su nombre largo y su nombre corto", () => {
     expect(NOMBRE_DE_LA_AUSENCIA.VACACIONES_FAMILIA).toBe("de salida con la familia");
     expect(NOMBRE_CORTO_DE_LA_AUSENCIA.SALIDA_NO_CONTROLADA).toBe("No localizado");
+    // Y «de dónde volvió» es una tercera frase: el panel dice «volvió del
+    // hospital», no «volvió de ingresado en el hospital».
+    expect(DE_DONDE_VOLVIO.INGRESO_HOSPITALARIO).toBe("del hospital");
     // Los cinco tipos tienen las dos. Sin esto, un tipo nuevo saldría
     // como `undefined` en la tarjeta de la puerta.
     for (const tipo of [
@@ -229,6 +233,7 @@ describe("la frase de la ausencia", () => {
     ] as const) {
       expect(NOMBRE_DE_LA_AUSENCIA[tipo]).toBeTruthy();
       expect(NOMBRE_CORTO_DE_LA_AUSENCIA[tipo]).toBeTruthy();
+      expect(DE_DONDE_VOLVIO[tipo]).toBeTruthy();
     }
   });
 });
