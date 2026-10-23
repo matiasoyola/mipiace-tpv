@@ -828,6 +828,11 @@ function SesionPodologiaDentro(props: {
         onCambiar={(p) => {
           setPestana(p);
           setZonaAbierta(null);
+          // clinica-8 (fase B, 12) · y se suelta la hoja de confirmación
+          // si estaba abierta. La hoja se pinta al final del componente,
+          // fuera del `if` de la pestaña: sin esto, cambiar a «Fotos»
+          // con la hoja abierta la dejaba encima de la cámara.
+          setConfirmar(null);
         }}
       />
 

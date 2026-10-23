@@ -1245,7 +1245,7 @@ primera, y es porque los bancos miran la petición que sale, no la pantalla:
 | Suite | Resultado |
 |---|---|
 | `npx vitest run` (workspace, desde la raíz) | **444 ficheros · 6.382 tests**, 10 saltados |
-| `pnpm test:e2e` (Postgres real, base propia de esta sesión) | ver la nota de abajo |
+| `pnpm test:e2e` (Postgres real, base propia de esta sesión) | **48 ficheros · 1.081 tests** |
 | `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio |
 
 El e2e corrió sobre `mipiacetpv_clinica8_e2eb`, una base propia de esta
@@ -1262,6 +1262,18 @@ solo lectura. Los dos bancos nacieron en master DESPUÉS de la fase A —
 residencia-6 entró con el merge— así que no estaban entre los cuatro que ella
 arregló. Siembran `VERSION_VIGENTE` y no un `1` escrito a mano, como los
 otros.
+
+**Y una corrida intermedia que hay que contar.** Con el arreglo ya puesto, la
+primera pasada dio **10 rojos** repartidos en tres ficheros
+—`holded-desconectar`, `residencia-4` y `residencia-6`— y la siguiente, sobre
+la MISMA base y sin tocar una línea, salió **48 de 48 en verde**. Uno de los
+diez era el test del **rate-limit de la puerta** de residencia-6, que mide
+ventanas de tiempo: es la misma familia que el `cashier-login` que la fase A
+anotó en su §6, un test que se cae bajo carga. Los otros nueve no se pudieron
+leer —esa corrida se lanzó filtrando la salida y los mensajes se perdieron—,
+así que lo honesto es decir qué se sabe: **tres ficheros que esta rama no
+toca, y verde a la siguiente**. Si vuelve a pasar en CI, el sitio por donde
+empezar es el reloj y no el código de este bloque.
 
 ### Lo nuevo de la fase B
 
