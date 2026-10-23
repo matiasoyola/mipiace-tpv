@@ -105,7 +105,7 @@ export function HoldedPage() {
     setTimeout(tick, POLL_INTERVAL_MS);
   }
 
-  if (!status) return <CenteredLoader label="Cargando estado…" />;
+  if (!status) return <CenteredLoader label="Cargando estado…" error={error} />;
 
   const stats = status.stats ?? {};
   const productsUpdated = numberOrNull(stats.productsUpdated);

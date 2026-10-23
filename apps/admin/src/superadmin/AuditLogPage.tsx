@@ -16,6 +16,8 @@ const ACTIONS = [
   { value: "block_tenant", label: "Bloquear cuenta" },
   { value: "unblock_tenant", label: "Desbloquear cuenta" },
   { value: "activate_tenant", label: "Activar cuenta" },
+  // primer-acceso · sin esta entrada el registro pinta el slug crudo.
+  { value: "reenviar_invitacion", label: "Reenviar invitación" },
   { value: "force_logout", label: "Cerrar sesiones del tenant" },
   { value: "resync", label: "Re-sincronizar" },
   // catalogo-en-alta · sin esta entrada el registro pinta el slug crudo.

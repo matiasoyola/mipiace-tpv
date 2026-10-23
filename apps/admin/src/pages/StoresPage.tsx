@@ -97,7 +97,7 @@ export function StoresPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!stores) return <CenteredLoader label="Cargando tiendas…" />;
+  if (!stores) return <CenteredLoader label="Cargando tiendas…" error={error} />;
 
   return (
     <AdminShell title="Tiendas">
@@ -337,7 +337,7 @@ export function StoreDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeId]);
 
-  if (!store) return <CenteredLoader label="Cargando tienda…" />;
+  if (!store) return <CenteredLoader label="Cargando tienda…" error={error} />;
 
   const canDelete = store.registers.length === 0;
 

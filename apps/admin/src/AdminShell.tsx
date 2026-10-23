@@ -41,7 +41,10 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, readCurrentRole, readImpersonationState } from "./api.js";
-import { useTenantCapabilities } from "./capabilities.js";
+import {
+  useTenantCapabilities,
+  type TenantCapabilities,
+} from "./capabilities.js";
 
 import { ImpersonationBanner } from "./components/ImpersonationBanner.js";
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
@@ -105,7 +108,67 @@ interface NavItem {
   exact?: boolean;
 }
 
-const NAV_ITEMS: NavItem[] = [
+/** Las capabilities que gatean una entrada del menú. Sale del tipo de
+ *  `NavItem` a propósito: añadir una allí obliga a darle su rama en
+ *  `capabilidadActiva`, y eso es lo que impide que vuelva a pasar lo de
+ *  `bonos` y `clinica`. */
+type CapabilidadDeMenu = NonNullable<NavItem["capability"]>;
+
+/**
+ * ¿Se pinta una entrada gateada por esta capability?
+ *
+ * hotfix-menu-capabilities · esto era una escalera de `if` dentro del
+ * filtro que acababa en `return true`, y el `return true` se comió las dos
+ * últimas capabilities que se añadieron al tipo: «Bonos» (`bonos`) se
+ * pintaba en TODAS las cuentas y «Contrato de datos» (`clinica`) en todo
+ * OWNER aunque su cuenta no tuviera la clínica. Se vio en producción, en
+ * Jardín de Gredos.
+ *
+ * Ahora es un `switch` exhaustivo: el `default` asigna el valor a un
+ * `never`, así que **declarar una capability en `NavItem` y no darle su
+ * rama aquí no compila**. No hay rama muda para una capability
+ * desconocida, que es lo que había antes.
+ *
+ * Y todas `=== true`, no `!== false`: mientras `caps` es `null` no se sabe
+ * nada, y la entrada no se pinta para no parpadear.
+ */
+function capabilidadActiva(
+  capability: CapabilidadDeMenu,
+  caps: TenantCapabilities | null,
+): boolean {
+  switch (capability) {
+    case "agenda":
+      return caps?.agenda === true;
+    case "caja":
+      return caps?.caja === true;
+    case "holded":
+      return caps?.holded === true;
+    case "fichaje":
+      return caps?.fichaje === true;
+    // holded-desconectar (ADR-020) · la única que se enciende al APAGAR
+    // Holded. Se evalúa igual que las demás.
+    case "holdedDejado":
+      return caps?.holdedDejado === true;
+    case "residencia":
+      return caps?.residencia === true;
+    case "bonos":
+      return caps?.bonos === true;
+    case "clinica":
+      return caps?.clinica === true;
+    default: {
+      // Si esto no compila, falta un `case` para la capability que acabas
+      // de añadir al tipo de `NavItem`. Añádelo: no hay default silencioso.
+      const nunca: never = capability;
+      return nunca;
+    }
+  }
+}
+
+// hotfix-menu-capabilities · exportadas para que el banco pueda recorrer
+// TODAS las entradas y comprobar que cada capability esconde las suyas con
+// su propio flag. Un `switch` exhaustivo garantiza que hay una rama; el
+// test garantiza que la rama mira la capability que dice mirar.
+export const NAV_ITEMS: NavItem[] = [
   // B5 activa Holded como sección "Sync errors". B6 añade Ajustes y
   // Tickets regalo. B-OnboardingV2 quita del OWNER las secciones
   // técnicas: la gestión de Holded, los dispositivos, los ajustes
@@ -595,7 +658,18 @@ export function AdminShell({
           empiece a facturar sin que nadie haya comprobado sus datos fiscales
           ni que sus cajas tienen la cadena limpia. Lo que sí dice es a quién
           llamar. */}
-      {shellCaps?.enEnsayo === true && <EnsayoAvisoBanner />}
+      {/* primer-acceso · Y SÓLO CON CAJA, que es la mitad que faltaba.
+          Lo encontró el bucle visual del 23-10: la PRIMERA pantalla de la
+          directora de Jardín de Gredos abría con seis líneas sobre el TPV,
+          los tickets de prueba y Hacienda. Esa residencia no tiene caja:
+          no vende, no cobra, no arquea y no emite una factura en su vida,
+          así que «tu cuenta está en ensayo» no le avisa de nada — le
+          describe un producto que no ha comprado, el día que entra.
+          Mismo gate y misma razón que el banner de Holded de aquí al lado
+          (H1): lo que no puede pasar en esa cuenta no se avisa. */}
+      {shellCaps?.enEnsayo === true && shellCaps?.caja === true && (
+        <EnsayoAvisoBanner />
+      )}
       <HoldedHealthBanner
         cajaEnabled={shellCaps?.caja === true}
         holdedEnabled={shellCaps?.holdedEnabled !== false}
@@ -797,14 +871,15 @@ function NavList({
     // se combinan en vez de excluirse: la bandeja "Holded" es a la vez
     // `superAdminOnly` y de caja, y antes el primer `return` se comía la
     // segunda condición.
-    if (item.capability === "agenda") return caps?.agenda === true;
-    if (item.capability === "caja") return caps?.caja === true;
-    if (item.capability === "holded") return caps?.holded === true;
-    if (item.capability === "fichaje") return caps?.fichaje === true;
-    if (item.capability === "holdedDejado") return caps?.holdedDejado === true;
-    // residencia-1 · `=== true` como las demás: mientras `caps` es `null`
-    // la entrada NO se pinta, para no parpadear.
-    if (item.capability === "residencia") return caps?.residencia === true;
+    //
+    // hotfix-menu-capabilities · una sola rama, y la decisión en
+    // `capabilidadActiva`. El `return true` de aquí es ahora SÓLO para las
+    // entradas sin capability (Resumen, Tiendas, Mi cuenta…): una entrada
+    // gateada no puede caerse por este agujero sin que el compilador lo
+    // diga.
+    if (item.capability != null) {
+      return capabilidadActiva(item.capability, caps);
+    }
     return true;
   });
   return (

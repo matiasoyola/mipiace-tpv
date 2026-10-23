@@ -39,6 +39,21 @@ interface FakeUser {
   isTestCashier: boolean;
   deletedAt: Date | null;
   createdAt: Date;
+  // primer-acceso · el nombre visible. `activate` lo guarda con el que
+  // teclea el implantador para que la página de bienvenida pueda saludar.
+  alias?: string | null;
+}
+
+// primer-acceso · los enlaces (reset e invitación) viven en la misma
+// tabla. El fake los guarda para poder comprobar que `activate` deja una
+// invitación pendiente en vez de una contraseña provisional.
+interface FakeToken {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  type: "RESET" | "INVITE";
+  expiresAt: Date;
+  usedAt: Date | null;
 }
 interface FakeTenant {
   id: string;
@@ -136,6 +151,7 @@ const tickets = new Map<string, FakeTicket>();
 const emailJobs = new Map<string, { id: string; ticketId: string; status: string }>();
 const superAdmins = new Map<string, FakeSuperAdmin>();
 const audits: FakeAudit[] = [];
+const tokens = new Map<string, FakeToken>();
 
 const sentEmails: Array<{ to: string; subject: string; text: string }> = [];
 
@@ -235,6 +251,7 @@ function makeFakePrisma() {
         isTestCashier: data.isTestCashier ?? false,
         deletedAt: null,
         createdAt: new Date(),
+        alias: data.alias ?? null,
       };
       users.set(u.id, u);
       return projectUser(u, select);
@@ -250,6 +267,8 @@ function makeFakePrisma() {
         "mustChangePasswordAt",
         // v1.3-piloto-feedback · Lote 2: transfer-owner rota el email.
         "email",
+        // primer-acceso · el nombre visible del propietario.
+        "alias",
       ]) {
         if ((data as any)[k] !== undefined) (u as any)[k] = (data as any)[k];
       }
@@ -542,8 +561,47 @@ function makeFakePrisma() {
     }),
   };
 
+  // primer-acceso · el modelo de los enlaces. Lo mínimo que usan
+  // `crearInvitacion` e `invitacionPendienteHasta`.
+  const passwordResetTokenModel = {
+    create: vi.fn(async ({ data }: any) => {
+      const t: FakeToken = {
+        id: randomUUID(),
+        userId: data.userId,
+        tokenHash: data.tokenHash,
+        type: data.type ?? "RESET",
+        expiresAt: data.expiresAt,
+        usedAt: data.usedAt ?? null,
+      };
+      tokens.set(t.id, t);
+      return { ...t };
+    }),
+    findFirst: vi.fn(async ({ where, select }: any) => {
+      const arr = [...tokens.values()].filter((t) => matchTokenWhere(t, where));
+      arr.sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime());
+      const t = arr[0];
+      if (!t) return null;
+      return select?.expiresAt ? { expiresAt: t.expiresAt } : { ...t };
+    }),
+    findMany: vi.fn(async ({ where }: any) =>
+      [...tokens.values()]
+        .filter((t) => matchTokenWhere(t, where))
+        .map((t) => ({ ...t })),
+    ),
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      let n = 0;
+      for (const t of tokens.values()) {
+        if (!matchTokenWhere(t, where)) continue;
+        if (data.usedAt !== undefined) t.usedAt = data.usedAt;
+        n++;
+      }
+      return { count: n };
+    }),
+  };
+
   const prisma: any = {
     user: userModel,
+    passwordResetToken: passwordResetTokenModel,
     tenant: tenantModel,
     store: storeModel,
     register: registerModel,
@@ -569,6 +627,16 @@ function makeFakePrisma() {
     $queryRaw: vi.fn(async () => []),
   };
   return prisma;
+}
+
+function matchTokenWhere(t: FakeToken, where: any): boolean {
+  if (!where) return true;
+  if (where.id && t.id !== where.id) return false;
+  if (where.userId && t.userId !== where.userId) return false;
+  if (where.type && t.type !== where.type) return false;
+  if (where.usedAt === null && t.usedAt != null) return false;
+  if (where.expiresAt?.gt && t.expiresAt <= where.expiresAt.gt) return false;
+  return true;
 }
 
 function matchUserWhere(u: FakeUser, where: any): boolean {
@@ -978,7 +1046,11 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     const body = res.json();
     expect(body.tenant.onboardingState).toBe("ACTIVE");
     expect(body.owner.email).toBe("owner@thalia.es");
-    expect(body.tempPassword).toHaveLength(16);
+    // primer-acceso (decisión 2) · NI UNA CONTRASEÑA EN LA RESPUESTA. Lo
+    // que vuelve es el enlace de la invitación, para «Copiar enlace».
+    expect(body.tempPassword).toBeUndefined();
+    expect(body.invitacion.email).toBe("owner@thalia.es");
+    expect(body.invitacion.enlace).toContain("/bienvenida?token=");
     // v1.3-piloto-feedback · Lote 1: PIN del OWNER en la respuesta y
     // pinHash persistido. 4 dígitos numéricos.
     expect(body.ownerPin).toMatch(/^\d{4}$/);
@@ -989,7 +1061,20 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     const owner = [...users.values()].find((u) => u.email === "owner@thalia.es");
     expect(owner).toBeTruthy();
     expect(owner!.role).toBe("OWNER");
-    expect(owner!.mustChangePasswordAt).not.toBeNull();
+    // primer-acceso · nace SIN contraseña utilizable y SIN el aviso de
+    // cambiarla: el estado «le falta entrar» lo cuenta la invitación.
+    expect(owner!.passwordHash).toBeNull();
+    expect(owner!.mustChangePasswordAt).toBeNull();
+    // Y con el nombre que tecleó el implantador, para la bienvenida.
+    expect(owner!.alias).toBe("María");
+    // La invitación quedó pendiente, de tipo INVITE y con 7 días.
+    const invites = [...tokens.values()].filter((t) => t.type === "INVITE");
+    expect(invites).toHaveLength(1);
+    expect(invites[0]!.usedAt).toBeNull();
+    const dias =
+      (invites[0]!.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(dias).toBeGreaterThan(6.9);
+    expect(dias).toBeLessThan(7.1);
     // v1.3-piloto-feedback · Lote 1: el OWNER nace con pinHash ya
     // poblado, así que puede entrar al TPV sin pasar por la pantalla
     // admin antes.
@@ -998,10 +1083,12 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     expect(tickets.size).toBe(0);
     // Cashier técnico soft-deleted.
     expect(users.get("u-test")!.deletedAt).not.toBeNull();
-    // Email enviado con password Y PIN.
+    // Email enviado con el ENLACE y con el PIN (decisión 7), y sin
+    // ninguna contraseña dentro.
     expect(sentEmails).toHaveLength(1);
-    expect(sentEmails[0]!.text).toContain(body.tempPassword);
+    expect(sentEmails[0]!.text).toContain(body.invitacion.enlace);
     expect(sentEmails[0]!.text).toContain(body.ownerPin);
+    expect(sentEmails[0]!.text).not.toContain("Contraseña temporal");
     // Audit log activate_tenant.
     expect(audits.some((a) => a.action === "activate_tenant")).toBe(true);
 

@@ -10,6 +10,7 @@ import {
   LockKeyhole,
   LockOpen,
   LogOut,
+  MailCheck,
   Minus,
   Power,
   Receipt,
@@ -32,6 +33,8 @@ import { EliminarCuentaPanel } from "./EliminarCuentaPanel.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
+  InvitacionEnviada,
+  ReenviarInvitacionResponse,
   DejarHoldedResultado,
   EmpezarAFacturarResultado,
   ResetearEnsayoResultado,
@@ -42,6 +45,7 @@ import type {
   ReadinessCheck,
   TenantDetail,
   TenantModules,
+  TenantUser,
   TestCashierTokenResponse,
 } from "./types.js";
 import { BUSINESS_TYPE_LABEL } from "./types.js";
@@ -109,7 +113,13 @@ export function TenantDetailPage() {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [activated, setActivated] = useState<ActivateTenantResponse | null>(null);
-  const [copiedPwd, setCopiedPwd] = useState(false);
+  // primer-acceso · la invitación que hay en pantalla ahora mismo: la de
+  // la activación o la del último reenvío. Una sola variable y no dos
+  // paneles: lo que el implantador necesita es «el enlace vigente», y dos
+  // sitios con dos enlaces distintos es exactamente el lío que «anula la
+  // anterior» viene a evitar.
+  const [invitacion, setInvitacion] = useState<InvitacionEnviada | null>(null);
+  const [copiedEnlace, setCopiedEnlace] = useState(false);
   // v1.3-piloto-feedback · Lote 1: feedback separado al copiar el PIN
   // del OWNER (TPV) — coexiste con el feedback de la contraseña admin.
   const [copiedPin, setCopiedPin] = useState(false);
@@ -552,6 +562,7 @@ export function TenantDetailPage() {
         },
       );
       setActivated(r);
+      setInvitacion(r.invitacion);
       setShowActivateModal(false);
       await reload();
     } catch (err) {
@@ -561,14 +572,45 @@ export function TenantDetailPage() {
     }
   }
 
-  async function copyPwd(): Promise<void> {
-    if (!activated) return;
+  async function copiarEnlace(): Promise<void> {
+    if (!invitacion) return;
     try {
-      await navigator.clipboard.writeText(activated.tempPassword);
-      setCopiedPwd(true);
-      setTimeout(() => setCopiedPwd(false), 2500);
+      await navigator.clipboard.writeText(invitacion.enlace);
+      setCopiedEnlace(true);
+      setTimeout(() => setCopiedEnlace(false), 2500);
     } catch {
       /* clipboard puede fallar */
+    }
+  }
+
+  // primer-acceso · «Reenviar invitación». Anula la anterior y deja el
+  // enlace nuevo en pantalla, para la llamada en la que el correo no ha
+  // llegado y hay que dictarlo por otro canal.
+  async function reenviarInvitacion(): Promise<void> {
+    if (!id) return;
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      const r = await superApi<ReenviarInvitacionResponse>(
+        `/super-admin/tenants/${id}/reenviar-invitacion`,
+        { method: "POST" },
+      );
+      setInvitacion(r.invitacion);
+      setActionMessage(
+        `Invitación nueva enviada a ${r.invitacion.email}. La anterior ya no vale.` +
+          (r.emailEnviado
+            ? ""
+            : " El email NO ha salido: pásale el enlace por otro canal.") +
+          (r.anulabaProvisional
+            ? " La contraseña provisional que tenía queda desactivada."
+            : ""),
+      );
+      await reload();
+    } catch (err) {
+      setActionError(errToHuman(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -615,21 +657,16 @@ export function TenantDetailPage() {
             cashier técnico {activated.purge.cashierDeleted ? "borrado" : "no encontrado"},
             device {activated.purge.deviceRevoked ? "revocado" : "no encontrado"}.
           </p>
-          <div className="text-[12px] uppercase tracking-wide text-emerald-700 mb-1">
-            Contraseña temporal del OWNER (admin)
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
-              {activated.tempPassword}
-            </code>
-            <button
-              onClick={copyPwd}
-              className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              {copiedPwd ? "Copiado" : "Copiar"}
-            </button>
-          </div>
+          {/* primer-acceso (decisión 3) · lo que el implantador necesita
+              saber tras activar: a quién se ha mandado la invitación y
+              hasta cuándo vale. Ninguna contraseña en pantalla. */}
+          <p className="text-[13px] text-emerald-900">
+            <strong className="font-semibold">
+              Invitación enviada a {activated.invitacion.email}
+            </strong>{" "}
+            · caduca el {diaYMes(activated.invitacion.caducaEl)}. El
+            propietario elige su contraseña desde el enlace del correo.
+          </p>
           {/* v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero
               en el TPV. Se enseña sólo aquí; el OWNER lo puede regenerar
               desde "Mi cuenta" cuando entre al admin.
@@ -655,16 +692,14 @@ export function TenantDetailPage() {
                 </button>
               </div>
               <p className="text-[11.5px] text-emerald-700 mt-2">
-                Contraseña y PIN se muestran una sola vez. Si el email no llega,
-                pásaselos al cliente por canal seguro.
+                El PIN se muestra una sola vez. Si el email no llega, pásaselo
+                al cliente por canal seguro.
               </p>
             </>
           ) : (
             <p className="text-[11.5px] text-emerald-700 mt-3">
               Esta empresa no tiene caja, así que <strong>no se ha generado
-              PIN de cajero</strong>: no hay TPV al que entrar. La contraseña
-              se muestra una sola vez; si el email no llega, pásasela al
-              cliente por canal seguro.
+              PIN de cajero</strong>: no hay TPV al que entrar.
             </p>
           )}
         </div>
@@ -992,6 +1027,50 @@ export function TenantDetailPage() {
           sólo si el comercio emite; el propio panel decide. */}
       {tenant.modules.caja && <FiscalChainsPanel tenantId={tenant.id} />}
 
+      {/* primer-acceso (decisión 3) · EL PANEL DE LA INVITACIÓN.
+          Se pinta a sí mismo sólo mientras el propietario no haya elegido
+          su contraseña: con ella elegida no hay nada que reenviar, y un
+          botón «Reenviar invitación» en una cuenta que lleva seis meses
+          funcionando es un botón que le deja la cuenta sin contraseña. */}
+      {!isDraft && propietarioSinEntrar(tenant) && (
+        <div className="bg-white border border-amber-200 rounded-xl p-6 mb-6">
+          <h3 className="font-semibold text-slate-900 mb-1">
+            Invitación del propietario
+          </h3>
+          <p className="text-[12.5px] text-slate-600 mb-4">
+            {estadoDeLaInvitacion(tenant)}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => void reenviarInvitacion()}
+              disabled={busy}
+              className="inline-flex items-center gap-2 h-10 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-40"
+            >
+              <MailCheck className="w-4 h-4" />
+              Reenviar invitación
+            </button>
+            {invitacion && (
+              <button
+                onClick={() => void copiarEnlace()}
+                className="inline-flex items-center gap-2 h-10 px-4 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                {copiedEnlace ? "Enlace copiado" : "Copiar enlace"}
+              </button>
+            )}
+          </div>
+          {/* El enlace sólo se puede copiar desde esta sesión: no se
+              guarda en ninguna parte, así que después de recargar la
+              página hay que reenviar para tener uno nuevo. Decirlo evita
+              que el implantador lo busque. */}
+          <p className="text-[11.5px] text-slate-500 mt-3">
+            {invitacion
+              ? "«Copiar enlace» vale para esta pantalla: el enlace no se guarda. Reenviar anula el anterior."
+              : "Reenvía para obtener un enlace que puedas copiar. Anula el anterior."}
+          </p>
+        </div>
+      )}
+
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
           Usuarios ({tenant.users.length})
@@ -1029,13 +1108,7 @@ export function TenantDetailPage() {
                       : "Nunca"}
                   </td>
                   <td className="py-2.5">
-                    {u.mustChangePassword ? (
-                      <span className="text-amber-700 text-[12px]">
-                        Pendiente de cambiar password
-                      </span>
-                    ) : (
-                      <span className="text-slate-400 text-[12px]">—</span>
-                    )}
+                    <EstadoDelUsuario user={u} />
                   </td>
                 </tr>
               ))}
@@ -1130,8 +1203,9 @@ export function TenantDetailPage() {
           <h3 className="font-semibold text-slate-900 mb-2">Activar cuenta</h3>
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-[12.5px] text-amber-900">
             Al confirmar: se creará la cuenta del propietario y se le enviará
-            email con sus credenciales. Los tickets de prueba se borrarán y el
-            cajero técnico quedará revocado.
+            un correo con un enlace para que elija su contraseña (vale 7 días).
+            No se genera ninguna contraseña provisional. Los tickets de prueba
+            se borrarán y el cajero técnico quedará revocado.
           </div>
           <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
             Email del propietario <span className="text-red-500">*</span>
@@ -1182,6 +1256,80 @@ export function TenantDetailPage() {
   );
 }
 
+// ── primer-acceso · el estado de la invitación, en palabras ──────────
+//
+// Tres estados y no uno, y la diferencia importa para quien está en una
+// llamada con el cliente:
+//
+//   · invitación viva → «le queda hasta el dd/mm», no hace falta nada;
+//   · sin contraseña y sin invitación viva → el enlace caducó y nadie lo
+//     ha pedido: hay que reenviar;
+//   · contraseña provisional del flujo viejo (`mustChangePassword`) → lo
+//     que hay en producción el día del despliegue, y reenviar la anula.
+//
+// «dd/mm», que es como se lee una fecha de caducidad corta. El año sobra:
+// un enlace de 7 días nunca cruza dos años... salvo en Nochevieja, y
+// entonces «31/12» y «07/01» siguen leyéndose bien.
+export function diaYMes(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(
+    d.getMonth() + 1,
+  ).padStart(2, "0")}`;
+}
+
+function propietario(tenant: TenantDetail): TenantUser | null {
+  return tenant.users.find((u) => u.role === "OWNER") ?? null;
+}
+
+/** `true` mientras el propietario no haya elegido su contraseña. */
+export function propietarioSinEntrar(tenant: TenantDetail): boolean {
+  const o = propietario(tenant);
+  if (!o) return false;
+  return o.sinContrasena === true || o.mustChangePassword;
+}
+
+export function estadoDeLaInvitacion(tenant: TenantDetail): string {
+  const o = propietario(tenant);
+  if (!o) return "Esta cuenta no tiene propietario todavía.";
+  if (o.invitacionPendienteHasta) {
+    return `${o.email} tiene una invitación pendiente: caduca el ${diaYMes(
+      o.invitacionPendienteHasta,
+    )}. Reenvíala sólo si el correo no le ha llegado.`;
+  }
+  if (o.mustChangePassword) {
+    return `${o.email} tiene una contraseña provisional del flujo anterior. Reenviar la desactiva y le manda un enlace para elegir la suya.`;
+  }
+  return `${o.email} no tiene contraseña y su enlace ya no vale. Reenvíale uno nuevo.`;
+}
+
+function EstadoDelUsuario({ user }: { user: TenantUser }) {
+  if (user.invitacionPendienteHasta) {
+    return (
+      <span className="text-amber-700 text-[12px]">
+        Invitación pendiente (caduca {diaYMes(user.invitacionPendienteHasta)})
+      </span>
+    );
+  }
+  // primer-acceso · el enlace caducó y no hay contraseña: la cuenta está
+  // bloqueada de hecho, y la tabla lo dice en vez de un «—» mudo.
+  if (user.sinContrasena === true) {
+    return (
+      <span className="text-red-700 text-[12px]">
+        Invitación caducada · hay que reenviarla
+      </span>
+    );
+  }
+  if (user.mustChangePassword) {
+    return (
+      <span className="text-amber-700 text-[12px]">
+        Contraseña provisional sin cambiar
+      </span>
+    );
+  }
+  return <span className="text-slate-400 text-[12px]">—</span>;
+}
+
 function StateHeader({ state }: { state: "DRAFT" | "ACTIVE" }) {
   if (state === "ACTIVE") return null;
   return (
@@ -1194,7 +1342,7 @@ function StateHeader({ state }: { state: "DRAFT" | "ACTIVE" }) {
         <p className="text-[12.5px] text-slate-600 mt-0.5">
           Sin propietario todavía. Tu equipo prueba el TPV con un cajero
           técnico. Cuando todo pase, "Activar cuenta" crea el OWNER y le
-          envía el email.
+          manda la invitación por correo.
         </p>
       </div>
     </div>
@@ -1440,8 +1588,8 @@ function ActivatePanel({
     <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
       <h3 className="font-semibold text-slate-900 mb-2">Activar cuenta</h3>
       <p className="text-[12.5px] text-slate-500 mb-4">
-        Crea la cuenta del propietario y envía email con credenciales.
-        Borra los datos de prueba. <strong>Irreversible.</strong>
+        Crea la cuenta del propietario y le envía un enlace para que elija su
+        contraseña. Borra los datos de prueba. <strong>Irreversible.</strong>
       </p>
       <button
         onClick={onAskActivate}

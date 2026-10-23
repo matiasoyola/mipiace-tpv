@@ -92,7 +92,7 @@ export function TagAliasesPage() {
     }
   }
 
-  if (!items) return <CenteredLoader label="Cargando aliases…" />;
+  if (!items) return <CenteredLoader label="Cargando aliases…" error={error} />;
 
   return (
     <AdminShell title="Etiquetas del TPV">

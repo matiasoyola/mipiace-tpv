@@ -417,3 +417,53 @@ export async function vistaDelContrato(
       }),
   };
 }
+
+// ── primer-acceso · lo que `/auth/me` necesita para decidir la entrada ──
+//
+// Punto 3 del bloque: «si la cuenta tiene la clínica encendida y el
+// contrato no está vigente, y ella es la propietaria, la primera pantalla
+// es el contrato».
+//
+// Vive aquí y no en `routes.ts` del auth por lo mismo que todo lo demás de
+// este fichero: el estado lo calcula `estadoDelTenant`, que es la MISMA
+// función que decide el 423. Un `if` sobre versiones en la ruta de `/me`
+// habría sido la segunda implementación del estado que `estado.ts` existe
+// para evitar — y el síntoma habría sido mandar a la dueña al contrato
+// cuando el servidor ya la deja escribir, o al revés.
+
+export interface ContratoEnLaEntrada {
+  /** El nombre del estado, tal cual. `APAGADO` incluido: el panel lo trata
+   *  como «aquí no hay nada que aceptar» y entra donde entraba. */
+  estado: EstadoDelModuloClinico["estado"];
+  /** `true` cuando hay que llevar a esta persona al contrato antes que a
+   *  cualquier otra pantalla. */
+  falta: boolean;
+  /** `true` si ESTA persona puede aceptarlo. Lo decide el servidor con el
+   *  rol de la base, igual que `GET /clinica/contrato`, y no el rol del
+   *  token: así la pantalla no ofrece un botón que la ruta va a negar. */
+  puedeAceptar: boolean;
+}
+
+export async function estadoDelContratoParaElPanel(
+  tenantId: string,
+  userId: string,
+  prisma: Ejecutor = getPrisma(),
+): Promise<ContratoEnLaEntrada> {
+  const estado = await estadoDelTenant(tenantId, prisma);
+  if (estado.estado === "APAGADO") {
+    return { estado: "APAGADO", falta: false, puedeAceptar: false };
+  }
+  const fila = await prisma.user.findFirst({
+    where: { id: userId, tenantId, deletedAt: null },
+    select: { role: true },
+  });
+  return {
+    estado: estado.estado,
+    // `VIGENTE` es el único estado en el que no falta nada. `SOLO_LECTURA`
+    // también manda al contrato: hay una versión nueva sin aceptar o está
+    // revocado, y en los dos casos lo siguiente que hay que hacer es
+    // mirarlo — no chocar con el 423 tres pantallas más adelante.
+    falta: estado.estado !== "VIGENTE",
+    puedeAceptar: fila?.role === "OWNER",
+  };
+}

@@ -478,3 +478,128 @@ export function nombresQueColisionan(
   }
   return choques;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// n1-hosteleria · QUIÉN TIENE EL SITIO EN EL CATÁLOGO (hallazgos 2 y 7)
+//
+// Los dos hallazgos de la pasada del 18-10 son el MISMO problema: la
+// rejilla de familias no cede su sitio.
+//
+//   · buscando «tost» con el teclado abierto (ventana 360 × 449), las
+//     seis familias ocupaban la pantalla y el primero de los 25
+//     resultados caía en y=592: cero resultados a la vista (hallazgo 2);
+//   · con «Cafe» elegida, el primer producto en y=833 con ventana de 648
+//     y sin desplazamiento automático, así que parecía que tocar la
+//     familia no había servido de nada (hallazgo 7).
+//
+// Vive aquí y no en el componente para que un banco pueda recorrer la
+// tabla entera sin montar la pantalla: jsdom no mide maquetación, pero
+// sí mide qué se decide (`n1-vertical-done` §4.2).
+// ──────────────────────────────────────────────────────────────────────
+
+/** La vista del catálogo: «Ahora» o una familia concreta. */
+export type VistaDelCatalogo =
+  | { kind: "ahora" }
+  | { kind: "family"; tag: string };
+
+export interface RepartoDelCatalogo {
+  /** ¿Se pinta la rejilla entera de familias? */
+  rejilla: boolean;
+  /** ¿Se pinta la tira con la familia elegida y «Cambiar»? */
+  tira: boolean;
+  /**
+   * ¿Se pinta la fila de cantidad 1–6?
+   *
+   * La añade la pasada del 23-10 en el N1. Buscando «tost» con el
+   * teclado abierto —ventana de 449 px— la rejilla de familias SÍ cedía
+   * su sitio, pero la fila de cantidad no, y en estrecho mide **120 px**
+   * porque `n1-vertical` la repartió en 3×2 (seis teclas de 56 en una
+   * fila piden 376 y a 360 no caben). Medido en el aparato:
+   *
+   *   cabecera de comanda   112 … 180   (68)
+   *   buscador              194 … 250   (56)
+   *   fila de cantidad      291 … 411   (120)  ← no cedía
+   *   primer resultado      425 … 493          ← fuera de 449
+   *
+   * El §2 del bloque pide que «los resultados van JUSTO DEBAJO del
+   * buscador», y con 120 px en medio no lo están. Cediendo, el primer
+   * resultado pasa a 291 … 359 —dentro— y caben dos.
+   *
+   * La cantidad no se pierde: se corrige sobre la propia línea con los
+   * `−`/`+` de 56 px, que es lo que manda `principio-venta-bajo-estres`
+   * (regla 6). Y en el terminal la fila no se mueve.
+   *
+   * En el banco no se vio porque su tenant no está en ensayo y no paga
+   * los 40 px de la banda.
+   */
+  cantidad: boolean;
+}
+
+/**
+ * Qué se pinta por encima de los productos.
+ *
+ * Las dos reglas, que **sólo** aplican en un aparato de mano:
+ *
+ *   1. con texto en el buscador, NI rejilla, NI tira, NI fila de
+ *      cantidad. Buscando, las familias no sirven para nada —la lista de
+ *      productos llega ya filtrada por la búsqueda, y filtrar además por
+ *      familia dejaría «sin resultados» con el producto a la vista en
+ *      otra— así que su sitio entero es de los resultados. Lo de la fila
+ *      de cantidad lo encontró la pasada del 23-10 en el N1: ver la nota
+ *      de `cantidad`;
+ *   2. con familia elegida, la rejilla se pliega a la tira, salvo que el
+ *      camarero haya pedido verla otra vez (`rejillaAbierta`).
+ *
+ * En el terminal la rejilla está siempre: trece familias a seis columnas
+ * son dos filas de 76 px y sobra pantalla. Es la restricción del bloque.
+ */
+export function repartoDelCatalogo(opts: {
+  deMano: boolean;
+  buscando: boolean;
+  vista: VistaDelCatalogo;
+  rejillaAbierta: boolean;
+}): RepartoDelCatalogo {
+  if (!opts.deMano) return { rejilla: true, tira: false, cantidad: true };
+  // Buscando no se pinta NADA por encima de los resultados: ni familias
+  // ni tira ni la fila de cantidad. Ver la nota de `cantidad`.
+  if (opts.buscando) {
+    return { rejilla: false, tira: false, cantidad: false };
+  }
+  const plegada = opts.vista.kind === "family" && !opts.rejillaAbierta;
+  return { rejilla: !plegada, tira: plegada, cantidad: true };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// n1-hosteleria · LA HOJA DE LA COMANDA NO SOBREVIVE A SALIR (hallazgo 8)
+//
+// Medido en la pasada del 18-10: abierta la comanda, se va a «Tickets
+// pasados», se abre la ficha de un ticket y se vuelve — y la hoja sigue
+// abierta debajo, tapando la venta. Durante el recorrido bloqueó DOS
+// veces los toques (la búsqueda y las familias) hasta cerrarla a mano.
+//
+// La causa es que la venta no se desmonta: «Tickets pasados», la ficha y
+// el cajón son overlays DENTRO de `SalePage`, así que el `sheetOpen` del
+// espacio de trabajo sobrevive intacto.
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * ¿Se pinta la hoja de la comanda?
+ *
+ * Dos condiciones, y las dos hacen falta:
+ *
+ *   · que el camarero la haya abierto (`abierta`);
+ *   · que no haya nada montado por encima de la venta
+ *     (`fueraDeLaVenta`: «Tickets pasados» y la ficha de un ticket, el
+ *     cajón del menú, la agenda, «Cerrar el día» y el arqueo X).
+ *
+ * Que sea derivado y no sólo un `setState` es a propósito: aunque el
+ * efecto que apaga `abierta` no llegara a correr —o alguien lo quitara—,
+ * la hoja no puede pintarse encima de un overlay. El efecto está
+ * ADEMÁS, para que al volver la hoja no reaparezca.
+ */
+export function hojaDeComandaVisible(opts: {
+  abierta: boolean;
+  fueraDeLaVenta: boolean;
+}): boolean {
+  return opts.abierta && !opts.fueraDeLaVenta;
+}

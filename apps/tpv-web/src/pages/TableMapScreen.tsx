@@ -73,18 +73,15 @@ import type { ServerDraft } from "../lib/tableDraft.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 import {
   ROOM_GRID_GAP,
-  ROOM_HEADER_DARK,
-  ROOM_SIDE_PADDING_DARK,
-  ROOM_TOP_PADDING_DARK,
-  TABLE_AMOUNT_FONT_PX_DARK,
+  repartoDeSala,
   ZONE_GAP,
   TABLE_SHAPE_RADIUS,
   TABLE_SHAPE_SIZE,
   tamanoDeMesaPara,
   type RoomZone,
-  ZONE_PADDING,
   roundTableChordWidth,
 } from "../lib/roomGrid.js";
+import { useAparatoDeMano } from "../hooks/useAparatoDeMano.js";
 import {
   BAR_COUNTER_FILL,
   CORAL,
@@ -262,6 +259,12 @@ export function TableMapScreen(props: TableMapScreenProps) {
     );
     return totalAparcadoEnVentaRapida(lineas, computeCart(lineas).total);
   })();
+  // n1-hosteleria · el umbral ÚNICO del bloque. De aquí cuelga todo lo
+  // que cambia en un aparato de mano; por encima de 640 px `reparto` es
+  // `REPARTO_TERMINAL` y esta pantalla es exactamente la de v2-H1.
+  const deMano = useAparatoDeMano();
+  const reparto = repartoDeSala(deMano);
+
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
@@ -448,7 +451,12 @@ export function TableMapScreen(props: TableMapScreenProps) {
     )
       .filter((z) => (porZona[z] ?? 0) > 0)
       .map((z) => ({ tables: porZona[z] ?? 0, isBar: z === "BARRA" }));
-    return tamanoDeMesaPara(zonas, window.innerWidth, window.innerHeight);
+    return tamanoDeMesaPara(
+      zonas,
+      window.innerWidth,
+      window.innerHeight,
+      reparto,
+    );
   })();
 
   async function dejarLibre(mesa: ApiTable): Promise<void> {
@@ -484,6 +492,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
         canCobrar={canCobrar}
         lista={props.mesasListas?.has(t.id) === true}
         lado={ladoDeMesa}
+        deMano={deMano}
+        amountFontPx={reparto.amountFontPx}
         onRecogida={setPorRecoger}
         onServido={() => {
           const orderId = props.comandaListaPorMesa?.get(t.id);
@@ -495,11 +505,151 @@ export function TableMapScreen(props: TableMapScreenProps) {
     );
   };
 
+  // n1-hosteleria · los controles de la cabecera, sueltos, para poder
+  // componerlos en UNA fila (terminal) o en DOS (mano) sin duplicar
+  // ninguno. Ver la nota larga del `<header>`.
+  const botonMenu = (
+    <button
+      type="button"
+      onClick={() => setDrawerOpen(true)}
+      title="Abrir menú"
+      aria-label="Abrir menú"
+      className="shrink-0 rounded-[14px] flex items-center justify-center"
+      style={{
+        width: MIN_TOUCH_PX,
+        height: MIN_TOUCH_PX,
+        background: DARK_SURFACE,
+        color: DARK_TEXT_SOFT,
+      }}
+    >
+      <Menu className="w-5 h-5" strokeWidth={2.1} />
+    </button>
+  );
+
+  const bloqueTitulo = (
+    // En la mano `flex-1 min-w-0`: es el único hijo que CEDE, y es lo que
+    // impide que la fila pida más ancho que la ventana. 22/15 px en vez
+    // de 28/17 para que las dos líneas entren en los 56 de la fila.
+    <div className={deMano ? "flex-1 min-w-0" : "min-w-0"}>
+      <div
+        className="font-semibold leading-tight truncate"
+        style={{
+          fontSize: deMano ? 22 : 28,
+          letterSpacing: "-0.015em",
+        }}
+      >
+        Sala
+      </div>
+      {/* «N abiertas · X €», tal cual lo pide la decisión 8.
+          El «M libres» de la cabecera clara se va: con la mesa libre
+          siendo ahora lo MÁS claro del lienzo, contarlas es repetir
+          con un número lo que la sala ya dice de un vistazo. El
+          cálculo no se toca —sigue siendo `summarizeOpenTables`, que
+          comparte con el aviso del cierre de v1.22— y `freeCount`
+          sigue saliendo de él, sólo que ya no se pinta aquí. */}
+      <div
+        data-testid="room-counter"
+        className="tabular-nums truncate"
+        style={{ fontSize: deMano ? 15 : 17, color: DARK_TEXT_MUTED }}
+      >
+        {/* «1 abierta», no «1 abiertas». Lo cazó el bucle visual en
+            la sala de Sirope, que tenía una sola mesa ocupada. */}
+        {openCount} {openCount === 1 ? "abierta" : "abiertas"} ·{" "}
+        {formatEur(salaTotal)}
+      </div>
+    </div>
+  );
+
+  const botonTickets = (
+    <button
+      type="button"
+      onClick={() => {
+        setHistoryQuery(undefined);
+        setShowHistory(true);
+      }}
+      title="Tickets pasados"
+      aria-label="Tickets pasados"
+      className="shrink-0 rounded-[14px] flex items-center justify-center"
+      style={{
+        width: MIN_TOUCH_PX,
+        height: MIN_TOUCH_PX,
+        background: DARK_SURFACE,
+        color: DARK_TEXT_SOFT,
+      }}
+    >
+      <ReceiptText className="w-[19px] h-[19px]" strokeWidth={2.25} />
+    </button>
+  );
+
+  const botonCajero = (
+    <button
+      type="button"
+      onClick={props.onLogoutCashier}
+      title={`Bloquear (${props.cashierLabel})`}
+      // En la mano `max-w-[22vw]` (79 px a 360) en vez de 20vw: con 72 px
+      // el nombre del cajero de Sirope se quedaba en dos letras. Sigue
+      // truncando, y sigue midiendo 44 de alto.
+      className={`shrink-0 rounded-[14px] truncate ${
+        deMano ? "px-3 max-w-[22vw]" : "px-4 max-w-[20vw]"
+      }`}
+      style={{
+        height: MIN_TOUCH_PX,
+        background: DARK_SURFACE,
+        color: DARK_TEXT_SOFT,
+        fontSize: 15,
+      }}
+    >
+      {props.cashierLabel.split("@")[0]}
+    </button>
+  );
+
+  // auditoria-sirope (#11) · LA VENTA RÁPIDA APARCADA SE VE.
+  // El 18-10 quedó una de 3 € a medias y desde el mapa no había forma de
+  // saberlo: el botón decía «Venta rápida» igual que si no hubiera nada.
+  // Una mesa abierta se ve de lejos; ésta sólo aparecía sola al cerrar el
+  // turno.
+  const botonVentaRapida = (
+    <button
+      type="button"
+      onClick={props.onQuickSale}
+      data-testid="boton-venta-rapida"
+      // En la mano 16 px y `px-3.5`: con el importe aparcado el rótulo
+      // mide ~183 px de los 360, y lo que queda es para el desplazador de
+      // los chips. El importe NO se quita — es el hallazgo #11.
+      className={`shrink-0 rounded-2xl font-semibold ${
+        deMano ? "px-3.5" : "px-5"
+      }`}
+      style={{
+        height: MIN_TOUCH_PX,
+        background: CORAL,
+        color: DARK_ON_CORAL,
+        fontSize: deMano ? 16 : 19,
+      }}
+    >
+      {aparcadoEnVentaRapida > 0
+        ? `Venta rápida · ${formatEur(aparcadoEnVentaRapida)}`
+        : "Venta rápida"}
+    </button>
+  );
+
   return (
     <div
       data-testid="room-screen"
       data-theme="dark"
-      className="min-h-screen flex flex-col font-sans"
+      // n1-hosteleria · `h-screen` en la mano y `min-h-screen` en el
+      // terminal, y la diferencia es el «alto total 4.020 px» que midió
+      // la pasada: con `min-h-screen`, si el contenido es más alto que la
+      // pantalla el contenedor CRECE, el `flex-1` del `<main>` crece con
+      // él y su `overflow-y-auto` no tiene nada que recortar — así que
+      // desplaza la PÁGINA y la cabecera se va hacia arriba. Con
+      // `h-screen` la altura queda clavada, y lo que desplaza es el
+      // lienzo con la cabecera y los chips de zona siempre puestos.
+      //
+      // Se elige en JS y no con `sm:` a propósito: la regla
+      // `body.con-banda-ensayo .h-screen` del `index.css` tiene más
+      // especificidad que una utilidad `sm:`, así que un `sm:h-auto`
+      // habría dejado la altura clavada también en el terminal.
+      className={`${deMano ? "h-screen" : "min-h-screen"} flex flex-col font-sans`}
       style={{ background: DARK_CANVAS, color: DARK_TEXT }}
     >
       {/* ── Cabecera ──────────────────────────────────────────────────
@@ -512,117 +662,111 @@ export function TableMapScreen(props: TableMapScreenProps) {
 
           El menú, Tickets y el cajero siguen a un toque, a la izquierda,
           como hasta ahora. */}
+      {/* ── Cabecera ──────────────────────────────────────────────────
+          En el TERMINAL: UNA fila de 80 px con todo —identidad, contador
+          de sala, filtros de zona y «Venta rápida»—. La cabecera clara
+          repartía lo mismo en TRES bloques (barra de app, fila «Sala · N
+          abiertas…» y leyenda) que sumaban 212 px antes de la primera
+          mesa. Esos 108 px recuperados son los que permiten que la mesa
+          crezca de 19.824 a 20.736 px² sin que la sala desplace.
+
+          EN LA MANO: DOS filas de 56. Y no es estética — es el hallazgo 1
+          de la pasada del 18-10 (🔴).
+
+          Esa fila única lleva a TODOS sus hijos en `shrink-0`, así que su
+          ancho de contenido mínimo es la suma de todos: ~845 px. El
+          WebView de Android ensancha el viewport de maquetación hasta el
+          mínimo que le pide el contenido, y medido en el N1 eso daba
+          `innerWidth` 845 con `documentElement.clientWidth` 360 — 485 px
+          fuera de la pantalla, SÓLO en esta pantalla (en el resto del TPV
+          era 360 × 720). Con ellos se iban «Salón» (termina en x=402) y
+          «Terraza» (x=512), y la página no desplaza en horizontal
+          (`scrollLeft` se quedaba en 0): dos de las cuatro zonas,
+          inalcanzables.
+
+          Lo que lo arregla no es repartir en dos filas por sí mismo, sino
+          que NINGUNA fila pida más que la ventana:
+
+            · fila 1 · el bloque del título es `flex-1 min-w-0` y trunca,
+              así que cede;
+            · fila 2 · los chips viven en su PROPIO desplazador
+              horizontal (`overflow-x-auto` + `min-w-0`), que es lo que
+              permite que la fila mida 0 de mínimo y que «Terraza» se
+              alcance deslizando los chips, sin mover la página.
+
+          Reparto: arriba lo que identifica y lo que se consulta (menú,
+          sala, Tickets, cajero); abajo lo que se usa en cada servicio
+          (las zonas y «Venta rápida», que se queda a la derecha y a mano
+          del pulgar). Los cuatro objetivos siguen midiendo 44. */}
       <header
-        className="shrink-0 flex items-center gap-4 px-5 border-b"
-        style={{ height: ROOM_HEADER_DARK, borderColor: DARK_SURFACE_RAISED }}
+        className={
+          deMano
+            ? "shrink-0 flex flex-col border-b"
+            : "shrink-0 flex items-center gap-4 px-5 border-b"
+        }
+        style={{
+          height: reparto.headerHeight,
+          borderColor: DARK_SURFACE_RAISED,
+        }}
       >
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          title="Abrir menú"
-          aria-label="Abrir menú"
-          className="shrink-0 rounded-[14px] flex items-center justify-center"
-          style={{
-            width: MIN_TOUCH_PX,
-            height: MIN_TOUCH_PX,
-            background: DARK_SURFACE,
-            color: DARK_TEXT_SOFT,
-          }}
-        >
-          <Menu className="w-5 h-5" strokeWidth={2.1} />
-        </button>
-        <div className="min-w-0">
-          <div
-            className="font-semibold leading-tight"
-            style={{ fontSize: 28, letterSpacing: "-0.015em" }}
-          >
-            Sala
-          </div>
-          {/* «N abiertas · X €», tal cual lo pide la decisión 8.
-              El «M libres» de la cabecera clara se va: con la mesa libre
-              siendo ahora lo MÁS claro del lienzo, contarlas es repetir
-              con un número lo que la sala ya dice de un vistazo. El
-              cálculo no se toca —sigue siendo `summarizeOpenTables`, que
-              comparte con el aviso del cierre de v1.22— y `freeCount`
-              sigue saliendo de él, sólo que ya no se pinta aquí. */}
-          <div
-            data-testid="room-counter"
-            className="tabular-nums truncate"
-            style={{ fontSize: 17, color: DARK_TEXT_MUTED }}
-          >
-            {/* «1 abierta», no «1 abiertas». Lo cazó el bucle visual en
-                la sala de Sirope, que tenía una sola mesa ocupada. */}
-            {openCount} {openCount === 1 ? "abierta" : "abiertas"} ·{" "}
-            {formatEur(salaTotal)}
-          </div>
-        </div>
-        {offline && (
-          <span
-            className="hidden md:flex items-center gap-1.5 shrink-0"
-            style={{ fontSize: 14, color: "#F2A08F" }}
-          >
-            <WifiOff className="w-4 h-4" /> Sin conexión
-          </span>
+        {deMano ? (
+          <>
+            <div
+              data-testid="room-header-fila-1"
+              className="flex items-center gap-2.5 px-4 min-w-0"
+              style={{ height: reparto.headerHeight / 2 }}
+            >
+              {botonMenu}
+              {bloqueTitulo}
+              {botonTickets}
+              {botonCajero}
+            </div>
+            <div
+              data-testid="room-header-fila-2"
+              className="flex items-center gap-2.5 px-4 min-w-0"
+              style={{ height: reparto.headerHeight / 2 }}
+            >
+              {/* El desplazador propio de los chips. `min-w-0` para que
+                  la fila no herede su ancho de contenido, y
+                  `overscroll-contain` para que al llegar al último chip
+                  el gesto no siga hacia la página. */}
+              <div
+                data-testid="zone-chips-scroller"
+                className="flex-1 min-w-0 overflow-x-auto overscroll-contain"
+              >
+                <ZoneChips
+                  zoneFilter={zoneFilter}
+                  setZoneFilter={setZoneFilter}
+                  counts={counts}
+                  deMano
+                />
+              </div>
+              {botonVentaRapida}
+            </div>
+          </>
+        ) : (
+          <>
+            {botonMenu}
+            {bloqueTitulo}
+            {offline && (
+              <span
+                className="hidden md:flex items-center gap-1.5 shrink-0"
+                style={{ fontSize: 14, color: "#F2A08F" }}
+              >
+                <WifiOff className="w-4 h-4" /> Sin conexión
+              </span>
+            )}
+            <div className="flex-grow" />
+            <ZoneChips
+              zoneFilter={zoneFilter}
+              setZoneFilter={setZoneFilter}
+              counts={counts}
+            />
+            {botonTickets}
+            {botonCajero}
+            {botonVentaRapida}
+          </>
         )}
-        <div className="flex-grow" />
-        <ZoneChips
-          zoneFilter={zoneFilter}
-          setZoneFilter={setZoneFilter}
-          counts={counts}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            setHistoryQuery(undefined);
-            setShowHistory(true);
-          }}
-          title="Tickets pasados"
-          aria-label="Tickets pasados"
-          className="shrink-0 rounded-[14px] flex items-center justify-center"
-          style={{
-            width: MIN_TOUCH_PX,
-            height: MIN_TOUCH_PX,
-            background: DARK_SURFACE,
-            color: DARK_TEXT_SOFT,
-          }}
-        >
-          <ReceiptText className="w-[19px] h-[19px]" strokeWidth={2.25} />
-        </button>
-        <button
-          type="button"
-          onClick={props.onLogoutCashier}
-          title={`Bloquear (${props.cashierLabel})`}
-          className="shrink-0 rounded-[14px] px-4 max-w-[20vw] truncate"
-          style={{
-            height: MIN_TOUCH_PX,
-            background: DARK_SURFACE,
-            color: DARK_TEXT_SOFT,
-            fontSize: 15,
-          }}
-        >
-          {props.cashierLabel.split("@")[0]}
-        </button>
-        {/* auditoria-sirope (#11) · LA VENTA RÁPIDA APARCADA SE VE.
-            El 18-10 quedó una de 3 € a medias y desde el mapa no había
-            forma de saberlo: el botón decía «Venta rápida» igual que si
-            no hubiera nada. Una mesa abierta se ve de lejos; ésta sólo
-            aparecía sola al cerrar el turno. */}
-        <button
-          type="button"
-          onClick={props.onQuickSale}
-          data-testid="boton-venta-rapida"
-          className="shrink-0 rounded-2xl px-5 font-semibold"
-          style={{
-            height: MIN_TOUCH_PX,
-            background: CORAL,
-            color: DARK_ON_CORAL,
-            fontSize: 19,
-          }}
-        >
-          {aparcadoEnVentaRapida > 0
-            ? `Venta rápida · ${formatEur(aparcadoEnVentaRapida)}`
-            : "Venta rápida"}
-        </button>
       </header>
 
       {/* v1.9.2-mesas-concurrencia · banner inline de expulsión / éxito.
@@ -681,10 +825,10 @@ export function TableMapScreen(props: TableMapScreenProps) {
       <main
         className="flex-1 flex flex-col overflow-y-auto"
         style={{
-          paddingLeft: ROOM_SIDE_PADDING_DARK,
-          paddingRight: ROOM_SIDE_PADDING_DARK,
-          paddingTop: ROOM_TOP_PADDING_DARK,
-          paddingBottom: ROOM_SIDE_PADDING_DARK,
+          paddingLeft: reparto.sidePadding,
+          paddingRight: reparto.sidePadding,
+          paddingTop: reparto.topPadding,
+          paddingBottom: reparto.sidePadding,
         }}
       >
         {offline && (
@@ -733,11 +877,17 @@ export function TableMapScreen(props: TableMapScreenProps) {
                     key={zone}
                     tables={zoneTables}
                     renderCard={renderRoomCard}
+                    zonePadding={reparto.zonePadding}
+                    deMano={deMano}
                   />
                 );
               }
               return (
-                <ZoneFrame key={zone} label={ZONE_LABEL[zone].toUpperCase()}>
+                <ZoneFrame
+                  key={zone}
+                  label={ZONE_LABEL[zone].toUpperCase()}
+                  zonePadding={reparto.zonePadding}
+                >
                   <RoomGrid>{zoneTables.map(renderRoomCard)}</RoomGrid>
                 </ZoneFrame>
               );
@@ -1015,10 +1165,20 @@ function ZoneChips({
   zoneFilter,
   setZoneFilter,
   counts,
+  deMano = false,
 }: {
   zoneFilter: TableZone | "ALL";
   setZoneFilter: (z: TableZone | "ALL") => void;
   counts: Record<TableZone, number>;
+  /**
+   * n1-hosteleria · en la mano los chips viven dentro de un desplazador
+   * horizontal propio (ver la nota del `<header>`) y SUBEN de 52 a
+   * `MIN_TOUCH_PX` = 56, que es el suelo táctil de estas pantallas: los
+   * 52 del terminal se tocan con el ratón o con la tablet apoyada, y
+   * aquí se tocan en marcha. El rótulo baja a 16 px y el relleno a
+   * `px-4` para que quepan más chips antes de deslizar.
+   */
+  deMano?: boolean;
 }) {
   // El orden de los chips sigue a `ZONE_ORDER`: Barra primero, como el
   // lienzo. Con un orden aquí y otro abajo, el camarero aprendería dos.
@@ -1044,10 +1204,12 @@ function ZoneChips({
             aria-pressed={active}
             data-testid="zone-chip"
             data-zone={item.id}
-            className="rounded-[14px] px-5 shrink-0 font-medium"
+            className={`rounded-[14px] shrink-0 font-medium ${
+              deMano ? "px-4" : "px-5"
+            }`}
             style={{
-              height: 52,
-              fontSize: 18,
+              height: deMano ? MIN_TOUCH_PX : 52,
+              fontSize: deMano ? 16 : 18,
               fontWeight: active ? 600 : 500,
               background: active ? DARK_TEXT : DARK_SURFACE,
               color: active ? DARK_CANVAS : DARK_TEXT_SOFT,
@@ -1069,9 +1231,16 @@ function ZoneFrame({
   label,
   children,
   extraTop,
+  zonePadding,
 }: {
   label: string;
   children: ReactNode;
+  /**
+   * n1-hosteleria · 12 px en la mano y 18 en el terminal
+   * (`RepartoDeSala.zonePadding`). Los 6 px por lado son los que hacen
+   * que quepan TRES mesas de 88 en los 328 útiles de 360.
+   */
+  zonePadding: number;
   /** El mostrador dibujado de la Barra. */
   extraTop?: ReactNode;
 }) {
@@ -1080,7 +1249,7 @@ function ZoneFrame({
       data-testid="zone-frame"
       data-zone-label={label}
       className="relative rounded-[22px] border-[1.5px] border-dashed"
-      style={{ padding: ZONE_PADDING, borderColor: DARK_SURFACE_RAISED }}
+      style={{ padding: zonePadding, borderColor: DARK_SURFACE_RAISED }}
     >
       <span
         className="absolute -top-[9px] left-[22px] px-2 font-medium"
@@ -1142,6 +1311,8 @@ function TableCard({
   canCobrar,
   lista,
   lado,
+  deMano,
+  amountFontPx,
   onRecogida,
   onServido,
   onPick,
@@ -1160,6 +1331,25 @@ function TableCard({
   lista: boolean;
   /** auditoria-sirope (#13) · el lado de la caja, que ya no es fijo. */
   lado: number;
+  /**
+   * n1-hosteleria · la forma pequeña (88 px) de un aparato de mano.
+   *
+   * QUÉ SE QUEDA Y QUÉ SE VA, que es la decisión que pedía el bloque.
+   * `principio-cobro-en-mesa` manda: «el total visible en la tarjeta» y
+   * «cobrar directo desde la tarjeta de mesa, sin entrar a la venta». Así
+   * que de la forma de 88 px NO se van ni el número de mesa, ni el
+   * importe, ni el botón de cobro.
+   *
+   * Lo que se va es la META: el «hace 12 min» / «cuenta» de debajo del
+   * importe. Y se va porque es lo único que el lienzo ya dice sin
+   * palabras — el relleno distingue libre / ocupada / pide la cuenta, y
+   * el aro discontinuo es «+45 min sin atender», que es el único umbral
+   * de tiempo que se actúa. El minuto exacto se consulta abriendo la
+   * mesa, que es donde se decide algo con él.
+   */
+  deMano: boolean;
+  /** `RepartoDeSala.amountFontPx`: 14 en la mano, 22 en el terminal. */
+  amountFontPx: number;
   /** auditoria-sirope (#14) · un toque en una mesa POR RECOGER. */
   onRecogida: (t: ApiTable) => void;
   onServido: () => void;
@@ -1352,8 +1542,21 @@ function TableCard({
       >
         <span
           data-testid="table-name"
-          className="font-semibold leading-none"
-          style={{ fontSize: TABLE_NAME_PX, letterSpacing: "-0.015em" }}
+          // n1-hosteleria · con el botón de cobro de 56 px ocupando de 26
+          // a 82 de los 88, un nombre centrado cae justo encima. Anclado
+          // arriba cuando hay botón; centrado en todo lo demás, como
+          // siempre. Ver la nota de `COBRAR_HEIGHT_MANO`.
+          className={`font-semibold leading-none ${
+            deMano && showCobrar ? "absolute top-1.5 inset-x-0 text-center" : ""
+          }`}
+          style={{
+            // n1-hosteleria · 20 px en la forma de 88. Con los 28 del
+            // terminal, «M12» más el importe de 14 suman 34 px de tinta
+            // en un círculo cuya cuerda útil a esa altura no llega a 80:
+            // el nombre se comía el sitio del dinero.
+            fontSize: deMano ? (showCobrar ? 18 : 20) : TABLE_NAME_PX,
+            letterSpacing: "-0.015em",
+          }}
         >
           {table.name}
         </span>
@@ -1376,7 +1579,7 @@ function TableCard({
         ) : isFree ? (
           <span
             className="font-medium"
-            style={{ fontSize: 14, opacity: 0.65 }}
+            style={{ fontSize: deMano ? 13 : 14, opacity: 0.65 }}
           >
             {pax} pax
           </span>
@@ -1393,7 +1596,7 @@ function TableCard({
                 <span
                   data-testid="table-card-amount"
                   className="font-semibold tabular-nums whitespace-nowrap"
-                  style={{ fontSize: TABLE_AMOUNT_FONT_PX_DARK }}
+                  style={{ fontSize: amountFontPx }}
                 >
                   {formatEur(Number(table.activeTicket.total))}
                 </span>
@@ -1402,7 +1605,10 @@ function TableCard({
                   hay: el botón ya dice qué pasa con esta mesa, y en una
                   forma de 144 px las dos cosas se pisan (medido en el
                   bucle visual, T2 de La Maestranza). */}
-              {!showCobrar && (
+              {/* n1-hosteleria · en la mano esta línea no se pinta. Ver
+                  la nota del prop `deMano`: el relleno ya dice el estado
+                  y el aro discontinuo ya dice «+45 min». */}
+              {!showCobrar && !deMano && (
                 <span
                   title={`Abierta hace ${elapsed}`}
                   className="font-medium truncate max-w-full px-2"
@@ -1456,11 +1662,17 @@ function TableCard({
             // bucle visual, T2 de La Maestranza a 1443 × 812).
             left: "50%",
             transform: "translateX(-50%)",
-            bottom: COBRAR_BOTTOM,
-            maxWidth: cobrarMaxWidth(table.zone, lado),
-            paddingLeft: 10,
-            paddingRight: 10,
-            height: COBRAR_HEIGHT,
+            bottom: deMano ? COBRAR_BOTTOM_MANO : COBRAR_BOTTOM,
+            maxWidth: cobrarMaxWidth(
+              table.zone,
+              lado,
+              deMano ? COBRAR_HEIGHT_MANO : COBRAR_HEIGHT,
+              deMano ? COBRAR_BOTTOM_MANO : COBRAR_BOTTOM,
+              deMano ? COBRAR_MARGEN_MANO : undefined,
+            ),
+            paddingLeft: deMano ? COBRAR_PADDING_X_MANO : 10,
+            paddingRight: deMano ? COBRAR_PADDING_X_MANO : 10,
+            height: deMano ? COBRAR_HEIGHT_MANO : COBRAR_HEIGHT,
             fontSize: 15,
             background: TABLE_BILLING_TEXT,
             color: TABLE_BILLING_FILL,
@@ -1468,6 +1680,23 @@ function TableCard({
         >
           {cobroBusy ? (
             <Loader2 className="w-4 h-4 animate-spin" />
+          ) : deMano ? (
+            // Dos renglones, que es lo que cabe en 75 px de cuerda. Ver
+            // la nota de `COBRAR_HEIGHT_MANO`.
+            <span className="flex flex-col items-center leading-none gap-0.5">
+              <span
+                className="font-semibold uppercase"
+                style={{ fontSize: 10, letterSpacing: "0.06em" }}
+              >
+                Cobrar
+              </span>
+              <span
+                className="font-semibold tabular-nums"
+                style={{ fontSize: COBRAR_AMOUNT_FONT_PX_MANO }}
+              >
+                {formatEur(Number(table.activeTicket.total))}
+              </span>
+            </span>
           ) : (
             <>Cobrar {formatEur(Number(table.activeTicket.total))}</>
           )}
@@ -1478,10 +1707,53 @@ function TableCard({
 }
 
 /** Alto del botón «Cobrar X €» de una mesa en BILLING. */
-const COBRAR_HEIGHT = 36;
+export const COBRAR_HEIGHT = 36;
 
 /** A qué altura del borde inferior se ancla. */
-const COBRAR_BOTTOM = 18;
+export const COBRAR_BOTTOM = 18;
+
+/**
+ * n1-hosteleria · el botón de cobro en la forma de 88 px.
+ *
+ * El bloque pide «el cobro desde la tarjeta (estado cuenta) sigue
+ * existiendo **con su objetivo de 44 px**». Se le da MÁS: 56, que es
+ * `MIN_TOUCH_PX`, el suelo táctil que `hospitalityTheme.ts` fija para la
+ * venta y la sala. Los 36 del terminal están por debajo de las dos
+ * cifras; aquí no se repite.
+ *
+ * La geometría sale de la cuerda:
+ *
+ *   bottom 6 + alto 56  →  centro del botón a 34 del borde
+ *   offset del centro de la mesa = 44 − 34 = 10
+ *   cuerda a 10 = 2·√(44² − 10²) = 85,7  →  81 px de ancho útil
+ *
+ * Y obliga a algo más: con el botón ocupando de 26 a 82 px de los 88, el
+ * nombre de la mesa YA NO PUEDE IR CENTRADO —se solaparía—, así que en
+ * la mano se ancla arriba cuando hay botón de cobro.
+ *
+ * En ese ancho no entra «Cobrar 12,50 €» en UNA línea (14 caracteres a
+ * 15 px piden ~113 px), así que va en DOS renglones: «Cobrar» a 10 px
+ * encima del importe. La palabra se queda —un botón que sólo enseñara el
+ * importe se lee como una etiqueta, no como una acción— y el importe
+ * también, que es lo que el camarero compara con el efectivo.
+ *
+ * Y el importe va a **12 px**, que es lo que cabe con el peor caso de la
+ * casa (`LONGEST_TABLE_AMOUNT`, 9 caracteres). Con la cuerda a 4 px de
+ * margen en vez de 8 y `bottom` 6:
+ *
+ *   el importe a 12 px pide 9 · 11,5 · 12/19 = 65,4, más 2 · 4 de
+ *   relleno = 73,4  →  7,6 px de margen sobre los 81
+ *
+ * A 13 px pediría 78,8: entra por 2,2 px, que es menos de lo que vale
+ * fiarse de una estimación de ancho por carácter. Lo mide
+ * `n1-sala-de-mano.test.ts`, no este comentario.
+ */
+export const COBRAR_HEIGHT_MANO = MIN_TOUCH_PX;
+export const COBRAR_BOTTOM_MANO = 6;
+/** El importe DENTRO del botón de cobro de la forma pequeña. */
+export const COBRAR_AMOUNT_FONT_PX_MANO = 12;
+/** Relleno lateral del botón en la mano. */
+export const COBRAR_PADDING_X_MANO = 4;
 
 /**
  * Ancho máximo del botón «Cobrar» dentro de la forma.
@@ -1491,14 +1763,29 @@ const COBRAR_BOTTOM = 18;
  * círculo de 144 px mide 144 en su eje pero mucho menos a 36 px del
  * borde, y ahí es donde el botón se apoya.
  */
-function cobrarMaxWidth(zone: TableZone, lado: number = TABLE_SHAPE_SIZE): number {
+export function cobrarMaxWidth(
+  zone: TableZone,
+  lado: number = TABLE_SHAPE_SIZE,
+  // n1-hosteleria · la geometría del botón entra por parámetro porque en
+  // la mano es 44/8 y no 36/18. Los valores por defecto son los del
+  // terminal, así que no se mueve nada de v2-H1.
+  alto: number = COBRAR_HEIGHT,
+  desdeAbajo: number = COBRAR_BOTTOM,
+  // En la forma de 88 los márgenes de v2-H1 (16 en el rectángulo, 8 en
+  // el círculo) se llevan un 18% del ancho útil. A 88 px bastan la mitad
+  // y siguen separando el botón del borde.
+  margen: { recto: number; circulo: number } = { recto: 16, circulo: 8 },
+): number {
   if (TABLE_SHAPE_RADIUS[zone] < TABLE_SHAPE_SIZE / 2) {
-    return lado - 16;
+    return lado - margen.recto;
   }
-  const centroDelBoton = COBRAR_BOTTOM + COBRAR_HEIGHT / 2;
+  const centroDelBoton = desdeAbajo + alto / 2;
   const offset = lado / 2 - centroDelBoton;
-  return Math.floor(roundTableChordWidth(offset, lado) - 8);
+  return Math.floor(roundTableChordWidth(offset, lado) - margen.circulo);
 }
+
+/** Los márgenes del botón de cobro en la forma pequeña. */
+export const COBRAR_MARGEN_MANO = { recto: 8, circulo: 4 };
 
 /**
  * Zona BARRA: el mostrador dibujado y, encima, los taburetes ordenados
@@ -1512,9 +1799,20 @@ function cobrarMaxWidth(zone: TableZone, lado: number = TABLE_SHAPE_SIZE): numbe
 function BarZone({
   tables,
   renderCard,
+  zonePadding,
+  deMano = false,
 }: {
   tables: ApiTable[];
   renderCard: (t: ApiTable) => ReactNode;
+  zonePadding: number;
+  /**
+   * n1-hosteleria · el mostrador se queda —es lo que da identidad a la
+   * zona— pero COMPACTO: 14 px de alto y `mb-2.5` en vez de 22 y `mb-4`.
+   * El bloque lo pide así («la Barra mantiene el mostrador dibujado,
+   * pero compacto») y son 18 px menos por delante de la primera fila de
+   * taburetes, que en 529 px de alto útil es casi un cuarto de mesa.
+   */
+  deMano?: boolean;
 }) {
   const sorted = tables
     .slice()
@@ -1522,11 +1820,15 @@ function BarZone({
   return (
     <ZoneFrame
       label={ZONE_LABEL.BARRA.toUpperCase()}
+      zonePadding={zonePadding}
       extraTop={
         <div
           data-testid="bar-counter"
-          className="rounded-[11px] mb-4"
-          style={{ height: 22, background: BAR_COUNTER_FILL }}
+          className={`rounded-[11px] ${deMano ? "mb-2.5" : "mb-4"}`}
+          style={{
+            height: deMano ? 14 : 22,
+            background: BAR_COUNTER_FILL,
+          }}
         />
       }
     >

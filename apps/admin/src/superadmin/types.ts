@@ -74,6 +74,13 @@ export interface TenantUser {
   lastLoginAt: string | null;
   twoFactorEnabled: boolean;
   mustChangePassword: boolean;
+  /** primer-acceso · hasta cuándo vale la invitación pendiente. `null`
+   *  cuando no hay ninguna viva. */
+  invitacionPendienteHasta?: string | null;
+  /** primer-acceso · no tiene contraseña utilizable. Con una invitación
+   *  viva es «invitación pendiente»; sin ella, el enlace caducó y hay que
+   *  reenviarlo. */
+  sinContrasena?: boolean;
 }
 
 export interface TenantStore {
@@ -294,10 +301,27 @@ export interface TestCashierTokenResponse {
   shiftId: string;
 }
 
+/** primer-acceso · la invitación que sustituye a la contraseña
+ *  provisional. El `enlace` llega UNA vez, para «Copiar enlace»; después
+ *  se consigue otro con «Reenviar invitación», que anula el anterior. */
+export interface InvitacionEnviada {
+  email: string;
+  enlace: string;
+  caducaEl: string;
+}
+
+export interface ReenviarInvitacionResponse {
+  invitacion: InvitacionEnviada;
+  emailEnviado: boolean;
+  /** `true` cuando el reenvío mató una contraseña provisional del flujo
+   *  viejo (el caso de los propietarios activados antes del bloque). */
+  anulabaProvisional: boolean;
+}
+
 export interface ActivateTenantResponse {
   tenant: { id: string; name: string; onboardingState: OnboardingState };
   owner: { id: string; email: string; name: string };
-  tempPassword: string;
+  invitacion: InvitacionEnviada;
   // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero por defecto
   // en el TPV. Mostrado una sola vez para que el super-admin lo pase al
   // cliente offline como fallback si el email no llega.

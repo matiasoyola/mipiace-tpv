@@ -57,6 +57,8 @@ import {
   FAMILY_BAR_COLUMNS_HANDHELD,
   GRID_GAP,
   PRODUCT_COLUMNS_HANDHELD,
+  hojaDeComandaVisible,
+  repartoDelCatalogo,
   tamanoNombreProducto,
 } from "../lib/hospitalityGrid.js";
 import {
@@ -114,6 +116,7 @@ import {
   type AnulacionPendiente,
 } from "../kitchen/tpv/DeshacerToast.js";
 import { ListoBanner, type AvisoListo } from "../kitchen/tpv/ListoBanner.js";
+import { useAparatoDeMano } from "../hooks/useAparatoDeMano.js";
 import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 
 /**
@@ -126,43 +129,6 @@ import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
  * línea, que no tiene techo.
  */
 export const QUANTITIES = [1, 2, 3, 4, 5, 6] as const;
-
-/**
- * ¿Estamos en handheld (< `sm`)?
- *
- * Hace falta en JS y no sólo en CSS porque el número de columnas de la
- * barra de familias y de la cuadrícula entra por `grid-template-columns`
- * calculado: el JIT de Tailwind no compila `grid-cols-${n}` y el reparto
- * de la cuadrícula es dinámico por definición (depende de cuántos
- * productos tenga la familia).
- *
- * Con `matchMedia` y su listener, no con `window.innerWidth` leído en el
- * render: leído en el render, girar la tablet o abrir el teclado del
- * sistema no vuelve a pintar y la rejilla se queda con las columnas del
- * tamaño anterior. `ux-principles` §3.6 pide justamente que la pantalla
- * se reorganice sola al cambiar de orientación.
- *
- * `matchMedia` puede no existir (jsdom sin stub): ahí se asume terminal,
- * que es el caso para el que están medidos los números.
- */
-function useIsHandheld(): boolean {
-  const [handheld, setHandheld] = useState(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return false;
-    return window.matchMedia("(max-width: 639px)").matches;
-  });
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(max-width: 639px)");
-    const onChange = (e: MediaQueryListEvent) => setHandheld(e.matches);
-    setHandheld(mq.matches);
-    // `addEventListener` sobre MediaQueryList existe desde Chrome 39, así
-    // que el WebView 101 del D8 lo tiene de sobra; el `addListener`
-    // legacy no hace falta.
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  return handheld;
-}
 
 /** Una acción de la barra de chrome que vive dentro de la comanda. */
 export interface ChromeAction {
@@ -239,6 +205,17 @@ export interface HospitalityWorkspaceProps {
    * el lector y la protección del teclado del sistema.
    */
   searchField: ReactNode;
+  /**
+   * n1-hosteleria (hallazgo 8) · ¿hay algo montado POR ENCIMA de la
+   * venta? «Tickets pasados» y la ficha de un ticket, el cajón del menú,
+   * la agenda, «Cerrar el día» y el arqueo X.
+   *
+   * Es más ancho que `overlayEncima` de n1-vertical a propósito: aquél
+   * decide si se pinta la barra del total —y el cajón o los tickets no
+   * son razón para quitarla— y éste decide si la hoja de la comanda
+   * sigue abierta, que es otra pregunta.
+   */
+  fueraDeLaVenta: boolean;
   onBackToMap: (() => void) | null;
   onClickProduct: (p: CatalogProduct, units: number) => void;
   onClickLine: (line: CartLine) => void;
@@ -317,10 +294,26 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // efecto: con un efecto habría un primer pintado con otra vista y la
   // pantalla parpadearía al entrar en cada mesa.
   const [view, setView] = useState<View>({ kind: "ahora" });
-  const handheld = useIsHandheld();
+  const handheld = useAparatoDeMano();
   // Handheld: la comanda vive en un bottom-sheet. Cerrarlo no toca nada
   // —las líneas viven en `SalePage`—, así que es sólo abierto/cerrado.
   const [sheetOpen, setSheetOpen] = useState(false);
+  /**
+   * n1-hosteleria · ¿el camarero ha pedido ver la rejilla de familias
+   * otra vez, teniendo ya una elegida? (hallazgos 2 y 7)
+   *
+   * Sólo cuenta en un aparato de mano. En el terminal la rejilla está
+   * siempre: trece familias a seis columnas son dos filas de 76 px, y
+   * sobra pantalla.
+   */
+  const [rejillaAbierta, setRejillaAbierta] = useState(false);
+
+  // n1-hosteleria (hallazgo 8) · al salir de la venta, la hoja se cierra
+  // de verdad: no basta con no pintarla, porque al volver estaría otra
+  // vez abierta tapando la búsqueda y las familias.
+  useEffect(() => {
+    if (props.fueraDeLaVenta) setSheetOpen(false);
+  }, [props.fueraDeLaVenta]);
   // n1-vertical · la barra inferior de handheld sólo mientras se marca.
   // Misma decisión y mismos motivos que en el TPV claro (ver la nota de
   // `barraTicketVisible` en SalePage.tsx): con un overlay encima tapa su
@@ -347,6 +340,43 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // y filtrar además por familia dejaría «no hay resultados» con el
   // producto a la vista en otra familia.
   const searching = props.searchQuery.trim().length > 0;
+
+  // ── n1-hosteleria · quién tiene el sitio (hallazgos 2 y 7) ──────────
+  //
+  // Los dos hallazgos son el MISMO problema: la rejilla de familias no
+  // cede su sitio. Medido en el N1 el 18-10:
+  //
+  //   · buscando «tost» con el teclado abierto (ventana 360 × 449): las
+  //     seis familias ocupaban la pantalla y el primer resultado de 25
+  //     caía en y=592. Cero resultados a la vista (hallazgo 2);
+  //   · con «Cafe» elegida: el primer producto en y=833 con ventana de
+  //     648, y sin desplazamiento automático. Parecía que tocar la
+  //     familia no había hecho nada (hallazgo 7).
+  //
+  // Las dos reglas, que sólo aplican en la mano:
+  //
+  //   1. CON TEXTO EN EL BUSCADOR la rejilla no se pinta. Nada de
+  //      plegarla ni encogerla: buscando, las familias no sirven para
+  //      nada —`products` llega ya filtrado por la búsqueda y filtrar
+  //      además por familia dejaría «sin resultados» con el producto a
+  //      la vista en otra— así que su sitio entero es de los resultados.
+  //   2. CON FAMILIA ELEGIDA la rejilla se pliega a una TIRA: la familia
+  //      elegida con su color, y «Cambiar» al lado. Un toque la
+  //      devuelve, y elegir otra familia la vuelve a plegar.
+  //
+  // Al borrar la búsqueda o volver a «Ahora», todo vuelve solo: son
+  // derivadas de `searching` y `view`, no un estado que haya que
+  // deshacer.
+  const {
+    rejilla: mostrarRejillaDeFamilias,
+    tira: familiaPlegada,
+    cantidad: mostrarFilaDeCantidad,
+  } = repartoDelCatalogo({
+      deMano: handheld,
+      buscando: searching,
+      vista: view,
+      rejillaAbierta,
+    });
 
   const visibleProducts = useMemo(() => {
     if (searching) return props.products;
@@ -457,7 +487,9 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
           un producto obligaba a bajar a la rejilla y volver a subir para
           ver el total — y la barra inferior con el total siempre a la
           vista es lo que v1.0-handheld puso ahí para evitarlo. */}
-      {!handheld && <Comanda {...props} sent={sent} pending={pending} />}
+      {!handheld && (
+        <Comanda {...props} sent={sent} pending={pending} deMano={handheld} />
+      )}
 
       {/* ── El catálogo ─────────────────────────────────────────────── */}
       <div className="flex-grow min-w-0 flex flex-col p-4 gap-3.5 box-border min-h-0">
@@ -473,7 +505,52 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
           </div>
         )}
         {handheld && props.searchField}
+        {/* n1-hosteleria · la TIRA de familia plegada (hallazgo 7).
+            La familia elegida con su color, para que se vea DÓNDE está,
+            y «Cambiar» para volver a la rejilla. 56 px de alto, que es el
+            suelo táctil de esta pantalla. */}
+        {familiaPlegada && view.kind === "family" && (
+          <div
+            data-testid="family-strip"
+            className="shrink-0 flex items-center gap-2"
+          >
+            <div
+              data-testid="family-strip-actual"
+              data-tag={view.tag}
+              className="flex-1 min-w-0 rounded-[14px] flex items-center px-3.5"
+              style={{
+                height: MIN_TOUCH_PX,
+                background: familyFillFor(view.tag, props.familyTones),
+                color: FAMILY_TEXT,
+              }}
+            >
+              <span
+                className="truncate font-semibold"
+                style={{ fontSize: 18 }}
+              >
+                {props.familyLabels[view.tag] ?? view.tag}
+              </span>
+            </div>
+            <button
+              type="button"
+              data-testid="cambiar-familia"
+              aria-label="Cambiar familia"
+              onClick={() => setRejillaAbierta(true)}
+              className={`shrink-0 rounded-[14px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
+              style={{
+                height: MIN_TOUCH_PX,
+                background: DARK_SURFACE,
+                color: DARK_TEXT_SOFT,
+                fontSize: 16,
+              }}
+            >
+              Cambiar
+            </button>
+          </div>
+        )}
+
         {/* Barra de familias. «Ahora» PRIMERO y sin vista «Todos». */}
+        {mostrarRejillaDeFamilias && (
         <div
           data-testid="family-bar"
           data-columns={handheld ? FAMILY_BAR_COLUMNS_HANDHELD : FAMILY_BAR_COLUMNS}
@@ -498,10 +575,17 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               fill={familyFillFor(tag, props.familyTones)}
               active={view.kind === "family" && view.tag === tag}
               anchoUtilPx={anchoUtilFamilia}
-              onClick={() => setView({ kind: "family", tag })}
+              onClick={() => {
+                setView({ kind: "family", tag });
+                // n1-hosteleria · elegir familia PLIEGA la rejilla, que
+                // es lo que deja el primer producto a la vista. En el
+                // terminal `rejillaAbierta` no se consulta.
+                setRejillaAbierta(false);
+              }}
             />
           ))}
         </div>
+        )}
 
         <div
           className="h-px shrink-0"
@@ -524,6 +608,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             Lo encontró el bucle visual: las teclas 5 y 6 se salían de la
             pantalla por la derecha, que es scroll horizontal y está
             prohibido por `ux-principles` §1.8. */}
+        {mostrarFilaDeCantidad && (
         <div
           data-testid="qty-row"
           data-columns={handheld ? 3 : 6}
@@ -582,6 +667,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             </span>
           )}
         </div>
+        )}
 
         {/* La cuadrícula. §3b · NUNCA paginación: ni páginas, ni flechas,
             ni «Más (N)», ni scroll dentro de la rejilla. El reparto se
@@ -736,7 +822,10 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               quitarlo haría saltar la rejilla cada vez que el cajero
               toca el buscador. */}
           <div className="h-20 shrink-0" aria-hidden />
-          {sheetOpen && (
+          {hojaDeComandaVisible({
+            abierta: sheetOpen,
+            fueraDeLaVenta: props.fueraDeLaVenta,
+          }) && (
             <div className="fixed inset-0 z-40">
               <div
                 className="absolute inset-0"
@@ -770,7 +859,13 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
                     <X className="w-4 h-4" strokeWidth={2.25} />
                   </button>
                 </div>
-                <Comanda {...props} sent={sent} pending={pending} inSheet />
+                <Comanda
+                  {...props}
+                  sent={sent}
+                  pending={pending}
+                  inSheet
+                  deMano={handheld}
+                />
               </div>
             </div>
           )}
@@ -997,6 +1092,7 @@ function PendingLine({
   onLess,
   onMore,
   chips,
+  deMano,
 }: {
   line: CartLine;
   /**
@@ -1012,6 +1108,22 @@ function PendingLine({
   onClick: () => void;
   onLess: () => void;
   onMore: () => void;
+  /**
+   * n1-hosteleria (hallazgo 3) · ¿estamos en un aparato de mano?
+   *
+   * auditoria-sirope (#8) dejó esta línea en UNA fila y la dimensionó
+   * para los ~356 px de la COLUMNA de comanda del D8. En el N1 la
+   * comanda es una hoja de 360 px de ancho y la misma fila lleva además
+   * los `−`/`+`: medido en el navegador el 19-10, al nombre le quedaban
+   * **76 px** y el `line-clamp: 2` lo cortaba de verdad («Café con
+   * leche» pedía 81 px de alto en una caja de 53). El hallazgo 3 seguía
+   * vivo aquí, y no se veía porque la pasada midió la línea ENVIADA.
+   *
+   * En la mano la línea se parte en dos renglones, que es lo que pide el
+   * bloque: el nombre arriba con todo el ancho, y debajo `−`, cantidad,
+   * `+`, importe y chips.
+   */
+  deMano: boolean;
   /** Los chips de silla y de tiempo, bajo la fila. */
   chips?: React.ReactNode;
 }) {
@@ -1031,7 +1143,38 @@ function PendingLine({
 
           Los `−`/`+` NO se tocan: siguen a 56 px. Lo que se toca con
           prisa es la cantidad. */}
-      <div className="flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2">
+      {/* n1-hosteleria (hallazgo 3) · EN LA MANO, EL NOMBRE PRIMERO Y SOLO.
+          Con todo el ancho de la hoja (≈336 px útiles) el nombre entra
+          entero en un renglón y le sobran dos; en la fila de abajo van
+          la cantidad, el importe y los chips. Ver la nota del prop
+          `deMano`. */}
+      {deMano && (
+        <button
+          type="button"
+          onClick={onClick}
+          data-testid="cart-line-name"
+          className="w-full text-left font-semibold px-2 pt-2"
+          style={{
+            fontSize: PENDING_LINE_NAME_PX,
+            color: DARK_TEXT,
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+            lineHeight: 1.15,
+            wordBreak: "break-word",
+          }}
+        >
+          {line.nameSnapshot}
+        </button>
+      )}
+      <div
+        className={
+          deMano
+            ? "flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2"
+            : "flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2"
+        }
+      >
       {/* El rótulo accesible dice lo que el botón VA a hacer, que con
           una sola unidad no es restar sino quitar la línea (decisión
           3d). En el panel claro el `−` se deshabilita a una unidad y
@@ -1054,27 +1197,36 @@ function PendingLine({
       <StepperKey label="Sumar una unidad" onClick={onMore} glyph="+" />
       {/* El nombre abre la hoja de la línea (modificadores, descuento,
           anular). Es el mismo toque que en el panel claro. */}
-      <button
-        type="button"
-        onClick={onClick}
-        data-testid="cart-line-name"
-        className="flex-grow min-w-0 text-left font-semibold"
-        style={{
-          fontSize: PENDING_LINE_NAME_PX,
-          color: DARK_TEXT,
-          // auditoria-sirope (#8) · hasta DOS líneas. Con `truncate`, el
-          // D8 pintaba «Café con l…» y «Café Ame…»: dos cafés distintos
-          // con el mismo principio, que es el mismo fallo que #7 en la
-          // rejilla y aquí con el cliente delante.
-          display: "-webkit-box",
-          WebkitBoxOrient: "vertical",
-          WebkitLineClamp: 2,
-          overflow: "hidden",
-          lineHeight: 1.15,
-        }}
-      >
-        {line.nameSnapshot}
-      </button>
+      {/* En el TERMINAL el nombre sigue en la fila, como lo dejó
+          auditoria-sirope (#8): ahí la columna de comanda mide ~356 px y
+          el nombre tiene sus dos líneas enteras. En la mano ya se ha
+          pintado arriba, y aquí sólo queda un relleno que empuja el
+          importe a la derecha. */}
+      {deMano ? (
+        <span className="flex-grow min-w-0" />
+      ) : (
+        <button
+          type="button"
+          onClick={onClick}
+          data-testid="cart-line-name"
+          className="flex-grow min-w-0 text-left font-semibold"
+          style={{
+            fontSize: PENDING_LINE_NAME_PX,
+            color: DARK_TEXT,
+            // auditoria-sirope (#8) · hasta DOS líneas. Con `truncate`, el
+            // D8 pintaba «Café con l…» y «Café Ame…»: dos cafés distintos
+            // con el mismo principio, que es el mismo fallo que #7 en la
+            // rejilla y aquí con el cliente delante.
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+            lineHeight: 1.15,
+          }}
+        >
+          {line.nameSnapshot}
+        </button>
+      )}
       {/* auditoria-sirope (#8) · EL IMPORTE Y LOS CHIPS, EN COLUMNA.
           En los ~356 px útiles de la comanda, poner el importe y el
           chip «Espera» uno al lado del otro dejaba al nombre 55 px y
@@ -1145,6 +1297,7 @@ function Comanda({
   sent,
   pending,
   inSheet = false,
+  deMano = false,
   ...props
 }: HospitalityWorkspaceProps & {
   // kds-1-cocina · trozos y no líneas: una línea puede estar en los dos
@@ -1153,6 +1306,14 @@ function Comanda({
   pending: Array<{ line: CartLine; units: number }>;
   /** `true` dentro del bottom-sheet de handheld. */
   inSheet?: boolean;
+  /**
+   * n1-hosteleria · el umbral único del bloque, hilado hasta la
+   * línea. No se deduce de `inSheet`: la hoja es la PRESENTACIÓN de
+   * la comanda en la mano, y mezclar las dos cosas haría que el día
+   * que la hoja se use en otro sitio el reparto de la línea cambiara
+   * sin que nadie lo pidiera.
+   */
+  deMano?: boolean;
 }) {
   // auditoria-sirope (#12) · ver la nota del workspace: sin destino, el
   // TPV no habla de cocina.
@@ -1332,6 +1493,7 @@ function Comanda({
                 )}
                 {pending.map(({ line: l, units }) => (
                   <PendingLine
+                    deMano={deMano}
                     key={`pend-${l.id}`}
                     line={l}
                     units={units}
