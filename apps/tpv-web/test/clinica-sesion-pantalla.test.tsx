@@ -1418,3 +1418,54 @@ describe("clinica-8 (13) · la escala de dolor y la primera visita", () => {
     expect(cuerpoDelCierre().evolucion).toBeNull();
   });
 });
+
+describe("clinica-8 (13) · la sesión abre con el tipo de visita de la CITA", () => {
+  // «La sesión no preselecciona el tipo de visita de la cita» (auditoría
+  // del 18-10, punto 14). El mecanismo existe desde clinica-5
+  // (`tiposSugeridos`, los tipos de los servicios reservados) y la API lo
+  // tiene su propio test en `clinica-sesion-rutas`. Lo que faltaba era
+  // esto: que la PANTALLA abra con ellos marcados — y que el día que
+  // alguien toque el `useEffect` que los pone, se entere.
+  //
+  // Por qué parecía roto el 18-10: el catálogo de la «Clínica demo» no
+  // tenía las marcas de clínica, así que `tiposSugeridos` llegaba VACÍO
+  // y no había nada que preseleccionar. Eso lo arregló la fase A (el CSV
+  // con sus cuatro columnas); el mecanismo nunca estuvo mal.
+
+  it("con una cita de quiropodia, el chip de quiropodia viene marcado", async () => {
+    await montar(vista({ verImportes: true, tiposSugeridos: ["QUIROPODIA"] }));
+    expect(chipDeTipo("Quiropodia").getAttribute("aria-pressed")).toBe("true");
+    for (const otro of ["Cirugía", "Biomecánica", "General"]) {
+      expect(chipDeTipo(otro).getAttribute("aria-pressed"), otro).toBe("false");
+    }
+  });
+
+  it("con una cita de DOS servicios, los dos vienen marcados", async () => {
+    await montar(
+      vista({ verImportes: true, tiposSugeridos: ["QUIROPODIA", "CIRUGIA"] }),
+    );
+    expect(chipDeTipo("Quiropodia").getAttribute("aria-pressed")).toBe("true");
+    expect(chipDeTipo("Cirugía").getAttribute("aria-pressed")).toBe("true");
+    expect(chipDeTipo("General").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("y lo marcado viaja en el cierre sin tocar nada", async () => {
+    await montar(
+      vista({ verImportes: true, tiposSugeridos: ["QUIROPODIA", "CIRUGIA"] }),
+    );
+    await pulsar(botonPorTexto("4"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+    await firmarSiSePregunta();
+    expect(cuerpoDelCierre().tipos).toEqual(["QUIROPODIA", "CIRUGIA"]);
+  });
+
+  it("si los servicios de la cita NO tienen tipo, no se inventa ninguno", async () => {
+    // Es el catálogo del 18-10, antes de la fase A. Marcar «quiropodia
+    // porque es lo más normal» sería escribir en la historia el tipo que
+    // no se eligió — es la decisión de clinica-5 y sigue en pie.
+    await montar(vista({ verImportes: true, tiposSugeridos: [] }));
+    for (const t of ["Quiropodia", "Cirugía", "Biomecánica", "General"]) {
+      expect(chipDeTipo(t).getAttribute("aria-pressed"), t).toBe("false");
+    }
+  });
+});

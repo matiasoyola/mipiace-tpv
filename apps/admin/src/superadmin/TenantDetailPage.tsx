@@ -42,6 +42,7 @@ import type {
   HoldedConnectionStatus,
   ImpersonateResponse,
   ImpersonationMode,
+  CheckRequirement,
   ReadinessCheck,
   TenantDetail,
   TenantModules,
