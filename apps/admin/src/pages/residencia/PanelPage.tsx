@@ -43,6 +43,8 @@ import {
   type Panel,
 } from "./relevo-lib.js";
 import { colorDelNivel } from "./incidencias-lib.js";
+// calidad-1 · el bloque de calidad del panel.
+import { NOMBRE_DEL_ESTADO } from "./calidad-lib.js";
 
 export function PanelPage() {
   const [panel, setPanel] = useState<Panel | null>(null);
@@ -94,6 +96,9 @@ export function PanelPage() {
   }
 
   const { abierto, relevos, obligaciones, turno, indicadores } = panel;
+  // calidad-1 · opcional, como `porArreglar`: un panel servido por una
+  // API anterior a este bloque no lo trae.
+  const calidad = panel.calidad;
   const porArreglar = panel.porArreglar ?? {
     pinesPorRenovar: [],
     residentesSinPlan: [],
@@ -504,7 +509,149 @@ export function PanelPage() {
         </section>
       )}
 
-      {/* ══ 5 · LOS INDICADORES ══════════════════════════════════ */}
+      {/* ══ 5 · calidad-1 · LO QUE CALIDAD TIENE ENCIMA DE LA MESA ═ */}
+      {/*
+          Va DELANTE de los indicadores y detrás de lo que hay que
+          arreglar, y el orden es el de la urgencia: una acción
+          correctiva vencida tiene nombre y fecha, y un indicador es un
+          número del mes. Lo que se puede hacer hoy, antes.
+      */}
+      {calidad != null && calidad.mapaCargado && (
+        <section>
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <h2 className="text-[16px] font-semibold text-mipiace-ink">
+              Calidad
+            </h2>
+            <Link
+              to="/admin/residencia/no-conformidades"
+              className="text-[13px] text-mipiace-coral underline"
+            >
+              Ver las no conformidades
+            </Link>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-3">
+            {/* Las NC sin cerrar, por estado. */}
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <p className="text-[12.5px] text-slate-600">
+                No conformidades sin cerrar
+              </p>
+              <p className="mt-1 text-[26px] font-semibold leading-none tabular-nums">
+                {calidad.noConformidades.abiertas}
+              </p>
+              <ul className="mt-2 space-y-0.5 text-[12.5px] text-slate-600">
+                {calidad.noConformidades.porEstado.map((e) => (
+                  <li key={e.estado}>
+                    {NOMBRE_DEL_ESTADO[e.estado]}: {e.cuantas}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Las acciones vencidas, CON SU RESPONSABLE: es lo que
+                convierte «se resolvió de palabra» en una fila con un
+                nombre. */}
+            <div
+              className={`rounded-2xl border px-4 py-3 ${
+                calidad.accionesVencidas.length > 0
+                  ? "border-red-300 bg-red-50"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <p className="text-[12.5px] text-slate-600">
+                Acciones correctivas vencidas
+              </p>
+              <p className="mt-1 text-[26px] font-semibold leading-none tabular-nums">
+                {calidad.accionesVencidas.length}
+              </p>
+              <ul className="mt-2 space-y-0.5 text-[12.5px]">
+                {calidad.accionesVencidas.slice(0, 5).map((a) => (
+                  <li key={a.id}>
+                    <Link
+                      to={`/admin/residencia/no-conformidades/${a.ncId}`}
+                      className="underline"
+                    >
+                      {a.referencia}
+                    </Link>
+                    <span className="text-slate-600">
+                      {" · "}
+                      {a.responsable} · venció el {dia(a.dueOn)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Las revisiones de riesgo vencidas (D-71). */}
+            <div
+              className={`rounded-2xl border px-4 py-3 ${
+                calidad.revisionesVencidas.length > 0
+                  ? "border-amber-300 bg-amber-50"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <p className="text-[12.5px] text-slate-600">
+                Revisiones de riesgo vencidas
+              </p>
+              <p className="mt-1 text-[26px] font-semibold leading-none tabular-nums">
+                {calidad.revisionesVencidas.length}
+              </p>
+              <ul className="mt-2 space-y-0.5 text-[12.5px]">
+                {calidad.revisionesVencidas.slice(0, 4).map((r) => (
+                  <li key={r.id}>
+                    <Link
+                      to={`/admin/residencia/procesos/${r.procesoId}`}
+                      className="underline"
+                    >
+                      {r.proceso}
+                    </Link>
+                    <span className="text-slate-600">
+                      {" · nivel "}
+                      {r.nivel} · tocaba el {dia(r.reviewAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* D-74 · LA PROPUESTA. Propone; la decide una persona. */}
+          {calidad.propuestas.length > 0 && (
+            <div className="mt-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4">
+              <h3 className="text-[14px] font-semibold">
+                {calidad.propuestas.length === 1
+                  ? "Un indicador lleva dos meses fuera de umbral"
+                  : `${calidad.propuestas.length} indicadores llevan dos meses fuera de umbral`}
+              </h3>
+              <p className="mt-1 text-[12.5px] text-slate-600">
+                El sistema <strong>propone</strong> abrir una no
+                conformidad con el origen ya relleno. La decide una
+                persona: un sistema que las abre solo llena el registro
+                de no conformidades que nadie trabaja, y eso un auditor
+                lo ve antes que el hueco.
+              </p>
+              <ul className="mt-2 space-y-1 text-[13px]">
+                {calidad.propuestas.map((p) => (
+                  <li key={p.code}>
+                    <strong>{p.nombre}</strong>
+                    <span className="text-slate-600">
+                      {" "}
+                      · {p.meses[0]} y {p.meses[1]} ·{" "}
+                    </span>
+                    <Link
+                      to="/admin/residencia/no-conformidades"
+                      className="underline"
+                    >
+                      abrir NC
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ══ 6 · LOS INDICADORES ══════════════════════════════════ */}
       <section>
         <div className="mb-2 flex items-baseline justify-between gap-3">
           <h2 className="text-[16px] font-semibold text-mipiace-ink">
