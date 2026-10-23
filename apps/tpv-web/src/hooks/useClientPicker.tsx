@@ -71,6 +71,44 @@ export function useClientPicker(): ClientPicker {
   return { open, close, isOpen: state !== null, element };
 }
 
+/**
+ * clinica-8 (fase B, 17) · LO TECLEADO EN EL BUSCADOR, REPARTIDO.
+ *
+ * El buscador acepta nombre, teléfono o email, así que lo que haya
+ * escrito puede ser cualquiera de las tres. Se reparte por lo que es, no
+ * por una pregunta más:
+ *
+ *   · **Con tres o más dígitos y nada más que dígitos, espacios, `+` o
+ *     guiones** → es un TELÉFONO. «666 12 34 56» no es el nombre de
+ *     nadie.
+ *   · **Con arroba** → no se siembra nada. El alta rápida no tiene campo
+ *     de email (vive en la ficha, sin prisa), y poner un email en el
+ *     nombre sería peor que dejarlo vacío.
+ *   · **Lo demás** → nombre y apellidos: la primera palabra al nombre y
+ *     el resto a los apellidos, que es como se busca a la gente en el
+ *     mostrador («Rosario Ja…»).
+ *
+ * Es una semilla: en cuanto el formulario está abierto, manda lo que se
+ * teclee en él.
+ */
+export function semillaDesdeLaBusqueda(query: string): {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+} {
+  const q = query.trim();
+  if (q.length === 0) return {};
+  if (q.includes("@")) return {};
+  if (/^[+\d][\d\s.-]*$/.test(q) && (q.match(/\d/g) ?? []).length >= 3) {
+    return { phone: q };
+  }
+  const partes = q.split(/\s+/);
+  const [primero, ...resto] = partes;
+  return resto.length > 0
+    ? { firstName: primero, lastName: resto.join(" ") }
+    : { firstName: primero };
+}
+
 function ClientPickerSheet({
   onClose,
   onSelect,
@@ -233,6 +271,9 @@ function ClientPickerSheet({
           // (ClientsPage), que es donde se rellena sin prisa.
           <ClientForm
             modo="rapido"
+            // clinica-8 (fase B, 17) · lo tecleado en el buscador entra
+            // en el formulario. Ver `semillaDesdeLaBusqueda`.
+            inicial={semillaDesdeLaBusqueda(query)}
             onSaved={(c) => onSelect(c)}
             onCancel={() => setShowCreate(false)}
           />

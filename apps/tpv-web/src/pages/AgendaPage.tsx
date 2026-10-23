@@ -37,6 +37,12 @@ import {
   type CatalogProduct,
 } from "../lib/catalog.js";
 import {
+  agruparServiciosDeLaCita,
+  apuntarUsoDeServicios,
+  leerUsoDeServicios,
+  tenantDelTerminal,
+} from "../lib/servicios-de-la-cita.js";
+import {
   asegurarClientesEnCache,
   clientFullName,
   loadClientsFromCache,
@@ -421,7 +427,14 @@ export function AgendaPage({
   > | null>(null);
   // Si la matriz es de sólo lectura para esta sesión, el aviso de «no hace
   // ninguno» tiene que mandar a quien SÍ la puede tocar, no a la cajera.
-  const [matrizEditable, setMatrizEditable] = useState(true);
+  //
+  // clinica-8 (fase B, 17) · arranca en `null` —«todavía no se sabe»— y
+  // ya no en `true`. Además del aviso, esto decide ahora si se pinta el
+  // estetoscopio, y un `true` de partida se lo enseñaba a la cajera
+  // durante el segundo que tarda la matriz en llegar. Mientras no se
+  // sabe, no se ofrece: la salida equivocada de este dato es enseñar de
+  // más.
+  const [matrizEditable, setMatrizEditable] = useState<boolean | null>(null);
   // La cifra de la tarjeta nº 1 en el botón. Un panel que hay que abrir para
   // enterarse de que hay un problema es el mismo silencio de antes con otra
   // pantalla: el número tiene que verse desde la agenda.
@@ -795,6 +808,12 @@ export function AgendaPage({
       setBookError({ message: res.message, alternatives: res.alternatives ?? [] });
       return;
     }
+    // clinica-8 (fase B, 17) · lo que acaba de entrar en una cita cuenta
+    // para el orden de la próxima lista. Se apunta AQUÍ —con la reserva
+    // hecha— y no al tocar el chip: lo que se quiere contar son las
+    // citas que existen, no los botones que alguien tocó y deshizo.
+    // También cuenta la encolada sin red: es una cita que se va a dar.
+    apuntarUsoDeServicios(draft.serviceIds, tenantDelTerminal());
     setDraft(null);
     setBookError(null);
     if (res.queuedOffline) flash("Cita guardada sin red; se enviará al reconectar.");
@@ -1265,8 +1284,24 @@ export function AgendaPage({
             </span>
           </button>
         )}
+        {/* clinica-8 (fase B, 17) · EL ESTETOSCOPIO NO SE LE ABRE A LA
+            CLIENTA.
+            Auditoría del 18-10, punto 24: «el estetoscopio de la agenda
+            abre "Salud de la agenda" con jerga interna». Y es literal:
+            ese panel enseña SEIS tarjetas con la CONSULTA SQL que
+            produce cada cifra (ADR-F3, y está bien que lo haga). Es una
+            herramienta de quien lleva el centro y de Mi Piace, y vive en
+            la cabecera de la agenda del mostrador, donde la cajera lo
+            toca con la clienta delante.
+            Se gatea con lo mismo que decide quién puede ARREGLAR lo que
+            el panel enseña: si la matriz de servicios es de sólo lectura
+            para esta sesión, el panel no tiene salida y no se ofrece.
+            Y con el botón se va el badge: una cifra que no se puede
+            abrir es una alarma sin puerta. */}
+        {matrizEditable === true && (
         <button
           onClick={() => setSaludAbierta(true)}
+          data-test="abrir-salud"
           className={`ml-1 h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 ${
             sinNadie !== null && sinNadie > 0
               ? "bg-mipiace-coral-soft text-mipiace-coral-dark"
@@ -1281,6 +1316,7 @@ export function AgendaPage({
             </span>
           )}
         </button>
+        )}
       </div>
 
       {/* B-reservas-7a · el día CERRADO se dice arriba y con su nombre, no
@@ -1331,7 +1367,10 @@ export function AgendaPage({
               panel de Personal (admin).
             </div>
           ) : (
-            <div className="flex min-w-max">
+            // Con una sola columna el carril ocupa el ancho entero en
+            // vez de `min-w-max`, que lo encogería al contenido y
+            // dejaría a la columna sin nada que repartir.
+            <div className={columns.length === 1 ? "flex w-full" : "flex min-w-max"}>
               {/* Regla de horas.
 
                   B-reservas-6a · la regla MENTÍA, y el bucle visual de este
@@ -1371,6 +1410,7 @@ export function AgendaPage({
                 <StaffColumn
                   key={s.userId}
                   staff={s}
+                  unica={columns.length === 1}
                   appts={apptsByStaff.get(s.userId) ?? []}
                   nowMin={isToday ? nowMin : null}
                   pastUntilMin={pastUntilMin}
@@ -1433,7 +1473,7 @@ export function AgendaPage({
                 ?.displayName ?? null
             }
             skillsPorStaff={skillsPorStaff}
-            matrizEditable={matrizEditable}
+            matrizEditable={matrizEditable === true}
             onAbrirMatriz={() => setMatriz({ focusServiceId: null })}
             bookError={bookError}
             onPickAlternative={(start) => {
@@ -2015,6 +2055,8 @@ function AbsenceSheet(props: {
 
 function StaffColumn(props: {
   staff: AgendaStaff;
+  /** clinica-8 (fase B, 17) · ¿es la única columna del día? */
+  unica?: boolean;
   appts: AgendaAppointment[];
   nowMin: number | null;
   // B-reservas-6a · hasta qué minuto del día ya ha pasado (el suelo).
@@ -2093,7 +2135,25 @@ function StaffColumn(props: {
     );
   }
   return (
-    <div className="w-44 md:w-52 shrink-0 border-l border-slate-200">
+    // clinica-8 (fase B, 17) · CON UNA SOLA PROFESIONAL, LA COLUMNA SE
+    // QUEDA CON LA PANTALLA.
+    //
+    // Auditoría del 18-10, punto 29: «Agenda de una profesional: columna
+    // estrecha, citas cortas difíciles de tocar». El ancho es fijo
+    // (`w-44 md:w-52`, 176/208 px) porque con cinco peluqueras tiene que
+    // caber una al lado de otra y deslizarse. En una clínica de UNA
+    // podóloga —que es Rosario— eso deja 208 px de agenda y el resto de
+    // la tablet en blanco, con las tarjetas de 15 minutos apretadas en
+    // una tira.
+    // Con una sola columna no hay nada con lo que repartir: `flex-1`, y
+    // el mínimo se queda en el ancho de siempre para que nada encoja.
+    <div
+      className={
+        props.unica
+          ? "flex-1 min-w-44 border-l border-slate-200"
+          : "w-44 md:w-52 shrink-0 border-l border-slate-200"
+      }
+    >
       <div
         className="sticky top-0 z-10 h-10 flex items-center gap-2 px-2 bg-white border-b border-slate-200"
         // B-reservas-mostrador F2 · la cabecera usa el MISMO color base que el
@@ -2439,6 +2499,18 @@ function BookingPanel(props: {
     draft.staffUserId,
     props.skillsPorStaff,
   );
+  // clinica-8 (fase B, 17) · agrupados por categoría y ordenados por
+  // uso. El contador se lee una vez por apertura de la hoja: leerlo en
+  // cada render movería la lista bajo el dedo si se reservara en otra
+  // pestaña.
+  const uso = useMemo(() => leerUsoDeServicios(tenantDelTerminal()), []);
+  /** clinica-8 (fase B, 17) · la tira de horas, para traerla a la vista
+   *  en cuanto la búsqueda contesta. */
+  const huecosRef = useRef<HTMLDivElement | null>(null);
+  const grupos = useMemo(
+    () => agruparServiciosDeLaCita(bookableServices, uso),
+    [bookableServices, uso],
+  );
   const totalDuration = draft.serviceIds.reduce((sum, id) => {
     const s = services.find((x) => x.id === id);
     return sum + (s?.durationMin ?? 0);
@@ -2520,6 +2592,20 @@ function BookingPanel(props: {
         to: date,
       });
       setSlots(res);
+      // clinica-8 (fase B, 17) · LAS HORAS, A LA VISTA.
+      //
+      // Auditoría del 18-10, punto 25: «"Buscar hueco": las horas salen
+      // bajo el pliegue». La hoja del alta es una columna con scroll
+      // propio (cliente, servicios, hora, bono, acciones) y los chips de
+      // hora nacen debajo de su botón, que en una tablet en vertical cae
+      // ya al borde. Se pulsa, parece que no pasa nada, y se vuelve a
+      // pulsar.
+      //
+      // Se lleva la tira a la vista en cuanto llega. `block: "nearest"`
+      // para que mueva lo justo —no centra ni salta— y con `?.` porque
+      // jsdom no implementa `scrollIntoView`: el test comprueba que se
+      // llama, el navegador hace el resto.
+      huecosRef.current?.scrollIntoView?.({ block: "nearest" });
       // B-reservas-7a · TRES CAUSAS, tres frases. "No hay huecos" era una
       // sola para las tres, y se arreglan de formas distintas: el centro
       // cerrado lo arregla el owner en los ajustes, el turno que falta lo
@@ -2657,25 +2743,51 @@ function BookingPanel(props: {
                   No hay servicios que pueda hacer.
                 </div>
               ))}
-            {bookableServices.map((s) => {
-              const active = draft.serviceIds.includes(s.id);
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => toggleService(s.id)}
-                  className={`w-full flex items-center justify-between px-3 h-10 rounded-lg border text-[13px] ${
-                    active
-                      ? "border-mipiace-coral bg-mipiace-coral/10 text-mipiace-ink"
-                      : "border-slate-200 bg-white text-slate-600"
-                  }`}
-                >
-                  <span className="truncate">{s.name}</span>
-                  <span className="text-[11px] tabular-nums text-slate-400">
-                    {s.durationMin} min
-                  </span>
-                </button>
-              );
-            })}
+            {/* clinica-8 (fase B, 17) · POR CATEGORÍA Y POR USO.
+                Diecisiete líneas seguidas con la paciente al teléfono se
+                leen enteras cada vez. Ver `servicios-de-la-cita.ts`: los
+                grupos y su contenido salen ordenados de ahí, y el
+                encabezado sólo se pinta si hay MÁS DE UNO — en un centro
+                con una sola categoría, un encabezado es una línea que no
+                distingue nada. */}
+            {grupos.map((g) => (
+              <div key={g.categoria} data-categoria={g.categoria}>
+                {grupos.length > 1 && (
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-1 pt-1.5 pb-1">
+                    {g.titulo}
+                  </div>
+                )}
+                <div className="space-y-1">
+                  {g.servicios.map((s) => {
+                    const active = draft.serviceIds.includes(s.id);
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => toggleService(s.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 min-h-10 py-1.5 rounded-lg border text-[13px] ${
+                          active
+                            ? "border-mipiace-coral bg-mipiace-coral/10 text-mipiace-ink"
+                            : "border-slate-200 bg-white text-slate-600"
+                        }`}
+                      >
+                        {/* clinica-8 (fase B, 19) · el nombre ENTERO, en
+                            dos líneas si hace falta. Ver la nota del
+                            mismo punto en `SalePage`: lo que distingue
+                            «Revisión biomecánica adultos» de «Revisión
+                            biomecánica niños» es la última palabra, y
+                            `truncate` cortaba justo ahí. */}
+                        <span className="text-left leading-tight line-clamp-2">
+                          {s.name}
+                        </span>
+                        <span className="text-[11px] tabular-nums text-slate-400 shrink-0">
+                          {s.durationMin} min
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -2718,7 +2830,22 @@ function BookingPanel(props: {
               {searchError && (
                 <div className="text-[12px] text-red-500 mt-1">{searchError}</div>
               )}
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              {/* La tira de horas, y CUÁNTAS son. El número delante
+                  convierte «no ha pasado nada» en «hay siete, elige»:
+                  cuando la tira se corta por abajo, el encabezado se ve
+                  aunque los chips no. */}
+              <div ref={huecosRef} className="mt-2">
+                {slots.length > 0 && (
+                  <div
+                    data-test="cuantos-huecos"
+                    className="text-[12px] text-slate-500 mb-1.5"
+                  >
+                    {slots.length === 1
+                      ? "1 hueco · toca la hora"
+                      : `${slots.length} huecos · toca una hora`}
+                  </div>
+                )}
+              <div className="flex flex-wrap gap-1.5">
                 {slots.slice(0, 24).map((sl) => (
                   <button
                     key={sl.start}
@@ -2728,6 +2855,7 @@ function BookingPanel(props: {
                     {localHHMM(sl.start)}
                   </button>
                 ))}
+              </div>
               </div>
             </div>
           )}

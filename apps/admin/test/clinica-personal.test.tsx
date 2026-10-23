@@ -340,6 +340,26 @@ describe("clinica-1 · la propietaria y el encargado se marcan y nada más", () 
   it("y al guardarla NO se manda `puesto`", async () => {
     await pintar();
     await abrirFicha("PILAR");
+    // clinica-8 (fase B, 16) · hay que CAMBIAR algo. El guardado de la
+    // tarjeta sólo manda las secciones sucias: con tres rutas detrás de
+    // un botón, mandar las tres en cada toque serían tres sitios donde
+    // fallar sin que nadie haya tocado nada.
+    // Por su etiqueta y no por el orden: la tarjeta tiene dos casillas
+    // («Activo en la agenda» y «Es sanitario») y sólo la segunda es de
+    // la sección clínica.
+    const casilla = [...container.querySelectorAll("label")]
+      .find((l) => l.textContent?.includes("Es sanitario"))!
+      .querySelector("input") as HTMLInputElement;
+    await act(async () => {
+      casilla.click();
+    });
+    // Y el colegiado, que es obligatorio con la marca puesta (fase A).
+    await act(async () => {
+      escribir(
+        container.querySelector<HTMLInputElement>("[data-colegiado]")!,
+        "45/0123",
+      );
+    });
     await act(async () => {
       botonPorTexto("Guardar")!.dispatchEvent(
         new MouseEvent("click", { bubbles: true }),

@@ -3,7 +3,14 @@
 // cada uno y sus turnos (semana tipo `rrule` + validez). Gate por
 // `agendaEnabled` (ADR-R6). Vocabulario neutro: "profesional".
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 
 import { AdminShell } from "../AdminShell.js";
@@ -172,6 +179,43 @@ function shiftSummary(s: Shift): string {
 // «Guardado» es lo que distingue «no se ha enterado» de «se ha guardado y
 // se ve igual».
 type Guardado = { que: "ok" } | { que: "error"; mensaje: string } | null;
+
+// ── clinica-8 (fase B, 16) · UN SOLO GUARDADO POR TARJETA ───────────
+//
+// La tarjeta de una profesional tenía CUATRO botones de guardar (perfil,
+// historia clínica, servicios, turnos). La auditoría del 18-10 lo anotó
+// como «Personal: cuatro botones de guardar» (punto 23), y lo que se
+// paga no es la estética: se cambia el nombre, se marca «Es sanitario»,
+// se marcan los servicios, se pulsa UN botón y los otros dos cambios se
+// quedan en la pantalla. La dueña sale creyendo que guardó.
+//
+// Ahora hay UNO, al final de la tarjeta, y guarda las tres secciones que
+// son un formulario. Cada sección sigue siendo su componente con su
+// estado —que es lo correcto: son tres rutas distintas del servidor— y
+// lo que sube es esta pareja de funciones.
+//
+// Los TURNOS se quedan aparte, y es una decisión, no un olvido: «Crear
+// turno» no edita la tarjeta, crea una fila en una lista (y hay un botón
+// de borrar al lado de cada una). Meterlo en el guardado de la tarjeta
+// obligaría a que «guardar» a veces cree un turno y a veces no.
+/**
+ * Lo que una sección lanza cuando falta un dato suyo. Se distingue de un
+ * fallo de red o del servidor porque el mensaje ya está escrito para la
+ * persona y no hay que envolverlo: «Falta el nº de colegiado…» no se
+ * lee mejor con «la historia clínica:» delante.
+ */
+class FaltaUnDato extends Error {}
+
+export interface SeccionGuardable {
+  /** Nombre de la sección, para decir cuál falló. */
+  nombre: string;
+  /** ¿Hay cambios sin guardar? Lo que no está sucio no se manda: tres
+   *  peticiones por cada toque de «Guardar» serían tres sitios donde
+   *  fallar sin motivo. */
+  sucio: () => boolean;
+  /** Guarda. Lanza con el mensaje si no pudo. */
+  guardar: () => Promise<void>;
+}
 
 function ResultadoGuardado({ estado }: { estado: Guardado }) {
   if (!estado) return null;
@@ -344,6 +388,44 @@ function ProfessionalCard({
     row.profile?.displayName ?? row.alias ?? row.email.split("@")[0] ?? "—";
   const isPro = row.profile !== null;
 
+  // clinica-8 (fase B, 16) · las tres secciones que el botón único
+  // guarda. Ver `SeccionGuardable`.
+  const refPerfil = useRef<SeccionGuardable | null>(null);
+  const refClinica = useRef<SeccionGuardable | null>(null);
+  const refSkills = useRef<SeccionGuardable | null>(null);
+  const [guardandoTarjeta, setGuardandoTarjeta] = useState(false);
+  const [guardadoTarjeta, setGuardadoTarjeta] = useState<Guardado>(null);
+
+  async function guardarTarjeta() {
+    onError(null);
+    setGuardadoTarjeta(null);
+    setGuardandoTarjeta(true);
+    try {
+      // El orden importa: dar de alta el perfil es lo que hace que
+      // existan los servicios que se van a guardar después.
+      for (const ref of [refPerfil, refClinica, refSkills]) {
+        const seccion = ref.current;
+        if (!seccion || !seccion.sucio()) continue;
+        try {
+          await seccion.guardar();
+        } catch (err) {
+          // El nombre de la sección delante: «No se pudo guardar» a
+          // secas no dice si entró el nombre y no el colegiado.
+          const mensaje =
+            err instanceof FaltaUnDato
+              ? err.message
+              : `${seccion.nombre}: ${mensajeDeFallo(err)}`;
+          setGuardadoTarjeta({ que: "error", mensaje });
+          onError(mensaje);
+          return;
+        }
+      }
+      setGuardadoTarjeta({ que: "ok" });
+    } finally {
+      setGuardandoTarjeta(false);
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
       <button
@@ -398,6 +480,7 @@ function ProfessionalCard({
             canEdit={canEdit}
             onChanged={onChanged}
             onError={onError}
+            handle={refPerfil}
           />
           {/* clinica-1 · sólo en tenants con la clínica encendida. En Sole
               y en los demás, esta tarjeta es exactamente la de hoy. */}
@@ -407,6 +490,7 @@ function ProfessionalCard({
               canEdit={canEdit}
               onChanged={onChanged}
               onError={onError}
+              handle={refClinica}
             />
           )}
           {/* residencia-1 · roles de cuidado y zona. Va DEBAJO de la
@@ -428,6 +512,7 @@ function ProfessionalCard({
                 canEdit={canEdit}
                 onChanged={onChanged}
                 onError={onError}
+                handle={refSkills}
               />
               <ShiftsEditor
                 userId={row.userId}
@@ -435,6 +520,29 @@ function ProfessionalCard({
                 onError={onError}
               />
             </>
+          )}
+
+          {/* clinica-8 (fase B, 16) · EL BOTÓN. Uno, al final, y guarda
+              lo que esté sucio en el orden en que las secciones dependen
+              unas de otras: primero el PERFIL —porque darla de alta como
+              profesional es lo que hace aparecer los servicios—, después
+              la historia clínica y después los servicios.
+              Para y lo dice en la primera que falla, nombrándola: con un
+              «no se pudo guardar» a secas, la dueña no sabe si el nombre
+              entró y el colegiado no, o al revés. */}
+          {canEdit && (
+            <div className="pt-1">
+              <PrimaryButton
+                type="button"
+                data-test="guardar-tarjeta"
+                onClick={guardarTarjeta}
+                busy={guardandoTarjeta}
+                className="!w-auto px-5 !h-10 !text-[13.5px]"
+              >
+                Guardar
+              </PrimaryButton>
+              <ResultadoGuardado estado={guardadoTarjeta} />
+            </div>
           )}
         </div>
       )}
@@ -448,12 +556,15 @@ function ProfileEditor({
   canEdit,
   onChanged,
   onError,
+  handle,
 }: {
   row: StaffRow;
   personal: readonly StaffRow[];
   canEdit: boolean;
   onChanged: () => Promise<void>;
   onError: (m: string | null) => void;
+  /** clinica-8 (fase B, 16) · lo que el botón único de la tarjeta usa. */
+  handle?: React.RefObject<SeccionGuardable | null>;
 }) {
   const [displayName, setDisplayName] = useState(
     row.profile?.displayName ?? row.alias ?? "",
@@ -473,28 +584,61 @@ function ProfileEditor({
     () => row.profile?.color ?? colorPropuesto(coloresEnUso(personal, row.userId)),
   );
   const [active, setActive] = useState(row.profile?.active ?? true);
-  const [busy, setBusy] = useState(false);
-  const [guardado, setGuardado] = useState<Guardado>(null);
+
+  const [altaEnCurso, setAltaEnCurso] = useState(false);
+  const [altaFallida, setAltaFallida] = useState<Guardado>(null);
+
+  // clinica-8 (fase B, 16) · SIN PERFIL, EL GUARDADO DE LA TARJETA NO
+  // DA DE ALTA.
+  //
+  // Dar de alta como profesional no es guardar: es CREAR una columna en
+  // la agenda. Si el guardado único la creara, marcar «Es sanitario» a
+  // la propietaria —que es el gesto del punto 5 de la fase A, y es
+  // clínico, no de agenda— le pondría de paso una columna que nadie
+  // pidió. Así que esta sección sólo está «sucia» cuando ya hay perfil
+  // y sus campos han cambiado, y el alta tiene su propio botón, igual
+  // que «Crear turno».
+  //
+  // Siguen siendo UN guardado y DOS creaciones, que es lo que la
+  // auditoría pedía (y no cuatro guardados).
+  const sucio =
+    row.profile != null &&
+    (displayName.trim() !== (row.profile.displayName ?? "") ||
+      color !== row.profile.color ||
+      active !== row.profile.active);
 
   async function save() {
+    if (displayName.trim().length === 0) {
+      throw new FaltaUnDato("Pon el nombre con el que sale en la agenda.");
+    }
+    await api(`/staff/${row.userId}`, {
+      method: "PUT",
+      body: { displayName: displayName.trim(), color, active },
+    });
+    await onChanged();
+  }
+
+  async function darDeAlta() {
     onError(null);
-    setGuardado(null);
-    setBusy(true);
+    setAltaFallida(null);
+    setAltaEnCurso(true);
     try {
-      await api(`/staff/${row.userId}`, {
-        method: "PUT",
-        body: { displayName: displayName.trim(), color, active },
-      });
-      await onChanged();
-      setGuardado({ que: "ok" });
+      await save();
     } catch (err) {
-      const mensaje = mensajeDeFallo(err);
-      setGuardado({ que: "error", mensaje });
+      const mensaje =
+        err instanceof FaltaUnDato ? err.message : mensajeDeFallo(err);
+      setAltaFallida({ que: "error", mensaje });
       onError(mensaje);
     } finally {
-      setBusy(false);
+      setAltaEnCurso(false);
     }
   }
+
+  useImperativeHandle(handle, () => ({
+    nombre: "el perfil",
+    sucio: () => sucio,
+    guardar: save,
+  }));
 
   return (
     <section>
@@ -551,18 +695,21 @@ function ProfileEditor({
         />
         Activo en la agenda
       </label>
-      {canEdit && (
+      {/* clinica-8 (fase B, 16) · con perfil, no hay botón aquí: guarda
+          el único de la tarjeta. Sin perfil, el ALTA es su propia
+          acción — ver la nota de `sucio`. */}
+      {canEdit && row.profile == null && (
         <div className="mt-4">
           <PrimaryButton
             type="button"
-            onClick={save}
-            busy={busy}
-            disabled={displayName.trim().length === 0}
+            data-test="dar-de-alta"
+            onClick={darDeAlta}
+            busy={altaEnCurso}
             className="!w-auto px-5 !h-10 !text-[13.5px]"
           >
-            {row.profile ? "Guardar perfil" : "Dar de alta como profesional"}
+            Dar de alta como profesional
           </PrimaryButton>
-          <ResultadoGuardado estado={guardado} />
+          <ResultadoGuardado estado={altaFallida} />
         </div>
       )}
     </section>
@@ -590,11 +737,13 @@ function ClinicaEditor({
   canEdit,
   onChanged,
   onError,
+  handle,
 }: {
   row: StaffRow;
   canEdit: boolean;
   onChanged: () => Promise<void>;
   onError: (m: string | null) => void;
+  handle?: React.RefObject<SeccionGuardable | null>;
 }) {
   const clinica = row.clinica ?? {
     esSanitario: false,
@@ -608,9 +757,7 @@ function ClinicaEditor({
   const [puesto, setPuesto] = useState<"CASHIER" | "CLINICIAN">(
     row.role === "CLINICIAN" ? "CLINICIAN" : "CASHIER",
   );
-  const [busy, setBusy] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [guardado, setGuardado] = useState<Guardado>(null);
 
   // El puesto sólo se elige para quien no es propietaria ni encargado:
   // cambiarle el rol de negocio a la dueña no es una decisión de esta
@@ -625,52 +772,51 @@ function ClinicaEditor({
 
   const faltaColegiado = sanitarioFinal && colegiado.trim().length === 0;
 
+  const sucio =
+    sanitarioFinal !== clinica.esSanitario ||
+    colegiado.trim() !== (clinica.colegiado ?? "") ||
+    alcance !== clinica.alcance ||
+    (puestoEditable && puesto !== (row.role === "CLINICIAN" ? "CLINICIAN" : "CASHIER"));
+
   async function guardar() {
-    onError(null);
     setAviso(null);
-    setGuardado(null);
-    // clinica-8 · lo que falta se dice AQUÍ y no se manda para que el
+    // clinica-8 · lo que falta se dice y no se manda para que el
     // servidor conteste 400 desde la cabecera de la página. Es el único
     // campo que se teclea en toda la tarjeta.
     if (faltaColegiado) {
-      setGuardado({
-        que: "error",
-        mensaje:
-          "Falta el nº de colegiado: va en la historia y en los informes que firma. Escríbelo como lo tengas (45/0123, 45-0123, COL-450123…).",
-      });
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api<{ sesionesInvalidadas: boolean }>(
-        `/staff/${row.userId}/clinica`,
-        {
-          method: "PATCH",
-          body: {
-            ...(puestoEditable ? { puesto } : {}),
-            esSanitario: sanitarioFinal,
-            colegiado: colegiado.trim() || null,
-            alcance,
-          },
-        },
+      throw new FaltaUnDato(
+        "Falta el nº de colegiado: va en la historia y en los informes que firma. Escríbelo como lo tengas (45/0123, 45-0123, COL-450123…).",
       );
-      // Cambiar el puesto tira las sesiones. Decirlo evita el susto de
-      // «me ha echado del TPV sin avisar».
-      if (res.sesionesInvalidadas) {
-        setAviso(
-          "Guardado. Esta persona tendrá que volver a entrar en el TPV con su PIN.",
-        );
-      }
-      await onChanged();
-      setGuardado({ que: "ok" });
-    } catch (err) {
-      const mensaje = mensajeDeFallo(err);
-      setGuardado({ que: "error", mensaje });
-      onError(mensaje);
-    } finally {
-      setBusy(false);
     }
+    const res = await api<{ sesionesInvalidadas: boolean }>(
+      `/staff/${row.userId}/clinica`,
+      {
+        method: "PATCH",
+        body: {
+          ...(puestoEditable ? { puesto } : {}),
+          esSanitario: sanitarioFinal,
+          colegiado: colegiado.trim() || null,
+          alcance,
+        },
+      },
+    );
+    // Cambiar el puesto tira las sesiones. Decirlo evita el susto de
+    // «me ha echado del TPV sin avisar».
+    if (res.sesionesInvalidadas) {
+      setAviso(
+        "Guardado. Esta persona tendrá que volver a entrar en el TPV con su PIN.",
+      );
+    }
+    await onChanged();
   }
+
+  useImperativeHandle(handle, () => ({
+    nombre: "la historia clínica",
+    sucio: () => sucio,
+    guardar,
+  }));
+
+  void onError;
 
   return (
     <section>
@@ -810,24 +956,12 @@ function ClinicaEditor({
         <p className="text-[12.5px] text-mipiace-ink-soft mt-3">{aviso}</p>
       )}
 
-      {canEdit && (
-        <div className="mt-4">
-          {/* clinica-8 · el botón YA NO SE DESACTIVA cuando falta el
-              colegiado. Un botón apagado en una tablet se lee como «esto
-              está roto»: se pulsa, no pasa nada y nadie sabe por qué. Ahora
-              se pulsa, y `guardar()` contesta qué falta y en qué formatos
-              vale el número. */}
-          <PrimaryButton
-            type="button"
-            onClick={guardar}
-            busy={busy}
-            className="!w-auto px-5 !h-10 !text-[13.5px]"
-          >
-            Guardar
-          </PrimaryButton>
-          <ResultadoGuardado estado={guardado} />
-        </div>
-      )}
+      {/* clinica-8 (fase A) · el botón ya no se desactivaba cuando
+          faltaba el colegiado; en la fase B ya no hay botón aquí. Lo que
+          sobrevive es la razón: se pulsa el único de la tarjeta y
+          `guardar()` contesta qué falta y en qué formatos vale el
+          número, en vez de dejar un botón apagado que en una tablet se
+          lee como «esto está roto». */}
 
       {/* La lista de pacientes sólo tiene sentido con «sólo los suyos», y
           sólo para quien YA está guardado como sanitario: con la marca sin
@@ -1042,24 +1176,28 @@ function SkillsEditor({
   canEdit,
   onChanged,
   onError,
+  handle,
 }: {
   row: StaffRow;
   services: ServiceRow[];
   canEdit: boolean;
   onChanged: () => Promise<void>;
   onError: (m: string | null) => void;
+  handle?: React.RefObject<SeccionGuardable | null>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(row.serviceIds),
   );
-  const [busy, setBusy] = useState(false);
-  const [guardado, setGuardado] = useState<Guardado>(null);
   const dirty = useMemo(() => {
     const a = new Set(row.serviceIds);
     if (a.size !== selected.size) return true;
     for (const id of selected) if (!a.has(id)) return true;
     return false;
   }, [row.serviceIds, selected]);
+
+  // clinica-8 (fase B, 16) · ¿están TODOS marcados? Decide qué hace el
+  // botón de «Todos los servicios» y cómo se lee.
+  const todos = services.length > 0 && selected.size === services.length;
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -1071,30 +1209,48 @@ function SkillsEditor({
   }
 
   async function save() {
-    onError(null);
-    setGuardado(null);
-    setBusy(true);
-    try {
-      await api(`/staff/${row.userId}/skills`, {
-        method: "PUT",
-        body: { serviceIds: [...selected] },
-      });
-      await onChanged();
-      setGuardado({ que: "ok" });
-    } catch (err) {
-      const mensaje = mensajeDeFallo(err);
-      setGuardado({ que: "error", mensaje });
-      onError(mensaje);
-    } finally {
-      setBusy(false);
-    }
+    await api(`/staff/${row.userId}/skills`, {
+      method: "PUT",
+      body: { serviceIds: [...selected] },
+    });
+    await onChanged();
   }
+
+  useImperativeHandle(handle, () => ({
+    nombre: "los servicios",
+    sucio: () => dirty,
+    guardar: save,
+  }));
+
+  void onError;
 
   return (
     <section>
-      <h3 className="text-[13px] font-semibold text-mipiace-ink mb-3">
-        Servicios que da
-      </h3>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <h3 className="text-[13px] font-semibold text-mipiace-ink">
+          Servicios que da
+        </h3>
+        {/* clinica-8 (fase B, 16) · «TODOS LOS SERVICIOS», de un toque.
+            Auditoría del 18-10: «sin "marcar todos" en servicios»
+            (punto 23). En Rosario son 17 casillas, y en la clínica de
+            una sola profesional las 17 son suyas: el alta costaba 17
+            toques para llegar al estado por defecto de ese centro.
+            Es un interruptor y no un botón suelto: con todo marcado
+            dice «Ninguno», porque el gesto contrario —empezar de cero
+            para marcar tres— cuesta los mismos 17 toques al revés. */}
+        {canEdit && services.length > 0 && (
+          <button
+            type="button"
+            data-test="todos-los-servicios"
+            onClick={() =>
+              setSelected(todos ? new Set() : new Set(services.map((x) => x.id)))
+            }
+            className="h-9 px-3 rounded-lg bg-mipiace-stone text-[12.5px] font-medium text-mipiace-ink hover:bg-slate-200"
+          >
+            {todos ? "Ninguno" : "Todos los servicios"}
+          </button>
+        )}
+      </div>
       {services.length === 0 ? (
         <p className="text-[13px] text-slate-500">
           No hay servicios en el catálogo. Márcalos como servicio en Holded y
@@ -1119,19 +1275,12 @@ function SkillsEditor({
           ))}
         </div>
       )}
-      {canEdit && (
-        <div className="mt-4">
-          <OutlineButton
-            type="button"
-            onClick={save}
-            busy={busy}
-            disabled={!dirty}
-            className="!w-auto px-5 !h-10 !text-[13.5px]"
-          >
-            Guardar servicios
-          </OutlineButton>
-          <ResultadoGuardado estado={guardado} />
-        </div>
+      {/* clinica-8 (fase B, 16) · sin botón propio: guarda el único de
+          la tarjeta. */}
+      {services.length > 0 && (
+        <p className="text-[12px] text-slate-500 mt-2.5">
+          {selected.size} de {services.length} marcados
+        </p>
       )}
     </section>
   );
@@ -1247,7 +1396,20 @@ function ShiftForm({
   const [days, setDays] = useState<Set<string>>(new Set());
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("14:00");
-  const [validFrom, setValidFrom] = useState("");
+  // clinica-8 (fase B, 16) · «VÁLIDO DESDE» NACE CON HOY.
+  //
+  // Auditoría del 18-10, punto 22: «"Crear turno" sin "Válido desde" no
+  // hace nada y no avisa». La fase A puso el aviso; lo que faltaba es
+  // que casi nunca haga falta. Un turno que se crea un lunes por la
+  // mañana rige desde ese lunes: es la respuesta en el 95 % de las
+  // veces, y la otra —un turno que empieza el mes que viene— se teclea
+  // igual encima.
+  //
+  // La fecha es la del CENTRO (Europe/Madrid) y no la del navegador:
+  // `validFrom` se compara contra el calendario de la agenda, que vive
+  // en esa zona. En un portátil con la zona cambiada, «hoy» del
+  // navegador puede ser otro día.
+  const [validFrom, setValidFrom] = useState(hoyEnElCentro);
   const [validUntil, setValidUntil] = useState("");
   const [kind, setKind] = useState<ShiftKind>("REGULAR");
   const [busy, setBusy] = useState(false);
@@ -1401,6 +1563,16 @@ function ShiftForm({
       <ResultadoGuardado estado={guardado} />
     </div>
   );
+}
+
+/**
+ * clinica-8 (fase B, 16) · el día de hoy en el centro, en `YYYY-MM-DD`.
+ *
+ * `sv-SE` porque es el locale que formatea ISO sin montar una librería,
+ * y es el truco que ya usa el resto de la casa para esto mismo.
+ */
+export function hoyEnElCentro(ahora: Date = new Date()): string {
+  return ahora.toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" });
 }
 
 function Field({

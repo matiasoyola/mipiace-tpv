@@ -265,10 +265,24 @@ describe("clinica-8 · el guardado contesta SIEMPRE, al lado del botón", () => 
     expect(avisos().join(" ")).toContain("Falta el nº de colegiado");
   });
 
+  // clinica-8 (fase B, 16) · ya no hay «Guardar perfil»: hay UN botón
+  // por tarjeta. Lo que este test fija sigue siendo lo mismo —que
+  // guardar el perfil contesta donde está el dedo— con el botón que hay.
   it("el guardado del PERFIL también contesta", async () => {
     await pintar();
     await abrirFichaDeRosa();
-    await click(botonPorTexto("Guardar perfil")!);
+    const nombre = container.querySelector(
+      'input[placeholder="Rosa"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(nombre, "Rosa M.");
+      nombre.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(botonPorTexto("Guardar")!);
     expect(avisos()).toContain("ok: Guardado.");
   });
 });
