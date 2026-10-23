@@ -456,7 +456,7 @@ criterios nuevos.
 
 ### 5.2 En verde
 
-**431 ficheros / 6257 tests** en todo el monorepo. `tsc -b` limpio en
+**431 ficheros / 6260 tests** en todo el monorepo. `tsc -b` limpio en
 `apps/tpv-web`, `apps/api`, `apps/admin` y `packages/db`, y `build` de `tpv-web`
 limpio.
 
