@@ -248,6 +248,24 @@ export const PENDING_LINE_QTY_PX = 24;
 /** Total a cobrar. */
 export const TOTAL_PX = 46;
 
+/**
+ * n1-hosteleria-2 · el total EN LA MANO: **34 px**.
+ *
+ * `principio-venta-bajo-estres` pide que «el total sea lo más grande de
+ * la pantalla», y a 34 lo sigue siendo de calle: lo siguiente en la hoja
+ * es el nombre de una línea a 23 y «Cobrar» a 22.
+ *
+ * Los 46 están medidos para la columna de comanda de un terminal de
+ * 10–15", donde el pie tiene 800 px de alto debajo. En la hoja del N1 el
+ * pie entero medía **180 px de los 720** y la fila del total se llevaba
+ * 69 de ellos, con la lista de líneas —lo que el camarero está
+ * revisando— en 332. Doce píxeles de glifo no valen una línea de
+ * comanda.
+ *
+ * Ver la cuenta completa del reparto de la hoja en el `-done`.
+ */
+export const TOTAL_PX_MANO = 34;
+
 /** Los dos botones del pie de la comanda. */
 export const COBRAR_LABEL_PX = 22;
 export const ENVIAR_LABEL_PX = 20;
@@ -294,6 +312,23 @@ export const COBRAR_HEIGHT_PX = 68;
 
 /** «Enviar» comparte alto con «Cobrar»; la jerarquía la hacen ancho y relleno. */
 export const ENVIAR_HEIGHT_PX = 68;
+
+/**
+ * n1-hosteleria-2 · los dos botones del pie EN LA MANO: `MIN_TOUCH_PX`.
+ *
+ * 56 y no 68. Los 68 son `tap-cobrar-hosteleria` de `tokens.md` §4 —el
+ * cuarto peldaño de la escala, por encima de `touch-lg`— y se eligieron
+ * para la barra de cobro de un terminal. Aquí siguen estando ocho
+ * píxeles por encima del suelo de R3 (48) y son exactamente el suelo de
+ * la casa para la venta y la sala, el mismo que este bloque le ha dado a
+ * la X de la hoja y a la etiqueta LISTO.
+ *
+ * Doce píxeles por botón, y los dos van en la misma fila, así que son 12
+ * px de los 720 — poco por sí solos, y parte de los 52 que el pie
+ * devuelve a la lista de líneas en total.
+ */
+export const COBRAR_HEIGHT_MANO_PX = MIN_TOUCH_PX;
+export const ENVIAR_HEIGHT_MANO_PX = MIN_TOUCH_PX;
 
 /**
  * Ancho de la comanda.

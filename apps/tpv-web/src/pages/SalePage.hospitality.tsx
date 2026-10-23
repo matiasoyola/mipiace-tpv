@@ -85,6 +85,9 @@ import {
   FAMILY_LABEL_PX,
   FAMILY_TEXT,
   MIN_TOUCH_PX,
+  COBRAR_HEIGHT_MANO_PX,
+  ENVIAR_HEIGHT_MANO_PX,
+  TOTAL_PX_MANO,
   ORDER_PANEL_WIDTH,
   PENDING_LINE_AMOUNT_PX,
   PENDING_LINE_NAME_PX,
@@ -1656,10 +1659,19 @@ function Comanda({
         alergias={props.kitchen.estado.allergies.length}
       />
 
-      {/* El pie: total y las dos acciones. */}
+      {/* El pie: total y las dos acciones.
+          n1-hosteleria-2 · hallazgo 1 · EL PIE DEVUELVE 52 PX A LA LISTA.
+          Medido en la hoja del N1 con la comanda de seis líneas: el pie
+          se llevaba **180 px de los 720** y la lista de líneas —lo que el
+          camarero está revisando— se quedaba en 332. De esos 180, 42
+          eran relleno y hueco. En la mano el relleno baja a `pt-2 pb-2.5
+          gap-2`, el total a `TOTAL_PX_MANO` y los botones a
+          `MIN_TOUCH_PX`. En el terminal no se mueve nada. */}
       <div
         data-testid="comanda-pie"
-        className="shrink-0 px-4 pt-3.5 pb-4 flex flex-col gap-3 border-t"
+        className={`shrink-0 px-4 flex flex-col border-t ${
+          deMano ? "pt-2 pb-2.5 gap-2" : "pt-3.5 pb-4 gap-3"
+        }`}
         style={{ borderColor: DARK_SURFACE_RAISED }}
       >
         <div className="flex items-baseline justify-between gap-3">
@@ -1676,7 +1688,10 @@ function Comanda({
           <span
             data-testid="comanda-total"
             className="font-semibold tabular-nums"
-            style={{ fontSize: TOTAL_PX, letterSpacing: "-0.025em" }}
+            style={{
+              fontSize: deMano ? TOTAL_PX_MANO : TOTAL_PX,
+              letterSpacing: "-0.025em",
+            }}
           >
             {formatEur(props.totals.total)}
           </span>
@@ -1707,7 +1722,7 @@ function Comanda({
             }
             className={`flex-1 rounded-2xl border font-semibold disabled:opacity-40 ${PRESS_FEEDBACK_CLASS}`}
             style={{
-              height: ENVIAR_HEIGHT_PX,
+              height: deMano ? ENVIAR_HEIGHT_MANO_PX : ENVIAR_HEIGHT_PX,
               fontSize: ENVIAR_LABEL_PX,
               borderColor: "#3A404A",
               background: "transparent",
@@ -1729,7 +1744,7 @@ function Comanda({
             className={`rounded-2xl border-0 font-semibold disabled:opacity-40 ${PRESS_FEEDBACK_CLASS}`}
             style={{
               flex: 1.3,
-              height: COBRAR_HEIGHT_PX,
+              height: deMano ? COBRAR_HEIGHT_MANO_PX : COBRAR_HEIGHT_PX,
               fontSize: COBRAR_LABEL_PX,
               background: CORAL,
               color: DARK_ON_CORAL,
