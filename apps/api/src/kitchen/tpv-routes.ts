@@ -848,6 +848,30 @@ export async function registerKitchenTpvRoutes(
           section: true,
           number: true,
           readyAt: true,
+          // n1-hosteleria-2 · hallazgo 9 · QUÉ hay que recoger, no sólo
+          // de qué mesa.
+          //
+          // Hasta aquí esta ruta devolvía la mesa y nada más, porque sus
+          // dos destinos —la banda de arriba y la etiqueta LISTO— sólo
+          // enseñan el nombre. Con el hallazgo 9 el aviso deja de ser un
+          // «hecho» directo y pasa a abrir una hoja con lo que el
+          // camarero tiene que coger del pase, así que ahora hacen falta
+          // las líneas: cuántas, cómo se llaman enteras y qué alérgenos
+          // llevan.
+          //
+          // Van aquí y NO por `/tickets/:id` a propósito: lo que está
+          // listo es la comanda de COCINA, no el ticket. Un ticket de seis
+          // líneas con tres listas enseñaría las seis, y el camarero se
+          // llevaría del pase lo que todavía está en la plancha.
+          lines: {
+            select: {
+              id: true,
+              nameSnapshot: true,
+              units: true,
+              voidedUnits: true,
+              allergens: true,
+            },
+          },
         },
       });
       return {
@@ -859,6 +883,16 @@ export async function registerKitchenTpvRoutes(
           section: o.section,
           number: o.number,
           readyAt: o.readyAt!.toISOString(),
+          // Las anuladas no se pintan: lo anulado no está en el pase. Y
+          // lo que se manda son las unidades QUE QUEDAN, no las pedidas.
+          lines: o.lines
+            .map((l) => ({
+              id: l.id,
+              name: l.nameSnapshot,
+              units: Number(l.units) - Number(l.voidedUnits),
+              allergens: l.allergens,
+            }))
+            .filter((l) => l.units > 0),
         })),
       };
     },

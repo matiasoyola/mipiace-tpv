@@ -123,6 +123,11 @@ import {
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { summarizeOpenTables } from "../lib/openTables.js";
 import { VERDE_LISTA, VERDE_LISTA_TEXT } from "../lib/kitchenTheme.js";
+import {
+  hojaDeLaMesa,
+  type ListaDeCocina,
+} from "../lib/avisosListos.js";
+import { HojaDeListo } from "../kitchen/tpv/HojaDeListo.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { formatEur } from "../lib/money.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
@@ -246,6 +251,13 @@ export interface TableMapScreenProps {
    * TPV. Un toque en la etiqueta marca «Servido», igual que la banda.
    */
   mesasListas?: Set<string>;
+  /**
+   * n1-hosteleria-2 · hallazgo 9 · lo listo CON SU DETALLE, para que la
+   * etiqueta LISTO de una mesa abra la hoja en vez de servir en el acto.
+   */
+  avisosListo?: ListaDeCocina[];
+  /** El «Hecho» de la hoja: sirve todas las comandas de la mesa. */
+  onServidas?: (orderIds: string[]) => void;
   onServido?: (orderId: string) => void;
   /** `tableId → orderId` de la comanda más antigua lista de esa mesa. */
   comandaListaPorMesa?: Map<string, string>;
@@ -296,6 +308,9 @@ export function TableMapScreen(props: TableMapScreenProps) {
   const [cobro, setCobro] = useState<CobroState | null>(null);
   // auditoria-sirope (#14) · la mesa POR RECOGER que se acaba de tocar.
   const [porRecoger, setPorRecoger] = useState<ApiTable | null>(null);
+  // n1-hosteleria-2 · hallazgo 9 · qué mesa tiene la hoja de «listo»
+  // abierta. Antes la etiqueta servía en el acto; ahora abre esto.
+  const [mesaListaAbierta, setMesaListaAbierta] = useState<string | null>(null);
   /**
    * n1-hosteleria-2 · hallazgo 2 · qué zonas están plegadas.
    *
@@ -528,10 +543,10 @@ export function TableMapScreen(props: TableMapScreenProps) {
         deMano={deMano}
         amountFontPx={reparto.amountFontPx}
         onRecogida={setPorRecoger}
-        onServido={() => {
-          const orderId = props.comandaListaPorMesa?.get(t.id);
-          if (orderId && props.onServido) props.onServido(orderId);
-        }}
+        // n1-hosteleria-2 · hallazgo 9 · la etiqueta ABRE la hoja de esa
+        // mesa. Tocar y que desaparezca dejaba al camarero con el nombre
+        // de una mesa y sin saber qué tenía que coger del pase.
+        onServido={() => setMesaListaAbierta(t.id)}
         onPick={props.onPickTable}
         onCobrar={openCobro}
       />
@@ -1155,6 +1170,26 @@ export function TableMapScreen(props: TableMapScreenProps) {
           siguiente cliente», y eso sigue siendo cierto: por eso se queda
           como segunda acción, con su botón entero, y no como el texto
           gris que era «Dejar libre». */}
+      {/* n1-hosteleria-2 · hallazgo 9 · la hoja de lo que está listo en
+          una mesa, con sus líneas y el «Hecho». Ver `lib/avisosListos.ts`. */}
+      {mesaListaAbierta != null &&
+        (() => {
+          const mesa = hojaDeLaMesa(props.avisosListo ?? [], mesaListaAbierta);
+          if (!mesa) return null;
+          return (
+            <HojaDeListo
+              mesa={mesa}
+              deMano={deMano}
+              onHecho={(ids) => {
+                setMesaListaAbierta(null);
+                if (props.onServidas) props.onServidas(ids);
+                else for (const id of ids) props.onServido?.(id);
+                void load();
+              }}
+              onCerrar={() => setMesaListaAbierta(null)}
+            />
+          );
+        })()}
       {porRecoger && (
         <ConfirmSheet
           title={`${porRecoger.name} · por recoger`}

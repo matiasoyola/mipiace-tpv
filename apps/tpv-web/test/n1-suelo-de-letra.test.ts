@@ -58,6 +58,8 @@ const PANTALLAS = [
   // La hoja de opciones de una mesa (hallazgo 8). No es «de sala» por su
   // nombre, pero en la mano es lo que sale al tocar una mesa.
   "components/ConfirmSheet.tsx",
+  // La hoja de lo que está listo (hallazgo 9).
+  "kitchen/tpv/HojaDeListo.tsx",
 ];
 
 /**

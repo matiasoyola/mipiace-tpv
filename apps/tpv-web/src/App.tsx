@@ -979,7 +979,11 @@ export function TpvHome(props: {
         pickError={openTableError}
         mesasListas={avisosListo.mesasListas}
         comandaListaPorMesa={comandaListaPorMesa}
+        avisosListo={avisosListo.listas}
         onServido={(orderId) => void avisosListo.marcarServido(orderId)}
+        onServidas={(orderIds) => {
+          for (const id of orderIds) void avisosListo.marcarServido(id);
+        }}
         onLogoutCashier={props.onLogoutCashier}
         onCloseShift={props.onCloseShift}
       />

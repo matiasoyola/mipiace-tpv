@@ -465,7 +465,14 @@ type SalePagePropsDeTest = React.ComponentProps<typeof SalePage>;
 async function render(opts: {
   lineas?: ServerDraftLine[];
   modulo?: boolean;
-  avisos?: Array<{ orderId: string; tableName: string | null; readyAt: string }>;
+  avisos?: Array<{
+    orderId: string;
+    tableName: string | null;
+    readyAt: string;
+    tableId?: string | null;
+    section?: string;
+    lines?: Array<{ id: string; name: string; units: number; allergens: string[] }>;
+  }>;
   onServido?: (id: string) => void;
 } = {}) {
   root = createRoot(container);
@@ -754,20 +761,74 @@ describe("kds-2b · SABOTAJE · la comanda de la wifi sale con el catálogo viej
 });
 
 describe("kds-1 · decisión 5 · la banda «LISTO»", () => {
-  it("sale con el nombre de la mesa y un toque marca «Servido»", async () => {
+  it("sale con el nombre de la mesa, y un toque ABRE LA HOJA (hallazgo 9)", async () => {
+    // n1-hosteleria-2 · hallazgo 9 · esto CAMBIA a propósito lo que kds-1
+    // dejó escrito. Hasta aquí el toque marcaba «Servido» en el acto, y
+    // Matías lo probó en el N1 el 23-10: el aviso desaparece y el camarero
+    // se queda con el nombre de una mesa y sin saber qué coger del pase.
+    //
+    // Ahora el toque abre una hoja por mesa con las líneas listas, y lo
+    // que sirve es el «Hecho». El cambio es de FLUJO, así que va en todos
+    // los aparatos — este banco corre en el terminal.
     banco({ pantalla: true, listas: [] });
     const servidos: string[] = [];
     await render({
       avisos: [
-        { orderId: ORDER, tableName: "M4", readyAt: "2026-10-08T10:20:00.000Z" },
+        {
+          orderId: ORDER,
+          tableId: "mesa-m4",
+          tableName: "M4",
+          section: "COCINA",
+          readyAt: "2026-10-08T10:20:00.000Z",
+          lines: [
+            { id: "l1", name: "Café con leche", units: 2, allergens: [] },
+          ],
+        },
       ],
       onServido: (id) => servidos.push(id),
     });
 
     const banda = $('[data-testid="listo-banda"]')!;
     expect(banda.textContent).toMatch(/M4 · listo para servir/);
+
+    // El toque NO sirve: abre la hoja.
     await click(banda);
+    expect(servidos).toEqual([]);
+    const hoja = $('[data-testid="hoja-listo"]')!;
+    expect(hoja).toBeTruthy();
+    // Y la hoja dice QUÉ hay que coger, con la cantidad y el nombre entero.
+    expect(hoja.textContent).toMatch(/2 · Café con leche/);
+
+    // Lo que sirve es el «Hecho».
+    await click($('[data-testid="hoja-listo-hecho"]')!);
     expect(servidos).toEqual([ORDER]);
+  });
+
+  it("SABOTAJE · en el TERMINAL el aviso no puede servir en el acto", async () => {
+    // La fila de la tabla: «en los grandes sigue siendo un “hecho”
+    // directo». Si alguien devolviera el `onServido` al `onClick` de la
+    // banda, este banco lo diría: el toque serviría sin pasar por la hoja.
+    banco({ pantalla: true, listas: [] });
+    const servidos: string[] = [];
+    await render({
+      avisos: [
+        {
+          orderId: ORDER,
+          tableId: "mesa-m4",
+          tableName: "M4",
+          section: "COCINA",
+          readyAt: "2026-10-08T10:20:00.000Z",
+          lines: [{ id: "l1", name: "Bravas", units: 1, allergens: [] }],
+        },
+      ],
+      onServido: (id) => servidos.push(id),
+    });
+    await click($('[data-testid="listo-banda"]')!);
+    // Tras el toque: nada servido y la hoja delante.
+    expect(servidos).toEqual([]);
+    expect($$('[data-testid="hoja-listo"]')).toHaveLength(1);
+    // Y el botón de la banda ya no se llama «Servido».
+    expect($('[data-testid="listo-banda"]')!.textContent).not.toMatch(/Servido/);
   });
 
   it("varias listas se apilan de MÁS ANTIGUA a más nueva", async () => {

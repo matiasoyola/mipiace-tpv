@@ -28,6 +28,12 @@ import {
   modoDeLosAvisos,
 } from "../../lib/hospitalityGrid.js";
 import {
+  agruparListasPorMesa,
+  type LineaLista,
+  type MesaLista,
+} from "../../lib/avisosListos.js";
+import { HojaDeListo } from "./HojaDeListo.js";
+import {
   DARK_PANEL,
   DARK_TEXT,
   MIN_TOUCH_PX,
@@ -40,13 +46,28 @@ export interface AvisoListo {
   tableName: string | null;
   /** ISO de cuándo se puso «Lista». Ordena la pila. */
   readyAt: string;
+  // n1-hosteleria-2 · hallazgo 9 · lo que hace falta para la hoja.
+  //
+  // Opcionales porque el camino de la wifi (kds-2) no los trae: una
+  // tarjeta que sólo llegó por la LAN no tiene todavía id de servidor ni
+  // detalle. La hoja sigue valiendo sin ellos — dice de qué mesa es y
+  // sirve— y lo dice en voz alta en vez de enseñar una lista vacía.
+  tableId?: string | null;
+  section?: string;
+  lines?: LineaLista[];
 }
 
 export interface ListoBannerProps {
   avisos: AvisoListo[];
   /** `Store.kitchenReadyBeep`. Apagado de serie. */
   beep: boolean;
-  onServido: (orderId: string) => void;
+  /**
+   * n1-hosteleria-2 · hallazgo 9 · lo que sirve es el «Hecho» de la hoja,
+   * y sirve TODAS las comandas de esa mesa de una vez: una mesa puede
+   * tener las bravas en la pantalla de cocina y las cañas en la de barra,
+   * y el camarero hace un solo viaje.
+   */
+  onHecho: (orderIds: string[]) => void;
   /**
    * n1-hosteleria-2 · R2 · en la mano los avisos NO se apilan.
    *
@@ -73,6 +94,8 @@ const BANDA_PX = 52;
 export function ListoBanner(props: ListoBannerProps) {
   // La lista entera, cuando el contador de la mano está desplegado.
   const [desplegado, setDesplegado] = useState(false);
+  // n1-hosteleria-2 · hallazgo 9 · qué mesa tiene la hoja abierta.
+  const [mesaAbierta, setMesaAbierta] = useState<string | null>(null);
   // Un pitido por comanda y SÓLO al aparecer: sin esto, cada repintado de
   // la pantalla (que en venta son muchos) volvería a pitar.
   const pitadosRef = useRef<Set<string>>(new Set());
@@ -93,50 +116,91 @@ export function ListoBanner(props: ListoBannerProps) {
     a.readyAt.localeCompare(b.readyAt),
   );
 
+  // n1-hosteleria-2 · hallazgo 9 · se agrupa POR MESA, y en los dos
+  // caminos: una mesa con las bravas en cocina y las cañas en barra es UN
+  // viaje del camarero, no dos avisos.
+  const mesas = agruparListasPorMesa(ordenadas);
+  const abierta = mesas.find((m) => claveDeMesa(m) === mesaAbierta) ?? null;
+
+  const hoja = abierta ? (
+    <HojaDeListo
+      mesa={abierta}
+      deMano={props.deMano === true}
+      onHecho={(ids) => {
+        props.onHecho(ids);
+        setMesaAbierta(null);
+      }}
+      onCerrar={() => setMesaAbierta(null)}
+    />
+  ) : null;
+
   if (modoDeLosAvisos(props.deMano === true) === "contador") {
     return (
-      <ContadorDeAvisos
-        avisos={ordenadas}
-        desplegado={desplegado}
-        onDesplegar={setDesplegado}
-        onServido={props.onServido}
-      />
+      <>
+        <ContadorDeAvisos
+          avisos={ordenadas}
+          mesas={mesas}
+          desplegado={desplegado}
+          onDesplegar={setDesplegado}
+          onAbrirMesa={(m) => {
+            setMesaAbierta(claveDeMesa(m));
+            setDesplegado(false);
+          }}
+        />
+        {hoja}
+      </>
     );
   }
 
+  // ── El terminal · la pila, que AHORA ABRE LA HOJA ───────────────────
+  //
+  // Hasta el hallazgo 9 este botón decía «Servido» y servía en el acto.
+  // Ahora dice «Ver» y abre la hoja de la mesa: el cambio de flujo es de
+  // todos los aparatos, no sólo de la mano. Es la segunda excepción
+  // declarada a «los terminales no cambian ni un píxel» (§0 del `-done`).
   return (
-    <div
-      data-testid="listo-banner"
-      className="shrink-0 flex flex-col gap-1 px-3 pt-2"
-    >
-      {ordenadas.map((a) => (
-        <button
-          key={a.orderId}
-          type="button"
-          data-testid="listo-banda"
-          data-order-id={a.orderId}
-          onClick={() => props.onServido(a.orderId)}
-          className={`w-full rounded-[12px] px-4 flex items-center gap-3 font-bold text-left ${PRESS_FEEDBACK_CLASS}`}
-          // n1-hosteleria-2 · R4 · `DARK_ON_CORAL` es blanco, y blanco
-          // sobre `VERDE_LISTA` da **1,66:1**. Es el mismo fallo que la
-          // etiqueta «LISTO» de la mesa, con la misma causa: la constante
-          // correcta (`VERDE_LISTA_TEXT`) existe y estaba sin usar. Con
-          // ella, 10,82:1.
-          style={{
-            minHeight: Math.max(BANDA_PX, MIN_TOUCH_PX),
-            background: VERDE_LISTA,
-            color: VERDE_LISTA_TEXT,
-            fontSize: 21,
-          }}
-        >
-          <span>{a.tableName ?? "Comanda"} · listo para servir</span>
-          <span className="ml-auto font-semibold" style={{ fontSize: 16 }}>
-            Servido
-          </span>
-        </button>
-      ))}
-    </div>
+    <>
+      <div
+        data-testid="listo-banner"
+        data-modo="pila"
+        className="shrink-0 flex flex-col gap-1 px-3 pt-2"
+      >
+        {mesas.map((m) => (
+          <button
+            key={claveDeMesa(m)}
+            type="button"
+            data-testid="listo-banda"
+            data-order-id={m.orderIds[0]}
+            data-comandas={m.orderIds.length}
+            onClick={() => setMesaAbierta(claveDeMesa(m))}
+            className={`w-full rounded-[12px] px-4 flex items-center gap-3 font-bold text-left ${PRESS_FEEDBACK_CLASS}`}
+            // n1-hosteleria-2 · R4 · `DARK_ON_CORAL` es blanco, y blanco
+            // sobre `VERDE_LISTA` da **1,66:1**. Es el mismo fallo que la
+            // etiqueta «LISTO» de la mesa, con la misma causa: la
+            // constante correcta (`VERDE_LISTA_TEXT`) existe y estaba sin
+            // usar. Con ella, 10,82:1.
+            style={{
+              minHeight: Math.max(BANDA_PX, MIN_TOUCH_PX),
+              background: VERDE_LISTA,
+              color: VERDE_LISTA_TEXT,
+              fontSize: 21,
+            }}
+          >
+            <span>{m.tableName ?? "Comanda"} · listo para servir</span>
+            <span className="ml-auto font-semibold" style={{ fontSize: 16 }}>
+              Ver
+            </span>
+          </button>
+        ))}
+      </div>
+      {hoja}
+    </>
   );
+}
+
+/** La clave de agrupación: la mesa, o la propia comanda si no hay mesa. */
+export function claveDeMesa(m: MesaLista): string {
+  return m.tableId ?? `sin-mesa:${m.orderIds[0]}`;
 }
 
 /**
@@ -159,15 +223,18 @@ export function ListoBanner(props: ListoBannerProps) {
  */
 function ContadorDeAvisos({
   avisos,
+  mesas,
   desplegado,
   onDesplegar,
-  onServido,
+  onAbrirMesa,
 }: {
   /** Ya ordenados de más antigua a más nueva. */
   avisos: AvisoListo[];
+  /** Los mismos, agrupados por mesa (hallazgo 9). */
+  mesas: MesaLista[];
   desplegado: boolean;
   onDesplegar: (v: boolean) => void;
-  onServido: (orderId: string) => void;
+  onAbrirMesa: (m: MesaLista) => void;
 }) {
   // R3 · toda hoja se cierra también con el «atrás» de Android.
   useBackGuard(() => onDesplegar(false), desplegado);
@@ -256,20 +323,18 @@ function ContadorDeAvisos({
               ✕
             </button>
           </div>
+          {/* n1-hosteleria-2 · hallazgo 9 · una fila POR MESA, y tocarla
+              ABRE su hoja. Antes cada fila servía en el acto: el camarero
+              tocaba y se quedaba sin saber qué tenía que coger. */}
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 flex flex-col gap-2">
-            {avisos.map((a) => (
+            {mesas.map((m) => (
               <button
-                key={a.orderId}
+                key={claveDeMesa(m)}
                 type="button"
                 data-testid="listo-banda"
-                data-order-id={a.orderId}
-                onClick={() => {
-                  onServido(a.orderId);
-                  // Servida la última, la capa se va sola: dejarla
-                  // abierta y vacía obligaría a un toque para salir de
-                  // una pantalla que ya no dice nada.
-                  if (avisos.length <= 1) onDesplegar(false);
-                }}
+                data-order-id={m.orderIds[0]}
+                data-comandas={m.orderIds.length}
+                onClick={() => onAbrirMesa(m)}
                 className={`w-full rounded-[12px] px-4 flex items-center gap-3 font-bold text-left ${PRESS_FEEDBACK_CLASS}`}
                 style={{
                   minHeight: Math.max(BANDA_PX, MIN_TOUCH_PX),
@@ -279,13 +344,13 @@ function ContadorDeAvisos({
                 }}
               >
                 <span className="flex-1 min-w-0">
-                  {a.tableName ?? "Comanda"} · listo para servir
+                  {m.tableName ?? "Comanda"} · listo para servir
                 </span>
                 <span
                   className="shrink-0 font-semibold"
                   style={{ fontSize: 16 }}
                 >
-                  Servido
+                  Ver
                 </span>
               </button>
             ))}

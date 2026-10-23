@@ -278,6 +278,11 @@ export interface ComandaCocinaWiring {
   /** Las bandas «M4 · listo para servir», y el toque que marca «Servido». */
   avisosListo: AvisoListo[];
   onServido: (orderId: string) => void;
+  /**
+   * n1-hosteleria-2 · hallazgo 9 · lo que sirve es el «Hecho» de la hoja,
+   * y sirve todas las comandas de esa mesa de una vez.
+   */
+  onServidas: (orderIds: string[]) => void;
   /** Las anulaciones dentro de su ventana de 5 s, con su «Deshacer». */
   anulaciones: AnulacionPendiente[];
   onDeshacer: (key: string) => void;
@@ -1450,7 +1455,7 @@ function Comanda({
         <ListoBanner
           avisos={props.kitchen.avisosListo}
           beep={props.kitchen.readyBeep}
-          onServido={props.kitchen.onServido}
+          onHecho={props.kitchen.onServidas}
           deMano={deMano}
         />
       )}

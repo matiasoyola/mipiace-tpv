@@ -3097,6 +3097,13 @@ export function SalePage(props: SalePageProps) {
                   props.onServido?.(orderId);
                   kitchen.recargar();
                 },
+                // n1-hosteleria-2 · hallazgo 9 · el «Hecho» de la hoja
+                // sirve TODAS las comandas de la mesa de una vez: las
+                // bravas de cocina y las cañas de barra son un viaje.
+                onServidas: (orderIds) => {
+                  for (const id of orderIds) props.onServido?.(id);
+                  kitchen.recargar();
+                },
                 anulaciones: kitchen.anulaciones,
                 onDeshacer: deshacerAnulacionConTotal,
                 cocinaNoRecibe: kitchen.cocinaNoRecibe,
