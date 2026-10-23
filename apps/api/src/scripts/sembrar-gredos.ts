@@ -31,7 +31,7 @@
 //
 //   pnpm --filter @mipiacetpv/api exec tsx src/scripts/sembrar-gredos.ts
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { PrismaClient } from "@mipiacetpv/db";
 
@@ -68,6 +68,7 @@ import { cargarPlantillaDeObligaciones } from "../residencia/obligaciones.js";
 import { estaAusente, wallTimeToUtc } from "@mipiacetpv/residencia-plan";
 import { cargarCatalogoDeSerie } from "../residencia/catalogo/cargar-catalogo.js";
 import { cargarPlantillaDeGravedad } from "../residencia/catalogo/cargar-plantilla.js";
+import { VERSION_DE_LA_PLANTILLA } from "../residencia/catalogo/plantilla-de-gravedad.js";
 import { aplicarPlantilla } from "../residencia/plan.js";
 // historia-1 · el escenario de la ficha clínica, las ausencias, el
 // ingreso guiado y el alta. **Las MISMAS funciones del producto**, no un
@@ -129,10 +130,16 @@ const MANUEL = "99999999-0000-4000-8000-000000000055";
 const CAMA_201_B = "99999999-0000-4000-8000-000000000043";
 const HAB_202 = "99999999-0000-4000-8000-000000000032";
 const CAMA_202 = "99999999-0000-4000-8000-000000000044";
+// Y la tablet de la 201, que es la habitación de Antonio (ingresado) e
+// Isabel (de vuelta ayer): sin ella, la pantalla del residente AUSENTE no
+// se puede fotografiar, y es media decisión del bloque (D-92).
+const TABLET_201 = "99999999-0000-4000-8000-000000000064";
 
 /** El token de la tablet y el PIN de la auxiliar. Son de prueba y están
  *  escritos aquí porque el bucle visual los teclea. */
 export const TOKEN_DE_LA_PUERTA = "gredos-puerta-112-0001-0001-0001";
+/** historia-1 · la puerta de la 201, donde está el residente ausente. */
+export const TOKEN_DE_LA_PUERTA_201 = "gredos-puerta-201-0001-0001-0001";
 export const PIN_DE_ANA = "4071";
 // ── residencia-6 (D-68) · CUATRO CIFRAS O SEIS, SEGÚN EL ALCANCE ─────
 //
@@ -226,7 +233,12 @@ async function main(): Promise<void> {
   for (const [id, alias, email, rol] of [
     [DIRECCION, "Pilar", "pilar@gredos.local", "OWNER"],
     [ANA, "Ana López", "ana@gredos.local", "CLINICIAN"],
-    [ROSA, "Rosa (DUE)", "rosa@gredos.local", "CLINICIAN"],
+    // historia-1 · **«Rosa» y no «Rosa (DUE)»**, y lo encontró el bucle
+    // visual: la ficha clínica firma cada línea con «lo escribió NOMBRE
+    // (CAPACIDAD)», y con el rol dentro del alias salía «Rosa (DUE) (DUE
+    // (enfermería))». El alias es el nombre de la persona; la capacidad
+    // la pone la pantalla.
+    [ROSA, "Rosa", "rosa@gredos.local", "CLINICIAN"],
     // residencia-4 · la médica. Es la única que puede pautar una
     // excepción de umbral (D-22).
     [SOTO, "Dra. Soto", "soto@gredos.local", "CLINICIAN"],
@@ -451,6 +463,26 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── historia-1 · la tablet de la 201 ──────────────────────────────
+  //
+  // Sin `ON CONFLICT DO UPDATE`, por lo mismo que las otras: `devices`
+  // lleva el trigger `devices_revoke_previous`, que toca otra fila de la
+  // misma tabla en la misma sentencia.
+  {
+    const ya = await prisma.$executeRawUnsafe(
+      `UPDATE devices SET device_token_hash = '${hashDeviceToken(TOKEN_DE_LA_PUERTA_201)}',
+         revoked_at = NULL, name = 'Puerta 201'
+       WHERE id = '${TABLET_201}'`,
+    );
+    if (ya === 0) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO devices (id, tenant_id, kind, room_id, register_id, name, device_token_hash)
+         VALUES ('${TABLET_201}', '${T}', 'ROOM', '${HAB_201}', NULL, 'Puerta 201',
+                 '${hashDeviceToken(TOKEN_DE_LA_PUERTA_201)}')`,
+      );
+    }
+  }
+
   // ── La tablet de la 112 ────────────────────────────────────────────
   // Primero el UPDATE y sólo si no estaba el INSERT, y **no un
   // `ON CONFLICT DO UPDATE`**: `devices` lleva el trigger
@@ -565,6 +597,7 @@ async function main(): Promise<void> {
       `  PIN de Ana        ${PIN_DE_ANA}   (auxiliar, primera planta)`,
       `  PIN de Rosa       ${PIN_DE_ROSA} (DUE, todo el centro · 6 cifras, D-68)`,
       `  token de la 112   ${TOKEN_DE_LA_PUERTA}`,
+      `  token de la 201   ${TOKEN_DE_LA_PUERTA_201} (la del residente ausente)`,
       `  habitación        112 · Carmen Gómez Ruiz (con foto) y Luis Núñez Bravo (sin consentimiento)`,
       `  PIN de Pilar      ${PIN_DE_PILAR} (dirección, el móvil de responsable · 6 cifras)`,
       `  PIN de la médica  ${PIN_DE_SOTO} (la única que pauta un umbral · 6 cifras)`,
@@ -671,7 +704,13 @@ async function sembrarElDia(dek: Buffer, ayer: string): Promise<void> {
     recibidoEn?: Date;
   }): Promise<string> {
     const control = controlDe(input.code);
-    const id = randomUUID();
+    // historia-1 · id estable, por lo mismo que en `incidencia()`: el
+    // índice `care_records_una_por_ocurrencia_key` no cubre a los que
+    // llevan `occurrence_at` NULL, así que sin esto cada corrida escribía
+    // otra fiebre de las 11:15.
+    const id = idEstable(
+      `registro|${ayer}|${input.turnoId}|${input.hora}|${input.code}|${input.clientId}`,
+    );
     const cuando = aLas(input.hora);
     const valor = cifrarJson(input.valor, dek, sitioValorDeRegistro(T, id));
     const nota =
@@ -702,7 +741,21 @@ async function sembrarElDia(dek: Buffer, ayer: string): Promise<void> {
     abierta: boolean;
     subject?: string;
   }): Promise<string> {
-    const id = randomUUID();
+    // ── historia-1 · **EL ID ES DETERMINISTA, y lo encontró el bucle
+    //    visual** ────────────────────────────────────────────────────
+    //
+    // Con `randomUUID()` y `ON CONFLICT DO NOTHING`, cada corrida del
+    // sembrador insertaba OTRA incidencia idéntica: el parte salía con la
+    // misma caída repetida seis veces, una por corrida. No se veía en
+    // ningún test porque el e2e siembra una vez y la suite no siembra.
+    //
+    // Con el id derivado de (día, turno, hora, tipo, residente), volver a
+    // sembrar escribe la MISMA fila y el `ON CONFLICT` la descarta — que
+    // es lo que «idempotente por ids fijos» promete en la cabecera de
+    // este fichero.
+    const id = idEstable(
+      `incidencia|${ayer}|${input.turnoId}|${input.hora}|${input.tipo}|${input.clientId ?? "centro"}`,
+    );
     const cuando = aLas(input.hora);
     const descripcion = cifrarTexto(
       input.descripcion,
@@ -725,7 +778,7 @@ async function sembrarElDia(dek: Buffer, ayer: string): Promise<void> {
          closed_at, closed_by_user_id, closed_by_care_role_assignment_id, self_closed, open)
        VALUES ('${id}', '${T}', '${input.subject ?? "RESIDENT"}',
                ${input.clientId == null ? "NULL" : `'${input.clientId}'`},
-               'DECLARED', '${input.tipo}', '${input.nivel}', 1,
+               'DECLARED', '${input.tipo}', '${input.nivel}', ${VERSION_DE_LA_PLANTILLA},
                ${descripcion == null ? "NULL" : `'${descripcion}'`},
                '${cuando.toISOString()}', '${cuando.toISOString()}',
                '${ANA}', '${rolDe(ANA)}',
@@ -869,7 +922,11 @@ async function sembrarElDia(dek: Buffer, ayer: string): Promise<void> {
     // Las constantes y los textos no se siembran en bloque: la
     // temperatura de Isabel ya está arriba, con su valor fuera de rango.
     if (valor == null) continue;
-    const id = randomUUID();
+    // historia-1 · y el del plan, por lo mismo. La clave es la ocurrencia
+    // a la que responde, que es justo lo que lo identifica.
+    const id = idEstable(
+      `plan|${ayer}|${turno.code}|${linea.id}|${linea.controlCode}`,
+    );
     const cifrado = cifrarJson(valor, dek, sitioValorDeRegistro(T, id));
     // La observación diaria guarda `occurrence_at` NULL (residencia-3
     // §1); lo que «toca» guarda el instante de la ocurrencia, que en una
@@ -1276,12 +1333,17 @@ async function sembrarLaFichaClinica(dek: Buffer): Promise<void> {
   // dieta**: el primero porque es de los de marcar y el segundo porque es
   // `auto` y se cumple cuando la dieta existe. Son los dos pendientes del
   // escenario, y cada uno enseña una de las dos formas de estar hecho.
+  // **Lo firma la dirección con SU capacidad**, no con la de la DUE: el
+  // bucle visual enseñó «Lo marcó Pilar (DUE (enfermería))», que es una
+  // firma imposible — la persona y la capacidad tienen que ser de la
+  // misma asignación (D-31).
+  const capacidadDeDireccion = await capacidadDe(DIRECCION, "DIRECCION");
   for (const code of ["CONSENT_IMAGEN", "DISPOSITIVOS"]) {
     await prisma.$executeRawUnsafe(
       `UPDATE admission_checklist_items
           SET done_at = now() - interval '2 days',
               done_by_user_id = '${DIRECCION}',
-              done_by_care_role_assignment_id = '${capacidadDeLaDue}'
+              done_by_care_role_assignment_id = '${capacidadDeDireccion}'
         WHERE client_id = '${DOLORES}' AND code = '${code}' AND done_at IS NULL`,
     );
   }
@@ -1318,6 +1380,27 @@ async function sembrarLaFichaClinica(dek: Buffer): Promise<void> {
       userId: DIRECCION,
     });
   }
+}
+
+/**
+ * Un uuid **estable** a partir de una clave.
+ *
+ * Lo que hace idempotente a este sembrador es que los ids no cambien
+ * entre corridas (ver la cabecera). Para las filas con id fijo escrito a
+ * mano basta la constante; para las que se generan en bucle —las
+ * incidencias y los registros del día— hace falta derivarlo de lo que las
+ * identifica.
+ *
+ * SHA-1 recortado a 16 bytes y con los bits de versión de un uuid v5
+ * puestos: no es criptografía, es un identificador reproducible.
+ */
+function idEstable(clave: string): string {
+  const h = createHash("sha1").update(clave, "utf8").digest();
+  const b = Buffer.from(h.subarray(0, 16));
+  b[6] = (b[6]! & 0x0f) | 0x50;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const x = b.toString("hex");
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
 }
 
 /** El id de la asignación de rol de alguien, que es con lo que se firma

@@ -336,7 +336,14 @@ function autoHecho(
     case "CONSENT_DATOS":
       return r.tieneConsentimientoDeDatos
         ? { hecho: true, porque: "Firmado y vigente" }
-        : { hecho: false, porque: "Sin firmar: se firma en su ficha" };
+        : {
+            hecho: false,
+            // **Dónde se firma, no «pendiente»**: lo encontró el bucle
+            // visual con la pantalla delante — el formulario de firma
+            // está debajo, en esta misma página, y decir «en su ficha»
+            // mandaba a la dirección a otro sitio.
+            porque: "Sin firmar: se firma abajo, en «Consentimientos del ingreso»",
+          };
     case "FAMILIAR":
       return r.tieneFamiliar
         ? { hecho: true, porque: "Con nombre y teléfono" }
