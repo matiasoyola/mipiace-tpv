@@ -29,6 +29,72 @@ export const INK_SOFT = rgb(0.35, 0.39, 0.45);
 export const LINEA = rgb(0.75, 0.78, 0.82);
 
 /**
+ * **LO QUE LA FUENTE PUEDE ESCRIBIR, Y NADA MÁS.**
+ *
+ * Las fuentes estándar de PDF (Helvetica y compañía) codifican en
+ * WinAnsi, y `pdf-lib` **LANZA** cuando le llega un carácter que no cabe:
+ * `WinAnsi cannot encode "→" (0x2192)`. No pinta un cuadradito ni se lo
+ * salta — revienta la petición entera con un 500.
+ *
+ * Lo encontró el bucle visual de calidad-1 generando el PAC: el texto de
+ * una no conformidad llevaba una flecha, y el documento que hay que
+ * mandarle a AENOR en 30 días no salía. **Es el peor momento posible
+ * para que un PDF falle**, y el carácter lo escribe quien redacta el
+ * hallazgo: flechas, comillas tipográficas de un copiar y pegar, un
+ * emoji. No hay forma de pedirle a nadie que no los use.
+ *
+ * Así que se sustituyen, y se sustituyen por algo que se lee: la flecha
+ * por `->`, los guiones y las comillas largas por los suyos de toda la
+ * vida, y lo que no tenga equivalente por `?` — que es feo y es visible,
+ * que es justo lo que tiene que ser para que alguien lo arregle.
+ *
+ * Lo que NO se hace es quitarlo en silencio: un carácter que desaparece
+ * de un documento legal es peor que uno que se ve raro.
+ */
+const EQUIVALENTES: Record<string, string> = {
+  "→": "->",
+  "←": "<-",
+  "⇒": "=>",
+  "–": "-",
+  "—": "-",
+  "‑": "-",
+  "“": '"',
+  "”": '"',
+  "„": '"',
+  "‘": "'",
+  "’": "'",
+  "…": "...",
+  "•": "·",
+  "✓": "v",
+  "✔": "v",
+  "×": "x",
+  "≥": ">=",
+  "≤": "<=",
+  "≠": "!=",
+  "\u00a0": " ",
+  "\u202f": " ",
+  "\u2009": " ",
+};
+
+/** Lo que WinAnsi sabe escribir: ASCII imprimible más el bloque latino-1
+ *  y el puñado de la zona 0x80-0x9F que la codificación define. */
+const ENCODABLE =
+  /^[\u0020-\u007e\u00a0-\u00ff\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178]$/;
+
+export function saneado(texto: string): string {
+  let salida = "";
+  for (const c of texto) {
+    const equivalente = EQUIVALENTES[c];
+    if (equivalente !== undefined) {
+      salida += equivalente;
+      continue;
+    }
+    salida += ENCODABLE.test(c) ? c : "?";
+  }
+  return salida;
+}
+
+/**
  * Parte un texto en renglones que caben en `maxWidth`.
  *
  * Por palabras, y si una sola palabra no cabe (una URL larga, un nº de
@@ -43,7 +109,10 @@ export function wrap(
 ): string[] {
   const lineas: string[] = [];
   let actual = "";
-  for (const palabra of text.split(/\s+/).filter(Boolean)) {
+  // Saneado ANTES de medir: `widthOfTextAtSize` es la llamada que lanza,
+  // así que medir un texto sin sanear revienta antes de llegar a
+  // pintarlo.
+  for (const palabra of saneado(text).split(/\s+/).filter(Boolean)) {
     const tentativa = actual ? `${actual} ${palabra}` : palabra;
     if (font.widthOfTextAtSize(tentativa, size) <= maxWidth) {
       actual = tentativa;
@@ -162,7 +231,7 @@ export function pieEnTodasLasPaginas(
 ): void {
   const paginas = doc.getPages();
   paginas.forEach((page, i) => {
-    const linea = `${texto} · ${i + 1} de ${paginas.length}`;
+    const linea = saneado(`${texto} · ${i + 1} de ${paginas.length}`);
     const size = 7.5;
     const ancho = font.widthOfTextAtSize(linea, size);
     page.drawText(linea, {

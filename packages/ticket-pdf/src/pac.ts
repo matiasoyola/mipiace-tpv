@@ -43,6 +43,7 @@ import {
   pieEnTodasLasPaginas,
   raya,
   reservar,
+  saneado,
   wrap,
   type Cursor,
 } from "./documento-a4.js";
@@ -115,7 +116,7 @@ function campo(cursor: Cursor, etiqueta: string, valor: string): void {
     CONTENT_WIDTH - anchoEtiqueta,
   );
   reservar(cursor, alto * lineas.length);
-  cursor.page.drawText(etiqueta, {
+  cursor.page.drawText(saneado(etiqueta), {
     x: MARGIN_X,
     y: cursor.y - CUERPO,
     size: PEQUENA,
@@ -155,7 +156,7 @@ export async function renderPacPdf(datos: PacParaPdf): Promise<Uint8Array> {
   };
 
   // ── La cabecera ───────────────────────────────────────────────────
-  cursor.page.drawText(datos.centro.nombre, {
+  cursor.page.drawText(saneado(datos.centro.nombre), {
     x: MARGIN_X,
     y: cursor.y - 11,
     size: 11,
@@ -166,7 +167,7 @@ export async function renderPacPdf(datos: PacParaPdf): Promise<Uint8Array> {
     .filter((x): x is string => !!x && x.trim() !== "")
     .join(" · ");
   if (senas) {
-    cursor.page.drawText(senas, {
+    cursor.page.drawText(saneado(senas), {
       x: MARGIN_X,
       y: cursor.y - 22,
       size: PEQUENA,
@@ -176,7 +177,7 @@ export async function renderPacPdf(datos: PacParaPdf): Promise<Uint8Array> {
   }
   cursor.y -= 34;
 
-  cursor.page.drawText(titulo, {
+  cursor.page.drawText(saneado(titulo), {
     x: MARGIN_X,
     y: cursor.y - TITULO,
     size: TITULO,
@@ -217,7 +218,7 @@ export async function renderPacPdf(datos: PacParaPdf): Promise<Uint8Array> {
     }
     const linea = (m: Map<string, number>): string =>
       [...m.entries()].map(([k, v]) => `${k}: ${v}`).join(" · ");
-    cursor.page.drawText("Resumen del periodo", {
+    cursor.page.drawText(saneado("Resumen del periodo"), {
       x: MARGIN_X,
       y: cursor.y - SECCION,
       size: SECCION,
@@ -249,7 +250,7 @@ export async function renderPacPdf(datos: PacParaPdf): Promise<Uint8Array> {
 
   for (const n of datos.noConformidades) {
     reservar(cursor, 40);
-    cursor.page.drawText(`${n.referencia} · ${n.clase}`, {
+    cursor.page.drawText(saneado(`${n.referencia} · ${n.clase}`), {
       x: MARGIN_X,
       y: cursor.y - SECCION,
       size: SECCION,
