@@ -40,6 +40,7 @@ export type ModoClientForm = "rapido" | "ficha";
 export function ClientForm({
   existing,
   modo = "ficha",
+  inicial,
   onSaved,
   onCancel,
 }: {
@@ -48,13 +49,29 @@ export function ClientForm({
   // Qué se pide. Por defecto la ficha entera: así ninguna pantalla que ya
   // usaba este formulario cambia por accidente.
   modo?: ModoClientForm;
+  /**
+   * clinica-8 (fase B, 17) · CON LO QUE YA SE HA TECLEADO.
+   *
+   * Auditoría del 18-10, punto 26: «Nuevo cliente: lo tecleado en el
+   * buscador no pasa al formulario». Se busca «Rosario Ja», no sale, se
+   * pulsa «Crear» y el formulario está vacío: hay que volver a
+   * escribirlo delante de la paciente.
+   *
+   * Es una semilla, no un valor controlado: en cuanto el formulario
+   * existe, manda lo que se teclee en él.
+   */
+  inicial?: { firstName?: string; lastName?: string; phone?: string };
   onSaved: (c: ClientRow) => void;
   onCancel: () => void;
 }) {
   const esRapido = modo === "rapido";
-  const [firstName, setFirstName] = useState(existing?.firstName ?? "");
-  const [lastName, setLastName] = useState(existing?.lastName ?? "");
-  const [phone, setPhone] = useState(existing?.phone ?? "");
+  const [firstName, setFirstName] = useState(
+    existing?.firstName ?? inicial?.firstName ?? "",
+  );
+  const [lastName, setLastName] = useState(
+    existing?.lastName ?? inicial?.lastName ?? "",
+  );
+  const [phone, setPhone] = useState(existing?.phone ?? inicial?.phone ?? "");
   const [email, setEmail] = useState(existing?.email ?? "");
   // El campo se teclea en dd/mm/aaaa; a la API va en YYYY-MM-DD.
   const [birthdate, setBirthdate] = useState(

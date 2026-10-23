@@ -47,6 +47,7 @@ import {
   sitioMotivoDeRetirada,
   sitioZonaDeFoto,
 } from "./cripto-campos.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { guardarFichero, MIME_DE_FOTO } from "./ficheros.js";
 
 /** Cuántas fotos entran en la rejilla de «Todas». */
@@ -94,10 +95,9 @@ const SELECT_FOTO = {
 
 type FilaDeFoto = Prisma.ClinicalPhotoGetPayload<{ select: typeof SELECT_FOTO }>;
 
-function nombreDe(u: { alias: string | null; email: string } | null): string {
-  if (!u) return "—";
-  return u.alias?.trim() || u.email;
-}
+// clinica-8 (fase B, 11) · el nombre, no el email. Era una copia local
+// que caía al email entero; ahora es `lib/nombre-para-mostrar.ts`.
+const nombreDe = nombreParaMostrar;
 
 /**
  * clinica-7 · la fila, descifrada.

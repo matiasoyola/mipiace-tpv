@@ -68,7 +68,14 @@ const PRODUCTS_SELLABLE_THRESHOLD_PCT = 50;
 /**
  * De qué depende un check. `always` = vale para cualquier empresa.
  */
-export type CheckRequirement = "always" | "caja" | "holded";
+export type CheckRequirement =
+  | "always"
+  | "caja"
+  | "holded"
+  | "clinica"
+  // clinica-8 (fase B) · una CLÍNICA, no «cualquiera con la historia
+  // clínica encendida». Ver la nota de `applies`.
+  | "clinicaDePodologia";
 
 export interface ReadinessCheck {
   id:
@@ -79,7 +86,8 @@ export interface ReadinessCheck {
     | "test-cashier-provisioned"
     | "modules-enabled"
     | "fiscal-minimum"
-    | "tickets-before-holded";
+    | "tickets-before-holded"
+    | "catalogo-clinico";
   label: string;
   ok: boolean;
   value?: string;
@@ -186,6 +194,11 @@ export async function computeOnboardingHealth(
         holdedApiKeyCiphertext: true,
         // catalogo-local (addendum 3) · la otra mitad de la pregunta.
         holdedEnabled: true,
+        // clinica-8 · de qué depende el check del catálogo clínico.
+        clinicalRecordsEnabled: true,
+        // clinica-8 (fase B) · para distinguir una clínica de una
+        // residencia, que tiene la historia clínica encendida por diseño.
+        residenciaEnabled: true,
         fiscalProfile: true,
       },
     }),
@@ -238,6 +251,28 @@ export async function computeOnboardingHealth(
   const ticketsCobradosSinSubir = Number(
     ticketsCobradosSinSubirRows?.[0]?.n ?? 0,
   );
+
+  // ── clinica-8 · ¿EL CATÁLOGO CLÍNICO ESTÁ COMPLETO? ────────────────
+  //
+  // Se pregunta sólo en una clínica, y por eso va aquí y no en el
+  // `Promise.all` de arriba: los catorce comercios sin historia clínica
+  // no pagan ni una consulta por este check.
+  //
+  // Lo que mide es exactamente lo que la auditoría del 18-10 encontró
+  // roto con el catálogo YA CARGADO: 17 servicios exentos y reservables,
+  // y la sesión diciendo «sin servicio» con el cierre a 0,00 €. El
+  // catálogo estaba, la clínica no podía cobrar.
+  //
+  // clinica-8 (fase B) · y tampoco una RESIDENCIA, que la tiene encendida
+  // por diseño y no es una consulta que cobre por tipo de visita. La
+  // condición es LA MISMA que `applies.clinicaDePodologia`: si se
+  // separaran, el check podría salir «No aplica» con un valor medido
+  // dentro, que es un dato sin dueño.
+  const catalogoClinico =
+    tenant.clinicalRecordsEnabled === true &&
+    tenant.residenciaEnabled !== true
+      ? await medirCatalogoClinico(prisma, tenantId)
+      : null;
 
   // Mensaje de error del sync extraído de los stats (si hay).
   const stats =
@@ -309,6 +344,33 @@ export async function computeOnboardingHealth(
   const applies: Record<CheckRequirement, boolean> = {
     always: true,
     caja: hasCaja,
+    // clinica-8 · sólo en una clínica. En los catorce comercios sin
+    // historia clínica el check sale «No aplica» y no bloquea nada.
+    clinica: tenant.clinicalRecordsEnabled === true,
+    // clinica-8 (fase B) · UNA RESIDENCIA NO ES UNA CLÍNICA, aunque tenga
+    // la historia clínica encendida.
+    //
+    // Lo encontró la CI al mergear master: `primer-acceso.e2e.ts` activa
+    // una residencia desde cero y la activación se iba a
+    // `ONBOARDING_NOT_READY · ["Catálogo clínico completo"]`. Y con razón,
+    // desde dentro del check: una residencia no declara tipos de visita y
+    // no tiene servicios de podología, así que le faltaba TODO.
+    //
+    // Pero `residenciaEnabled` enciende la historia clínica por diseño
+    // (residencia-1: «un tenant de residencia tiene además la clínica y el
+    // CRM»), así que el check de la fase A estaba bloqueando la
+    // activación de **todas** las residencias. Eso es un defecto de la
+    // fase A, no del banco de master.
+    //
+    // La pregunta que el check quiere hacer no es «¿tiene historia
+    // clínica?» sino «¿es una consulta que cobra por tipo de visita?». En
+    // un centro mixto —una residencia con una consulta de podología
+    // dentro— no se bloquea la activación: su catálogo clínico se
+    // completa después, y lo que está en juego ahí no es el primer cobro
+    // de una paciente que ya se ha ido.
+    clinicaDePodologia:
+      tenant.clinicalRecordsEnabled === true &&
+      tenant.residenciaEnabled !== true,
     // La dependencia es "está previsto que use Holded", NO "lo tiene
     // conectado". Si fuera lo segundo, la empresa a mitad de onboarding
     // vería su `sync-done` como "No aplica" justo cuando es el único
@@ -410,6 +472,26 @@ export async function computeOnboardingHealth(
       value: `${ticketsSyncFailed} pendientes`,
       requires: "caja",
     },
+    // ── clinica-8 · depende de la historia clínica ────────────────────
+    {
+      // NO SE ACTIVA UNA CLÍNICA QUE NO PUEDE COBRAR.
+      //
+      // Bloquea la activación a propósito, igual que
+      // `tickets-before-holded`: una clínica activada con el catálogo a
+      // medias factura de verdad desde el primer cobro, y el primer cobro
+      // es el de una paciente que ya se ha ido. Lo que cuesta arreglarlo
+      // antes es una columna del fichero.
+      id: "catalogo-clinico",
+      label: "Catálogo clínico completo",
+      ok: catalogoClinico === null ? true : catalogoClinico.falta.length === 0,
+      value:
+        catalogoClinico === null
+          ? "—"
+          : catalogoClinico.falta.length === 0
+            ? "completo"
+            : `falta: ${catalogoClinico.falta.join("; ")}`,
+      requires: "clinicaDePodologia",
+    },
     {
       id: "test-cashier-provisioned",
       label: "Cajero técnico provisionado",
@@ -481,4 +563,89 @@ function fiscalString(profile: unknown, keys: string[]): string | null {
     if (typeof v === "string" && v.trim().length > 0) return v.trim();
   }
   return null;
+}
+
+// ── clinica-8 · el catálogo clínico, medido ──────────────────────────
+//
+// Tres preguntas, y las tres salen de lo que la sesión necesita para
+// poder poner una línea en caja (clinica-5 §2):
+//
+//   1. **cada tipo de visita DECLARADO tiene servicio.** «Declarado» es la
+//      palabra importante: lo que se mira son las categorías que el centro
+//      ha marcado con un tipo (`tag_visit_types`), no los cinco tipos de la
+//      lista. Una podóloga que no hace biomecánica no tiene que inventarse
+//      un servicio para poder activarse; lo que no puede es declarar la
+//      categoría «cirugia → CIRUGIA» y no tener ni un servicio dentro,
+//      porque entonces esa tarjeta de la sesión no cobra nada.
+//   2. **los TRES niveles de quiropodia**, y sólo si el centro declara
+//      quiropodia. Son tres productos distintos y el nivel que la sesión
+//      propone elige cuál pasa a caja: con dos, la sesión propone un nivel
+//      que no existe y cierra sin línea.
+//   3. **una primera valoración.** Es el servicio con el que se cita la
+//      primera visita, y sin él la valoración inicial no tiene cómo
+//      cobrarse ni cómo proponerse.
+//
+// Devuelve la lista de lo que FALTA, en la palabra del implantador, para
+// que la pantalla pueda decir qué arreglar sin que nadie abra la base.
+async function medirCatalogoClinico(
+  prisma: PrismaClient,
+  tenantId: string,
+): Promise<{ falta: string[] }> {
+  const [categorias, agendas] = await Promise.all([
+    prisma.tagVisitType.findMany({
+      where: { tenantId },
+      select: { slug: true, visitType: true },
+    }),
+    // Las filas de agenda de los servicios ACTIVOS del comercio, con sus
+    // marcas y con las categorías de su producto. Una sola consulta: esto
+    // corre en cada apertura de la ficha del tenant.
+    prisma.serviceScheduling.findMany({
+      where: { tenantId, product: { active: true, kind: "SERVICE" } },
+      select: {
+        nivelQuiropodia: true,
+        primeraValoracion: true,
+        product: { select: { tags: true } },
+      },
+    }),
+  ]);
+
+  const falta: string[] = [];
+
+  if (categorias.length === 0) {
+    falta.push("ninguna categoría tiene tipo de visita");
+  }
+
+  // 1 · cada tipo declarado, con al menos un servicio en alguna de sus
+  // categorías.
+  const tiposSinServicio = new Set<string>();
+  for (const c of categorias) {
+    const hay = agendas.some((a) => a.product.tags.includes(c.slug));
+    if (!hay) tiposSinServicio.add(`${c.slug} (${c.visitType})`);
+  }
+  if (tiposSinServicio.size > 0) {
+    falta.push(`sin servicio en ${[...tiposSinServicio].join(", ")}`);
+  }
+
+  // 2 · los tres niveles, si hay quiropodia declarada.
+  const hayQuiropodia = categorias.some((c) => c.visitType === "QUIROPODIA");
+  if (hayQuiropodia) {
+    const niveles = new Set(
+      agendas
+        .map((a) => a.nivelQuiropodia)
+        .filter((n): n is number => n != null),
+    );
+    const sinNivel = [1, 2, 3].filter((n) => !niveles.has(n));
+    if (sinNivel.length > 0) {
+      falta.push(
+        `niveles de quiropodia sin servicio: ${sinNivel.join(", ")}`,
+      );
+    }
+  }
+
+  // 3 · la primera valoración.
+  if (!agendas.some((a) => a.primeraValoracion)) {
+    falta.push("ningún servicio es la primera valoración");
+  }
+
+  return { falta };
 }

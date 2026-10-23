@@ -28,8 +28,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  Ban,
   Camera,
   EyeOff,
+  Flashlight,
+  FlashlightOff,
   Loader2,
   SwitchCamera,
   X,
@@ -151,6 +154,47 @@ function ImagenDeFoto(props: {
 
 // ── La cámara ────────────────────────────────────────────────────────
 
+/**
+ * clinica-8 (fase B, 10) · ¿esta pista de vídeo tiene flash?
+ *
+ * `MediaStreamTrack.getCapabilities()` es lo único que lo sabe, y no
+ * existe en todas partes (ni en jsdom). Todo entre `try`: una cámara que
+ * no sabe decir si tiene flash es una cámara sin flash, no una excepción
+ * que tumbe la pantalla con el pie delante.
+ */
+export function pistaConLinterna(stream: MediaStream): boolean {
+  try {
+    const pista = stream.getVideoTracks()[0];
+    if (!pista || typeof pista.getCapabilities !== "function") return false;
+    return (pista.getCapabilities() as { torch?: boolean }).torch === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Enciende o apaga el flash de la pista. Devuelve si se pudo.
+ *
+ * `torch` va en `advanced`: es una constraint no estándar y en `basic`
+ * un navegador que no la conozca rechazaría TODA la llamada, apagando de
+ * paso la resolución que sí habíamos pedido.
+ */
+async function ponerLinterna(
+  stream: MediaStream | null,
+  encendida: boolean,
+): Promise<boolean> {
+  try {
+    const pista = stream?.getVideoTracks()[0];
+    if (!pista) return false;
+    await pista.applyConstraints({
+      advanced: [{ torch: encendida } as MediaTrackConstraintSet],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function Camara(props: {
   mapa: MapaVersionado;
   /** Las zonas que se ofrecen primero: las marcadas hoy en el mapa. */
@@ -160,13 +204,57 @@ function Camara(props: {
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [zona, setZona] = useState<string | null>(null);
+  // clinica-8 (fase B, 10) · LA ZONA VIENE PUESTA. «Se apunta y se
+  // dispara»: Matías, 18-10, sobre la cámara de clinica-4 —«elegir la
+  // zona antes de disparar no es intuitivo».
+  //
+  // Lo que cambia NO es que la foto deje de tener zona (una foto clínica
+  // sin zona no sirve: el comparador antes/después es por zona). Es
+  // QUIÉN la pone por defecto. Si la sesión de hoy ha marcado una zona,
+  // ésa es la zona de la foto — es lo que la podóloga acaba de tocar en
+  // el mapa del pie, con el pie delante. Con varias marcadas se coge la
+  // PRIMERA de las de hoy y se cambia de un toque, antes o después de
+  // disparar.
+  //
+  // Sin nada marcado (la primera visita, antes de tocar el mapa) sigue
+  // en `null` y hay que elegir: inventar una zona sería escribir en la
+  // historia una zona que nadie dijo.
+  const [zona, setZona] = useState<string | null>(props.zonasDeHoy[0] ?? null);
   const [error, setError] = useState<string | null>(null);
   const [estado, setEstado] = useState("Iniciando cámara…");
   const [camaras, setCamaras] = useState<MediaDeviceInfo[]>([]);
   const [cual, setCual] = useState(0);
   const [disparando, setDisparando] = useState(false);
   const [todasLasZonas, setTodasLasZonas] = useState(false);
+  // clinica-8 (fase B, 10) · ¿está el vídeo pintando ya?
+  //
+  // Mientras no lo está, Android pinta ENCIMA del `<video>` su póster de
+  // «play» —un triángulo gigante centrado— porque un `<video>` sin
+  // `poster` y sin frames es, para el WebView, un vídeo parado. En la
+  // tablet del 18-10 eso es lo que se veía durante el segundo que tarda
+  // `getUserMedia` (punto 10 de la auditoría), y un triángulo de «play»
+  // en medio de la pantalla se toca.
+  //
+  // Se tapa con una capa propia: negro, el texto de estado dentro y nada
+  // tocable. En cuanto llega el primer frame se quita.
+  //
+  // Y ESTO NO PUEDE SER UNA PUERTA SIN SALIDA. `pintando` bloquea además
+  // el disparador, así que un aparato donde el evento del primer frame
+  // no llegara dejaría la cámara abierta y la foto imposible — peor que
+  // el triángulo de «play» que se viene a tapar. Dos redes: se escuchan
+  // TRES eventos distintos (ver el `<video>`), y hay un plazo de 3 s
+  // tras el cual se da por pintando de todas formas. Si a los 3 s no hay
+  // imagen, lo que la podóloga ve es negro y puede disparar: una foto
+  // negra se repite, una cámara que no dispara no.
+  const [pintando, setPintando] = useState(false);
+  /** ¿La cámara de este aparato tiene flash que se pueda encender? */
+  const [hayLinterna, setHayLinterna] = useState(false);
+  const [linterna, setLinterna] = useState(false);
+  /** El JPEG recién hecho que todavía no tiene zona. Ver `disparar`. */
+  const [capturada, setCapturada] = useState<string | null>(null);
+  /** Sube con «Repetir la foto»: es lo que vuelve a arrancar el stream
+   *  que paramos al capturar. */
+  const [reintento, setReintento] = useState(0);
 
   const pararStream = useCallback(() => {
     const s = streamRef.current;
@@ -186,6 +274,9 @@ function Camara(props: {
 
   useEffect(() => {
     let cancelado = false;
+    setPintando(false);
+    setLinterna(false);
+    setHayLinterna(false);
     (async () => {
       try {
         const permiso = await ensureCameraPermission();
@@ -198,7 +289,27 @@ function Camara(props: {
         // uña de 1 cm, y en una foto de 640 no se ve si el borde está
         // inflamado. `ideal` y no `exact`: si la cámara no lo soporta, el
         // navegador baja en vez de fallar.
-        const calidad = { width: { ideal: 1600 }, height: { ideal: 1200 } };
+        //
+        // clinica-8 (fase B, 10) · LA EXPOSICIÓN CON POCA LUZ («imagen
+        // muy oscura», auditoría del 18-10).
+        //
+        // `frameRate: { ideal: 15 }`. El sensor de una tablet de 200 €
+        // expone en automático, y lo que limita cuánto puede abrir el
+        // obturador es el frame rate: a 30 fps no puede pasar de 1/30 s
+        // por frame. Pidiendo 15 se le deja llegar a 1/15, que es el
+        // doble de luz, y 15 fps son de sobra para encuadrar un pie
+        // apoyado en un reposapiés.
+        //
+        // `ideal` y no `exact` por lo mismo que la resolución: una cámara
+        // que no sepa bajar sigue dando 30 en vez de fallar.
+        //
+        // Y lo que de verdad arregla una consulta con la persiana bajada
+        // no es una constraint: es ENCENDER LA LUZ. Ver `hayLinterna`.
+        const calidad = {
+          width: { ideal: 1600 },
+          height: { ideal: 1200 },
+          frameRate: { ideal: 15 },
+        };
         const elegida = camaras[cual];
         const constraints: MediaStreamConstraints = elegida?.deviceId
           ? { video: { deviceId: { exact: elegida.deviceId }, ...calidad } }
@@ -214,6 +325,13 @@ function Camara(props: {
           await videoRef.current.play().catch(() => undefined);
         }
         setEstado("Encuadra la zona y dispara");
+        // ¿Tiene flash esta cámara? Se pregunta a la PISTA, no a la
+        // plataforma: `torch` está en las capacidades del track y es la
+        // única forma honesta de saberlo. Si no está, no se ofrece el
+        // botón — un botón de luz que no enciende nada es peor que no
+        // tenerlo. En jsdom `getCapabilities` no existe, y entonces no
+        // hay linterna, que es lo correcto.
+        setHayLinterna(pistaConLinterna(stream));
         if (camaras.length === 0) {
           try {
             const devs = await navigator.mediaDevices.enumerateDevices();
@@ -243,29 +361,72 @@ function Camara(props: {
         }
       }
     })();
+    // El plazo de los 3 s. Ver la nota de `pintando`.
+    const plazo = setTimeout(() => {
+      if (!cancelado) setPintando(true);
+    }, 3000);
     return () => {
       cancelado = true;
+      clearTimeout(plazo);
       pararStream();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cual, pararStream]);
+  }, [cual, reintento, pararStream]);
 
+  /**
+   * clinica-8 (fase B, 10) · SE APUNTA Y SE DISPARA.
+   *
+   * El frame se coge SIEMPRE. Lo que cambia según haya zona o no es qué
+   * se hace con él:
+   *
+   *   · con zona (la de la sesión de hoy, o una tocada antes) la foto se
+   *     guarda y se cierra la cámara, como hasta ahora;
+   *   · sin zona, el frame se QUEDA EN LA MANO (`capturada`) y la
+   *     pantalla pregunta de qué zona es, con la foto delante.
+   *
+   * El segundo camino es el que el prompt pide («o se elige después de
+   * la foto») y es mejor clínicamente: elegir la zona MIRANDO la foto
+   * que se acaba de hacer es más fiable que elegirla de memoria antes de
+   * apuntar — que es de donde salían las zonas equivocadas.
+   *
+   * Lo que NO se hace es guardar sin zona. Una foto sin zona no entra en
+   * el comparador antes/después, que es para lo que existen las fotos.
+   */
   async function disparar() {
     const v = videoRef.current;
-    if (!v || !zona) return;
-    setDisparando(true);
+    if (!v || disparando || error != null) return;
+    // El frame se pasa a un canvas del tamaño REAL del vídeo y se
+    // codifica en JPEG al 0,85: en PNG una foto de 1600×1200 pesa 3 MB
+    // y el tope de la API son 4.
+    let base64 = "";
     try {
-      // El frame se pasa a un canvas del tamaño REAL del vídeo y se
-      // codifica en JPEG al 0,85: en PNG una foto de 1600×1200 pesa 3 MB
-      // y el tope de la API son 4.
       const canvas = document.createElement("canvas");
       canvas.width = v.videoWidth || 1280;
       canvas.height = v.videoHeight || 960;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("sin contexto 2d");
       ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-      const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1] ?? "";
-      await props.onDisparo(zona, base64);
+      base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1] ?? "";
+    } catch {
+      setError("No se pudo tomar la foto. Vuelve a intentarlo.");
+      return;
+    }
+    if (!zona) {
+      // La cámara se PARA aquí: la foto ya está hecha y tener el LED
+      // encendido mientras se elige una zona es la lección de
+      // `cameraScan` otra vez.
+      pararStream();
+      setCapturada(base64);
+      return;
+    }
+    await guardar(zona, base64);
+  }
+
+  /** Manda la foto y cierra. El único sitio que llama a `onDisparo`. */
+  async function guardar(laZona: string, base64: string) {
+    setDisparando(true);
+    try {
+      await props.onDisparo(laZona, base64);
       pararStream();
       props.onCerrar();
     } catch (err) {
@@ -289,14 +450,132 @@ function Camara(props: {
       ? props.zonasDeHoy
       : todas;
 
+  // Las TRES razones por las que no se puede disparar, en una. Se calcula
+  // aquí y no en el `disabled` para que el aspecto del botón y su
+  // `aria-disabled` no puedan separarse de la condición real.
+  const bloqueado = disparando || error != null || !pintando;
+
+  // ── LA FOTO YA HECHA, ESPERANDO SU ZONA ────────────────────────────
+  //
+  // clinica-8 (fase B, 10). Se llega aquí sólo cuando se disparó sin
+  // zona puesta. Es una pantalla aparte y no un panel debajo del visor a
+  // propósito: lo que hay que mirar para contestar «¿de qué zona es?» es
+  // LA FOTO, no el pie. Con el visor en directo encima, la podóloga
+  // estaría eligiendo mirando otra cosa.
+  if (capturada != null) {
+    return (
+      <div
+        className="bg-white border border-slate-200 rounded-3xl px-3 sm:px-5 py-4"
+        data-test="camara-zona-despues"
+      >
+        <h2 className="m-0 text-[17px] font-bold text-mipiace-ink">
+          ¿De qué zona es esta foto?
+        </h2>
+        <div className="text-[13px] text-slate-500 mt-0.5">
+          Toca la zona y se guarda en la historia. Todavía no está
+          guardada.
+        </div>
+
+        <img
+          src={`data:image/jpeg;base64,${capturada}`}
+          alt="La foto que se acaba de hacer"
+          className="mt-3 w-full h-[260px] object-cover rounded-[20px] bg-black"
+        />
+
+        {error && (
+          <div className="mt-3 inline-flex items-center gap-2 bg-red-50 text-red-700 px-3.5 py-2 rounded-xl text-[13.5px]">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <div
+          className={`gap-2 mt-3 ${
+            ofrecidas.length > 6
+              ? "flex flex-nowrap overflow-x-auto pb-1.5"
+              : "flex flex-wrap"
+          }`}
+        >
+          {ofrecidas.map((clave) => (
+            <button
+              key={clave}
+              type="button"
+              data-test={`zona-despues-${clave}`}
+              disabled={disparando}
+              onClick={() => void guardar(clave, capturada)}
+              className="min-h-touch px-3.5 rounded-xl text-[14px] border bg-white border-slate-200 text-mipiace-ink whitespace-nowrap shrink-0 disabled:opacity-45"
+            >
+              {nombreDeZona(clave, props.mapa.version)}
+            </button>
+          ))}
+          {!todasLasZonas && props.zonasDeHoy.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setTodasLasZonas(true)}
+              className="min-h-touch px-3.5 rounded-xl text-[14px] border bg-white border-slate-200 text-mipiace-ink whitespace-nowrap shrink-0"
+            >
+              Otra zona…
+            </button>
+          )}
+        </div>
+
+        <div className="flex gap-3 flex-wrap items-center mt-3.5">
+          {/* «Repetir» vuelve al visor: suelta el frame y deja que el
+              efecto de arranque vuelva a pedir el stream (lo paramos al
+              capturar). */}
+          <button
+            type="button"
+            data-test="repetir-foto"
+            disabled={disparando}
+            onClick={() => {
+              setCapturada(null);
+              setError(null);
+              setReintento((n) => n + 1);
+            }}
+            className="h-touch px-4 rounded-2xl bg-mipiace-stone text-mipiace-ink font-medium text-[14px] disabled:opacity-45"
+          >
+            Repetir la foto
+          </button>
+          <button
+            type="button"
+            disabled={disparando}
+            onClick={() => {
+              setCapturada(null);
+              props.onCerrar();
+            }}
+            className="h-touch px-4 rounded-2xl bg-white border border-slate-200 text-mipiace-ink text-[14px] disabled:opacity-45"
+          >
+            Descartarla
+          </button>
+          {disparando && (
+            <span className="inline-flex items-center gap-2 text-[13.5px] text-slate-500">
+              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" />
+              Guardando…
+            </span>
+          )}
+        </div>
+        <div className="text-[12.5px] text-slate-500 mt-2">
+          La foto se guarda en la historia del paciente, nunca en la
+          galería de la tablet.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="bg-white border border-slate-200 rounded-3xl px-3 sm:px-5 py-4"
       data-test="camara"
     >
       <h2 className="m-0 text-[17px] font-bold text-mipiace-ink">Nueva foto</h2>
+      {/* clinica-8 (fase B, 10) · el subtítulo depende de si la zona ya
+          está puesta. «Elige antes de disparar» era una orden para un
+          caso que ahora es el raro; cuando la zona viene de la sesión lo
+          que hay que decir es CUÁL es y que se puede cambiar. */}
       <div className="text-[13px] text-slate-500 mt-0.5">
-        ¿De qué zona es? Elige antes de disparar.
+        {zona
+          ? `Zona: ${nombreDeZona(zona, props.mapa.version)}. Se puede cambiar antes o después de la foto.`
+          : "¿De qué zona es? Elígela y se activa el disparador."}
       </div>
 
       {/* UNA SOLA FILA que se desliza cuando hay muchas zonas.
@@ -345,34 +624,129 @@ function Camara(props: {
           autoPlay
           playsInline
           muted
+          // clinica-8 (fase B, 10) · `poster` vacío NO vale: Chrome
+          // trata un `poster` que no carga como si no hubiera, y vuelve
+          // a pintar su controlador. Lo que se hace es taparlo con una
+          // capa propia mientras no haya frame (ver abajo), y quitarla
+          // en cuanto el primero llegue.
+          // TRES eventos y no uno. `loadeddata` es el que llega en
+          // escritorio; en algunos WebView con autoplay restringido llega
+          // `playing` y `loadeddata` no, o llega sólo `timeupdate` al
+          // primer frame. Cualquiera de los tres significa lo mismo: ya
+          // hay imagen.
+          onLoadedData={() => setPintando(true)}
+          onPlaying={() => setPintando(true)}
+          onTimeUpdate={() => setPintando(true)}
           className="absolute inset-0 w-full h-full object-cover"
         />
+        {/* LA CAPA QUE TAPA EL PÓSTER DE «PLAY» de Android.
+            Un `<video>` sin frames es, para el WebView, un vídeo parado,
+            y lo pinta con un triángulo gigante centrado que invita a
+            tocarlo. Mientras `pintando` es falso —el segundo que tarda
+            `getUserMedia`— aquí hay negro opaco con el estado dentro, y
+            `pointer-events-none` para que el toque que de todas formas
+            caiga ahí no haga nada.
+            Con error no se quita nunca: no hay vídeo que enseñar y lo
+            que toca ver es el mensaje. */}
+        {!pintando && (
+          <div
+            data-test="camara-arrancando"
+            aria-hidden
+            className="absolute inset-0 bg-black flex items-center justify-center pointer-events-none"
+          >
+            <span className="inline-flex items-center gap-2 text-white/85 text-[13.5px]">
+              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" />
+              {error ? "" : "Iniciando cámara…"}
+            </span>
+          </div>
+        )}
         {/* La guía del encuadre. No recorta nada: la foto que se guarda es
             el frame completo, y recortar por una guía sería tirar parte de
             una imagen clínica. */}
         <div className="absolute inset-y-10 inset-x-[30%] border-2 border-dashed border-white/60 rounded-[40%_40%_30%_30%] pointer-events-none" />
+        {/* EL DISPARADOR, Y QUÉ ASPECTO TIENE CUANDO NO SE PUEDE PULSAR.
+            clinica-8 (fase B, 10) · «el disparador nunca parece activo
+            estando bloqueado» (prompt), «el disparador parece activo y
+            no lo está» (auditoría, punto 10).
+            Antes era el mismo círculo blanco pleno con `opacity-45`. Un
+            45 % de opacidad sobre NEGRO sigue siendo un círculo claro y
+            grande, que es la única cosa redonda de la pantalla y el
+            gesto aprendido de cualquier cámara: la podóloga lo tocaba.
+            Ahora, bloqueado, deja de ser un disparador: fondo
+            transparente, aro punteado y el icono de «no se puede»
+            dentro.
+            Y lo que lo bloquea ya NO es que falte la zona —eso se
+            pregunta después de la foto—: son las tres cosas que de
+            verdad impiden hacerla, que la cámara no esté pintando
+            todavía, que se esté guardando la anterior, o que haya
+            error. */}
         <button
           type="button"
           data-test="disparar"
           aria-label="Hacer foto"
-          disabled={!zona || disparando || error != null}
+          aria-disabled={bloqueado}
+          disabled={bloqueado}
           onClick={() => void disparar()}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[76px] h-[76px] rounded-full bg-white border-[6px] border-white/40 disabled:opacity-45 flex items-center justify-center"
+          className={`absolute bottom-4 left-1/2 -translate-x-1/2 w-[76px] h-[76px] rounded-full flex items-center justify-center ${
+            bloqueado
+              ? "bg-transparent border-2 border-dashed border-white/45 text-white/55"
+              : "bg-white border-[6px] border-white/40"
+          }`}
         >
-          {disparando && (
+          {disparando ? (
             <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-mipiace-ink" />
+          ) : (
+            bloqueado && <Ban className="w-6 h-6" strokeWidth={2} />
           )}
         </button>
-        {camaras.length > 1 && !error && (
-          <button
-            type="button"
-            onClick={() => setCual((i) => (i + 1) % camaras.length)}
-            aria-label="Cambiar cámara"
-            className="absolute top-3 right-3 min-h-touch px-3 rounded-xl bg-black/55 text-white text-[13px] inline-flex items-center gap-1.5"
-          >
-            <SwitchCamera className="w-4 h-4" /> Cambiar cámara
-          </button>
-        )}
+        <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
+          {camaras.length > 1 && !error && (
+            <button
+              type="button"
+              onClick={() => setCual((i) => (i + 1) % camaras.length)}
+              aria-label="Cambiar cámara"
+              className="min-h-touch px-3 rounded-xl bg-black/55 text-white text-[13px] inline-flex items-center gap-1.5"
+            >
+              <SwitchCamera className="w-4 h-4" /> Cambiar cámara
+            </button>
+          )}
+          {/* clinica-8 (fase B, 10) · LA LUZ. «Imagen muy oscura con poca
+              luz» (auditoría). Una consulta se mira el pie con un flexo
+              y el pie está a la altura de la rodilla, a la sombra de la
+              propia tablet. La constraint de 15 fps ayuda; lo que
+              resuelve es encender el flash.
+              Sólo sale si la pista dice que lo tiene. */}
+          {hayLinterna && !error && (
+            <button
+              type="button"
+              data-test="linterna"
+              aria-pressed={linterna}
+              onClick={() => {
+                void (async () => {
+                  const quiero = !linterna;
+                  const pudo = await ponerLinterna(streamRef.current, quiero);
+                  // Si no se pudo, se deja de ofrecer en vez de dejar un
+                  // botón que miente: la capacidad decía que sí y el
+                  // aparato ha dicho que no.
+                  if (pudo) setLinterna(quiero);
+                  else setHayLinterna(false);
+                })();
+              }}
+              className={`min-h-touch px-3 rounded-xl text-[13px] inline-flex items-center gap-1.5 ${
+                linterna
+                  ? "bg-white text-mipiace-ink font-medium"
+                  : "bg-black/55 text-white"
+              }`}
+            >
+              {linterna ? (
+                <Flashlight className="w-4 h-4" />
+              ) : (
+                <FlashlightOff className="w-4 h-4" />
+              )}
+              Luz
+            </button>
+          )}
+        </div>
         {/* ENCIMA del disparador y sin recibir toques.
             Lo cazó el bucle visual: con el aviso a `bottom-5` y el
             disparador a `bottom-4`, el texto quedaba POR DELANTE del
@@ -405,9 +779,14 @@ function Camara(props: {
         >
           Cancelar
         </button>
+        {/* clinica-8 (fase B, 10) · antes aquí ponía «Elige la zona para
+            poder disparar», que era la orden que el prompt viene a
+            quitar. Ahora se dispara igual y la zona se pregunta con la
+            foto delante; lo que queda es decirlo, para que nadie busque
+            el paso que ya no existe. */}
         {!zona && (
-          <span className="text-[13.5px] text-amber-700">
-            Elige la zona para poder disparar.
+          <span className="text-[13.5px] text-slate-500">
+            Dispara y luego eliges de qué zona es.
           </span>
         )}
       </div>

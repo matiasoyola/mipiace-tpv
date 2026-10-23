@@ -66,6 +66,7 @@ import {
   esIlegible,
   nuevoIdDeFila,
 } from "./cripto-campos.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { resolverPrimerTratamiento } from "./primer-tratamiento.js";
 import {
   puertaDeConsentimientos,
@@ -175,9 +176,10 @@ export async function cargarCitaDeLaSesion(
       .map((i) => nombrePorId.get(i.serviceId))
       .filter((n): n is string => n != null),
     servicioIds: serviceIds,
-    atiende: staff
-      ? { userId: staff.id, nombre: staff.alias ?? staff.email ?? "—" }
-      : null,
+    // clinica-8 (fase B, 11) · «Atiende» era el email de la propietaria
+    // en la cabecera de la sesión y en el informe. El mismo nombre que
+    // pinta todo lo demás.
+    atiende: staff ? { userId: staff.id, nombre: nombreDe(staff) } : null,
     ticketId: fila.ticket_id,
   };
 }
@@ -483,12 +485,9 @@ async function visitasCerradas(
   });
 }
 
-function nombreDe(u: {
-  alias: string | null;
-  email: string | null;
-}): string {
-  return u.alias ?? u.email ?? "—";
-}
+// clinica-8 (fase B, 11) · el nombre, no el email. Era una copia local
+// que caía al email entero; ahora es `lib/nombre-para-mostrar.ts`.
+const nombreDe = nombreParaMostrar;
 
 // ── La pantalla entera, en una llamada ────────────────────────────────
 

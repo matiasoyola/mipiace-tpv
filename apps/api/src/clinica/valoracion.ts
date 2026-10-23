@@ -50,6 +50,7 @@ import {
 } from "../enlaces/puerta.js";
 import { REGLAS_VALORACION } from "../enlaces/reglas.js";
 import { huellaDeToken } from "../enlaces/token.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { asegurarDek, dekONada } from "./claves.js";
 import {
   cifrarCorreccion,
@@ -116,9 +117,9 @@ type FilaValoracion = Prisma.ClinicalAssessmentGetPayload<{
 
 /** El nombre visible de quien firma. Mismo criterio que `autorView` de
  *  `routes.ts`: alias primero (el email es credencial, no display). */
-function nombreDe(u: { alias: string | null; email: string }): string {
-  return u.alias?.trim() || u.email;
-}
+// clinica-8 (fase B, 11) · el nombre, no el email. Era una copia local
+// que caía al email entero; ahora es `lib/nombre-para-mostrar.ts`.
+const nombreDe = nombreParaMostrar;
 
 // ── Lecturas ──────────────────────────────────────────────────────────
 

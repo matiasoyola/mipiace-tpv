@@ -384,14 +384,19 @@ describe("v1.14.1 · §1 · la tarjeta de producto", () => {
     expect(conFoto[0]!.style.minHeight).toBe(`${PRODUCT_CARD_MIN_HEIGHT}px`);
   });
 
-  it("el nombre va a dos líneas como máximo y el precio pesa más", async () => {
+  // clinica-8 (fase B, 19) · TRES líneas, no dos: el catálogo de Rosario
+  // tiene pares cuya última palabra es lo único que los distingue
+  // («Revisión biomecánica adultos» / «… niños») y con dos se leían
+  // iguales. La tarjeta no cambia de alto — la aritmética está en el
+  // comentario de `ProductTile` y la fija el test de arriba.
+  it("el nombre va a TRES líneas como máximo y el precio pesa más", async () => {
     await renderTableSale([]);
 
     const tile = tiles()[0]!;
     const nombre = Array.from(tile.querySelectorAll("span")).find((s) =>
       (s.textContent ?? "").includes(CATALOGO[0]!.name),
     )!;
-    expect(nombre.className).toContain("line-clamp-2");
+    expect(nombre.className).toContain("line-clamp-3");
     // Jerarquía: en una barra el nombre se reconoce de memoria y lo que
     // se comprueba de un vistazo es el importe.
     const precio = Array.from(tile.querySelectorAll("span")).find((s) =>

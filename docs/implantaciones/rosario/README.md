@@ -14,6 +14,19 @@ Las cinco columnas de siempre (`sku,nombre,precio_con_iva,iva,categoria`) **más
 | `exencion` | vacío / `E1` | Servicio sanitario exento (art. 20.Uno.3º LIVA, bloque `iva-exento-sanitario`). Con `E1`, `iva` tiene que ser 0. |
 | `duracion_min` | minutos | Crea la fila de `ServiceScheduling`: sin ella el servicio no se puede reservar. |
 
+**clinica-8 · y CUATRO MÁS**, las que dejan la clínica lista para cobrar:
+
+| Columna | Valores | Para qué |
+|---|---|---|
+| `tipo_visita` | `QUIROPODIA` / `PIE_RIESGO` / `CIRUGIA` / `BIOMECANICA` / `GENERAL` | Es de la **categoría** (S5): los servicios lo heredan y es lo que hace que la sesión ofrezca la tarjeta de cada tipo. Todas las filas de una misma categoría tienen que decir lo mismo. |
+| `primera_valoracion` | `si` / `no` | El servicio con el que se cita la primera visita. |
+| `tratamiento_sesion` | `si` / `no` | Sale como botón dentro de la sesión. |
+| `nivel_quiropodia` | 1 / 2 / 3 | «Este servicio **es** el nivel N». Es lo que convierte el nivel que la sesión propone en una línea de ticket. Uno por nivel. |
+
+Sin estas cuatro, el catálogo entra igual —exento, reservable y con su
+duración— **y la sesión dice «sin servicio» y cierra a 0,00 €**. Es lo que
+la auditoría del 18-10 midió con los 17 servicios ya cargados.
+
 **El importador del super-admin ya lee las tres** desde el bloque `catalogo-servicios-csv`
 (`docs/blocks/catalogo-servicios-csv-done.md`). Cada línea entra como servicio exento, con su
 duración de agenda y con el precio que paga la paciente. **Este fichero se puede cargar en cuanto el
@@ -28,9 +41,27 @@ servicio entraría como PRODUCTO al 0 % **sujeto** y sin duración.
 3. Confirmar. Los 17 entran con su fila de agenda en la misma pasada: o entran todos con su
    duración, o no entra ninguno.
 
-Dos cosas que el fichero **no** trae y se ponen después, en el panel de la dueña (Catálogo de
-agenda): las marcas de clínica (`primera valoración`, `tratamiento de sesión`, el nivel de la
-quiropodia) y los consentimientos que pide cada servicio.
+**clinica-8 · las marcas de clínica YA ENTRAN por el fichero** (la tabla de
+arriba). Lo único que sigue poniéndose después, en el panel de la dueña
+(Catálogo de agenda), son **los consentimientos que pide cada servicio**.
+
+### Tres decisiones de este fichero, a confirmar con Rosario
+
+Las tres son suyas y ninguna bloquea la carga; si cambia alguna, se edita la
+columna antes de cargar (un SKU que ya existe no se pisa, así que después
+habría que tocarlo en su panel).
+
+1. **La «Cura» (POD-006) pasa de la categoría `quiropodia` a `cirugía`.** Una
+   cura es la revisión de lo que se operó, y con `tipo_visita` por categoría
+   dejarla en quiropodia la convertía en un servicio de quiropodia: no
+   saldría en la tarjeta de «Cirugía · revisión», que es donde se marca. Es
+   también donde la pone el mockup validado de clinica-5.
+2. **Las órtesis de silicona van como `GENERAL`.** No son ni quiropodia ni
+   biomecánica; se hacen en consulta dentro del tratamiento. Si ella las
+   entiende como parte de la biomecánica, es cambiar una palabra.
+3. **La «Consulta diagnóstico» (POD-001) es la primera valoración.** Es el
+   servicio con el que se cita la primera visita; si cobra la primera visita
+   de otra manera, la marca va en esa otra línea.
 
 El comercio tiene que tener la **historia clínica encendida** antes de cargar: un `E1` en un tenant
 sin ella es una fila saltada con su motivo, no un producto exento callado.

@@ -904,10 +904,9 @@ describe("clinica-3 · cerrar dos veces no crea dos sesiones ni dos cobros", () 
       tenantId: TENANT_ID,
       appointmentId: CITA_ID,
     });
-    expect(lineas).toEqual([
-      { serviceId: QUIROPODIA },
-      { serviceId: VERRUGA },
-    ]);
+    expect(lineas).toEqual({
+      lineas: [{ serviceId: QUIROPODIA }, { serviceId: VERRUGA }],
+    });
   });
 });
 
@@ -1362,11 +1361,13 @@ describe("clinica-3 · el camino de cobro de siempre no cambia", () => {
         tenantId: TENANT_ID,
         appointmentId: CITA_ID,
       }),
-    ).toEqual([
-      { serviceId: QUIROPODIA },
-      { serviceId: FRESADO },
-      { serviceId: VERRUGA },
-    ]);
+    ).toEqual({
+      lineas: [
+        { serviceId: QUIROPODIA },
+        { serviceId: FRESADO },
+        { serviceId: VERRUGA },
+      ],
+    });
   });
 });
 
@@ -1678,14 +1679,21 @@ describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
     expect(r.statusCode).toBe(201);
     expect(r.json().cerrada.cuerpo.tratamientos).toEqual([]);
     expect(r.json().cerrada.resumen.lineas).toEqual([]);
-    // Y el cobro cae al camino de siempre (los servicios de la cita), que
-    // es lo que impide un ticket vacío. «Cobrar siempre se puede».
+    // clinica-8 · Y EL COBRO YA NO CAE A LOS SERVICIOS RESERVADOS.
+    //
+    // Hasta este bloque esto devolvía `null`, que el cobro leía como «aquí
+    // no hay nada clínico» y respondía cobrando lo que la cita reservaba.
+    // La auditoría del 18-10 lo midió: una sesión que no dejó ni una línea
+    // se cobró como «Quiropodia completa · 26 €» porque era lo previsto.
+    // **Se cobró lo que no se hizo, y nadie lo vio: los importes cuadran.**
+    //
+    // Ahora se distingue, y el cobro abre el borrador vacío diciéndolo.
     expect(
       await lineasDeLaSesionCerrada(fakePrisma, {
         tenantId: TENANT_ID,
         appointmentId: CITA_ID,
       }),
-    ).toBeNull();
+    ).toEqual({ sinNadaQueCobrar: true });
   });
 
   it("sin TIPOS, el schema lo rechaza antes de llegar", async () => {
@@ -1989,7 +1997,9 @@ describe("clinica-5 · DOS TIPOS, DOS LÍNEAS a caja", () => {
         tenantId: TENANT_ID,
         appointmentId: CITA_ID,
       }),
-    ).toEqual([{ serviceId: COMPLETA }, { serviceId: CURA }]);
+    ).toEqual({
+      lineas: [{ serviceId: COMPLETA }, { serviceId: CURA }],
+    });
   });
 
   it("un tipo sin servicio asignado se cierra igual y no pone línea", async () => {

@@ -60,11 +60,18 @@ interface FakeScheduling {
   onlineBookable: boolean;
   family: string | null;
   channels: unknown;
+  // clinica-8 · las marcas de clínica, que son lo que hace que la sesión
+  // pueda poner una línea en caja.
+  primeraValoracion: boolean;
+  tratamientoSesion: boolean;
+  nivelQuiropodia: number | null;
 }
 
 const productos = new Map<string, FakeProduct>();
 const agendas = new Map<string, FakeScheduling>();
 const audits: Array<{ action: string; tenantId: string | null; metadata: any }> = [];
+// clinica-8 · `tag_visit_types` del comercio, por slug de categoría.
+const tiposDeVisita = new Map<string, { slug: string; visitType: string }>();
 let tenant: {
   id: string;
   name: string;
@@ -84,6 +91,8 @@ interface Pendiente {
   productos: FakeProduct[];
   agendas: FakeScheduling[];
   audits: Array<{ action: string; tenantId: string | null; metadata: any }>;
+  // clinica-8 · las filas de `tag_visit_types` que la carga escribe.
+  tipos: Array<{ slug: string; visitType: string }>;
 }
 
 function nuevoProducto(d: any): FakeProduct {
@@ -112,6 +121,10 @@ function nuevaAgenda(d: any): FakeScheduling {
     onlineBookable: d.onlineBookable,
     family: d.family ?? null,
     channels: d.channels,
+    // Los defaults de la columna cuando el fichero no trae las marcas.
+    primeraValoracion: d.primeraValoracion ?? false,
+    tratamientoSesion: d.tratamientoSesion ?? false,
+    nivelQuiropodia: d.nivelQuiropodia ?? null,
   };
 }
 
@@ -142,7 +155,12 @@ function filtraProductos(
 // termina. Lo que se escriba con el cliente de fuera entra directo y
 // SOBREVIVE a la vuelta atrás, igual que en Postgres.
 function abrirTx(): { tx: any; aplicar: () => void } {
-  const pendiente: Pendiente = { productos: [], agendas: [], audits: [] };
+  const pendiente: Pendiente = {
+    productos: [],
+    agendas: [],
+    audits: [],
+    tipos: [],
+  };
   const tx = {
     product: {
       // Ve lo que esta misma transacción acaba de crear, que es lo que
@@ -164,6 +182,18 @@ function abrirTx(): { tx: any; aplicar: () => void } {
         return { count: data.length };
       },
     },
+    // clinica-8 · el mapa `categoría → tipo de visita`, que se escribe en
+    // la MISMA transacción y por la misma razón que la fila de agenda: un
+    // servicio de sesión sin tipo no lo ofrece ninguna tarjeta, y en DRAFT
+    // no hay OWNER que lo arregle.
+    tagVisitType: {
+      findUnique: async ({ where }: any) =>
+        tiposDeVisita.get(where.tenantId_slug.slug) ?? null,
+      create: async ({ data }: any) => {
+        pendiente.tipos.push({ slug: data.slug, visitType: data.visitType });
+        return data;
+      },
+    },
     superAdminAudit: {
       create: async ({ data }: any) => {
         if (auditRevienta) throw new Error("la tabla de auditoría no contesta");
@@ -181,6 +211,7 @@ function abrirTx(): { tx: any; aplicar: () => void } {
     aplicar: () => {
       for (const p of pendiente.productos) productos.set(p.id, p);
       for (const a of pendiente.agendas) agendas.set(a.productId, a);
+      for (const t of pendiente.tipos) tiposDeVisita.set(t.slug, t);
       audits.push(...pendiente.audits);
     },
   };
@@ -225,6 +256,18 @@ const fakePrisma: any = {
         agendas.set(a.productId, a);
       }
       return { count: data.length };
+    }),
+  },
+  // clinica-8 · igual que `serviceScheduling`: escribe DIRECTO, sin pasar
+  // por el `pendiente`, para que sacar esta escritura de la transacción se
+  // vea en rojo.
+  tagVisitType: {
+    findUnique: vi.fn(
+      async ({ where }: any) => tiposDeVisita.get(where.tenantId_slug.slug) ?? null,
+    ),
+    create: vi.fn(async ({ data }: any) => {
+      tiposDeVisita.set(data.slug, { slug: data.slug, visitType: data.visitType });
+      return data;
     }),
   },
   superAdminAudit: {
@@ -292,6 +335,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   productos.clear();
   agendas.clear();
+  tiposDeVisita.clear();
   audits.length = 0;
   agendaRevienta = false;
   auditRevienta = false;
@@ -586,5 +630,131 @@ describe("catalogo-servicios-csv · las promesas de siempre siguen", () => {
     expect(r.statusCode).toBe(409);
     expect(productos.size).toBe(0);
     expect(agendas.size).toBe(0);
+  });
+});
+
+// ── clinica-8 · LAS MARCAS DE CLÍNICA, POR EL FICHERO ───────────────
+//
+// `catalogo-servicios-csv` las dejó fuera a propósito. La auditoría del
+// 18-10 midió lo que eso significa: con los 17 servicios cargados y el TPV
+// enseñándolos, la primera sesión cerró con «sin servicio» y 0,00 €. El
+// catálogo estaba; la clínica no podía cobrar.
+describe("clinica-8 · el fichero deja la clínica lista para cobrar", () => {
+  it("los tres niveles de quiropodia quedan puestos, uno por servicio", async () => {
+    await post({ csv: CSV_ROSARIO, confirmar: true });
+    const nivelDe = (sku: string) => {
+      const p = [...productos.values()].find((x) => x.sku === sku)!;
+      return agendas.get(p.id)!.nivelQuiropodia;
+    };
+    expect(nivelDe("POD-002")).toBe(1);
+    expect(nivelDe("POD-003")).toBe(2);
+    expect(nivelDe("POD-004")).toBe(3);
+  });
+
+  it("la primera valoración queda marcada, y sólo ella", async () => {
+    await post({ csv: CSV_ROSARIO, confirmar: true });
+    const primeras = [...productos.values()]
+      .filter((p) => agendas.get(p.id)!.primeraValoracion)
+      .map((p) => p.sku);
+    expect(primeras).toEqual(["POD-001"]);
+  });
+
+  it("y los tratamientos de la sesión son los 16 que no son la valoración", async () => {
+    await post({ csv: CSV_ROSARIO, confirmar: true });
+    const marcados = [...productos.values()].filter(
+      (p) => agendas.get(p.id)!.tratamientoSesion,
+    );
+    expect(marcados).toHaveLength(16);
+  });
+
+  it("las cinco categorías quedan con su tipo de visita", async () => {
+    // Sin estas filas, ningún servicio tiene tipo y la sesión no ofrece
+    // una sola tarjeta: es la regla de S5 funcionando sobre un catálogo
+    // sin configurar.
+    await post({ csv: CSV_ROSARIO, confirmar: true });
+    expect(
+      new Map([...tiposDeVisita.values()].map((t) => [t.slug, t.visitType])),
+    ).toEqual(
+      new Map([
+        ["consulta", "GENERAL"],
+        ["quiropodia", "QUIROPODIA"],
+        ["cirugía", "CIRUGIA"],
+        ["biomecánica", "BIOMECANICA"],
+        ["órtesis", "GENERAL"],
+      ]),
+    );
+  });
+
+  it("los tipos de visita se escriben DENTRO de la transacción", async () => {
+    // Misma promesa que la fila de agenda, y por lo mismo: un catálogo
+    // configurado a medias en un comercio sin OWNER no lo arregla nadie.
+    //
+    // Y revienta la AUDITORÍA, no la fila de agenda. La primera versión de
+    // este test usaba `agendaRevienta` y **salía verde con el sabotaje
+    // puesto**: la agenda se escribe ANTES que los tipos, así que al
+    // reventar ahí los tipos no llegaban a escribirse ni dentro ni fuera, y
+    // el test no distinguía las dos cosas. La auditoría va DESPUÉS, así que
+    // con ella se ve: escritos dentro, la vuelta atrás se los lleva;
+    // escritos fuera, sobreviven.
+    auditRevienta = true;
+    const r = await post({ csv: CSV_ROSARIO, confirmar: true });
+    expect(r.statusCode).toBe(500);
+    expect(productos.size).toBe(0);
+    expect(agendas.size).toBe(0);
+    expect(tiposDeVisita.size).toBe(0);
+  });
+
+  it("la vista previa las ENSEÑA, y no escribe ninguna", async () => {
+    const r = await post({ csv: CSV_ROSARIO });
+    expect(r.statusCode).toBe(200);
+    const body = r.json();
+    expect(body.escrito).toBe(false);
+    expect(body.tiposDeVisita).toHaveLength(5);
+    const completa = body.entran.find((e: any) => e.sku === "POD-003");
+    expect(completa.nivelQuiropodia).toBe(2);
+    expect(completa.tratamientoSesion).toBe(true);
+    expect(completa.tipoVisita).toBe("QUIROPODIA");
+    // Y nada escrito: ni productos, ni agendas, ni tipos.
+    expect(productos.size).toBe(0);
+    expect(agendas.size).toBe(0);
+    expect(tiposDeVisita.size).toBe(0);
+  });
+
+  it("en un comercio SIN historia clínica, las filas con marcas se SALTAN", async () => {
+    // La misma puerta que la exención, y por lo mismo: la capability es
+    // del comercio y el parser no habla con la base.
+    //
+    // SIN `E1` en el fichero, a propósito: con la exención puesta las
+    // filas se saltarían por la puerta de `catalogo-servicios-csv` y este
+    // test saldría verde con la puerta nueva quitada. Lo enseñó su
+    // sabotaje. Las dos filas son IVA 21 y sujetas; lo único que un bar no
+    // puede tener aquí son las marcas de clínica.
+    tenant = { ...tenant!, clinicalRecordsEnabled: false };
+    const csv =
+      "sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min,tipo_visita,primera_valoracion,tratamiento_sesion,nivel_quiropodia\n" +
+      "SVC-1,Quiropodia,25.00,21,quiropodia,SERVICE,,30,QUIROPODIA,no,si,1\n" +
+      "SVC-2,Corte,18.00,21,peluqueria,SERVICE,,30,,,,";
+    const r = await post({ csv, confirmar: true });
+    expect(r.statusCode).toBe(200);
+    // La de las marcas, fuera con su motivo; la normal, dentro.
+    expect([...productos.values()].map((p) => p.sku)).toEqual(["SVC-2"]);
+    expect(
+      r.json().saltadas.find((x: any) => x.sku === "SVC-1").motivo,
+    ).toContain("no tiene la historia clínica encendida");
+    expect(tiposDeVisita.size).toBe(0);
+  });
+
+  it("un fichero SIN las columnas deja la fila de agenda como la dejaba ayer", async () => {
+    // La Maestranza: `false`, `false` y `null`, que son los defaults de la
+    // base. El sabotaje que esto caza es escribir marcas inventadas.
+    const csv =
+      "sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min\n" +
+      "SVC-1,Corte,18.00,21,peluqueria,SERVICE,,30";
+    await post({ csv, confirmar: true });
+    const a = [...agendas.values()][0]!;
+    expect(a.primeraValoracion).toBe(false);
+    expect(a.tratamientoSesion).toBe(false);
+    expect(a.nivelQuiropodia).toBeNull();
+    expect(tiposDeVisita.size).toBe(0);
   });
 });

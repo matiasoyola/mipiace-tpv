@@ -75,6 +75,14 @@ const TONE_HINTS: ReadonlyArray<{ tone: CategoryTone; words: string[] }> = [
   { tone: "green", words: ["ensalada", "verdura", "vegetal", "vegano", "sano", "entrante", "tapa"] },
   { tone: "rose", words: ["postre", "dulce", "helado", "tarta", "pasteleria", "chocolate"] },
   { tone: "stone", words: ["servicio", "corte", "peluqueria", "extra", "otros", "varios", "menu"] },
+  // clinica-8 (fase B, 19) · lo clínico, en azul. Lo mismo que los
+  // iconos: al final, para no mover el reparto de los quince comercios
+  // de hoy. Y en `sky` y no en ámbar porque el ámbar es el del café y lo
+  // que se quería quitar era precisamente eso.
+  {
+    tone: "sky",
+    words: ["quiropodia", "podolog", "cirugia", "cirugía", "biomecanic", "biomecánic", "ortesis", "órtesis", "consulta", "cura"],
+  },
 ];
 
 // Iconos Lucide por categoría. Mismo criterio: heurística por palabra
@@ -102,6 +110,18 @@ export type CategoryIconName =
   | "Scissors"
   | "Shirt"
   | "Sparkles"
+  // clinica-8 (fase B, 19) · los de clínica. «Venta: iconos de taza»
+  // (auditoría del 18-10, punto 28): en la rejilla de Rosario,
+  // «Quiropodia», «Cirugía» y «Biomecánica» salían con una TAZA DE CAFÉ.
+  // No es una errata del catálogo: ninguna de las tres casa con las
+  // pistas de hostelería, así que caían al icono por tono, y el tono por
+  // defecto del primer reparto es ámbar → `Coffee`.
+  | "Footprints"
+  | "Stethoscope"
+  | "Syringe"
+  | "Activity"
+  | "Bandage"
+  | "HeartPulse"
   | "Package";
 
 const ICON_HINTS: ReadonlyArray<{ icon: CategoryIconName; words: string[] }> = [
@@ -123,6 +143,21 @@ const ICON_HINTS: ReadonlyArray<{ icon: CategoryIconName; words: string[] }> = [
   { icon: "Scissors", words: ["corte", "peluqueria", "pelo", "barba"] },
   { icon: "Shirt", words: ["ropa", "textil", "moda", "camiseta"] },
   { icon: "Sparkles", words: ["belleza", "estetica", "tratamiento", "servicio"] },
+  // clinica-8 (fase B, 19) · las de clínica van DESPUÉS de las de
+  // hostelería a propósito. Las palabras no chocan entre sí —no hay
+  // ninguna categoría que sea «café» y «quiropodia» a la vez— y poner
+  // las nuevas al final deja intacto el reparto de los quince comercios
+  // de hoy, que es lo que no se puede mover: el icono de una categoría
+  // se aprende y cambiarlo cuesta un segundo por toque durante días.
+  {
+    icon: "Footprints",
+    words: ["quiropodia", "podolog", "pie", "pies", "una", "uñas", "callo", "helom", "papiloma"],
+  },
+  { icon: "Syringe", words: ["cirugia", "cirugía", "fenol", "infiltra", "avulsion"] },
+  { icon: "Activity", words: ["biomecanic", "biomecánic", "pisada", "ortesis", "órtesis", "plantilla"] },
+  { icon: "Bandage", words: ["cura", "herida", "ulcera", "úlcera", "apósito", "aposito", "vendaje"] },
+  { icon: "HeartPulse", words: ["riesgo", "diabet", "exploracion", "exploración", "seguimiento"] },
+  { icon: "Stethoscope", words: ["consulta", "revision", "revisión", "valoracion", "valoración", "diagnostic"] },
 ];
 
 const ICON_BY_TONE: Record<CategoryTone, CategoryIconName> = {
@@ -195,7 +230,8 @@ export function saveToneAssignments(
 function hintedTone(tag: string): CategoryTone | null {
   const slug = normalizeTag(tag);
   for (const { tone, words } of TONE_HINTS) {
-    if (words.some((w) => slug.includes(w))) return tone;
+    // clinica-8 (fase B, 19) · la misma regla que los iconos: ver `casa`.
+    if (words.some((w) => casa(slug, w))) return tone;
   }
   return null;
 }
@@ -250,11 +286,48 @@ export function resolveToneAssignments(
   return assignments;
 }
 
-/** Icono Lucide de una categoría. Nunca devuelve null. */
-export function iconNameForTag(tag: string, tone: CategoryTone): CategoryIconName {
+/**
+ * ¿Casa esta palabra con este slug?
+ *
+ * clinica-8 (fase B, 19) · **una palabra de dos o tres letras tiene que
+ * ser el slug ENTERO.** Con `includes` a secas, la pista «te» del té se
+ * comía media lista: «orTEsis» → taza de café, y «corTEs» de la
+ * peluquería también. Es un fallo que estaba desde v1.14 y que el
+ * catálogo de Rosario destapa, porque «órtesis» es una de sus cinco
+ * categorías.
+ *
+ * El corte en cuatro letras no es un número redondo elegido a gusto: es
+ * el único tramo donde `includes` miente. De cuatro para arriba las
+ * palabras de la lista («cafe», «vino», «pan» no, pero «pizza» sí) son
+ * raíces de verdad y acertar por subcadena es lo que hace que
+ * «panaderia» y «panes» caigan en la misma. Por debajo son sílabas.
+ */
+function casa(slug: string, palabra: string): boolean {
+  if (palabra.length <= 3) return slug === palabra;
+  return slug.includes(palabra);
+}
+
+/**
+ * Icono Lucide de una categoría. Nunca devuelve null.
+ *
+ * clinica-8 (fase B, 19) · `porDefecto` es lo que se usa cuando ninguna
+ * palabra casa. Sin él, el respaldo es el icono del TONO, y el tono se
+ * reparte por orden: en una clínica, la primera categoría del catálogo
+ * se lleva ámbar y ámbar es `Coffee`. Una taza de café encima de
+ * «Cirugía».
+ *
+ * `SalePage` le pasa el estetoscopio en un comercio con historia
+ * clínica. No se adivina aquí dentro: este módulo es puro y no sabe de
+ * qué negocio es el catálogo que le dan.
+ */
+export function iconNameForTag(
+  tag: string,
+  tone: CategoryTone,
+  porDefecto?: CategoryIconName,
+): CategoryIconName {
   const slug = normalizeTag(tag);
   for (const { icon, words } of ICON_HINTS) {
-    if (words.some((w) => slug.includes(w))) return icon;
+    if (words.some((w) => casa(slug, w))) return icon;
   }
-  return ICON_BY_TONE[tone];
+  return porDefecto ?? ICON_BY_TONE[tone];
 }

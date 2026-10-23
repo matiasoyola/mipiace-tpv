@@ -35,6 +35,13 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+// clinica-8 · la versión es la VIGENTE, no un `1` escrito a mano: al sacar
+// la v2 del contrato de encargado, una aceptación de la versión vieja deja
+// el módulo clínico en SOLO LECTURA (423) y este fichero entero se va a
+// rojo. Es la garantía de clinica-7 funcionando; con la constante, la
+// próxima versión no vuelve a costar una pasada.
+import { VERSION_VIGENTE } from "@mipiacetpv/contrato-encargado";
+
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -311,7 +318,7 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-       VALUES ('${randomUUID()}', '${tenantId}', 1, '${"a".repeat(64)}', '${directoraId}', now())`,
+       VALUES ('${randomUUID()}', '${tenantId}', ${VERSION_VIGENTE}, '${"a".repeat(64)}', '${directoraId}', now())`,
     );
 
     plantaId = randomUUID();

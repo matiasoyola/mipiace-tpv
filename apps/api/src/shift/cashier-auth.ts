@@ -81,6 +81,13 @@ export async function registerCashierAuthRoutes(
           // esta lista habría sido esconder la negativa en la puerta de
           // entrada, y la puerta de entrada no es donde se razona.
           role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
+          // clinica-8 · y VIVO. La activación borra (soft) el cajero
+          // técnico de «Probar TPV» y le quita el PIN; lo segundo ya
+          // cerraba la puerta —sin `pin_hash` no se entra— pero lo hacía
+          // por un efecto lateral del borrado, no porque nadie lo
+          // comprobara. El día que alguien le ponga un PIN a un usuario
+          // borrado, esto es lo que lo sigue dejando fuera.
+          deletedAt: null,
         },
         select: {
           id: true,

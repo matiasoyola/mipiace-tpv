@@ -558,6 +558,61 @@ describe("GET /apk, la pagina del terminal roto", () => {
     await app.close();
   });
 
+  // clinica-8 (fase B, 20) · EL AVISO DE LOS DOS AVISOS DE ANDROID.
+  //
+  // Auditoria del 18-10, punto 31: «/apk: "archivo daniño" sin aviso
+  // previo». Quien instala la APK en la clinica es la dueña, sola, con
+  // un codigo de seis digitos que le ha dado el implantador por
+  // telefono: ver «este archivo puede dañar tu dispositivo» sin
+  // esperarlo es donde se para y llama.
+  it("avisa de los DOS avisos de Android, y ANTES del boton", async () => {
+    const app = await build();
+    const { body } = await app.inject({ method: "GET", url: "/apk" });
+    // Los dos, cada uno con sus palabras: el de Chrome al descargar...
+    expect(body).toContain("puede dañar tu dispositivo");
+    expect(body).toContain("Descargar igualmente");
+    // ...y el del sistema al instalar.
+    expect(body).toContain("permiso para instalar apps");
+    // Y por que pasa, que es lo que lo convierte en normal.
+    expect(body).toContain("Google Play");
+    // ANTES del boton: leerlo despues de pulsar no sirve de nada.
+    expect(body.indexOf("puede dañar tu dispositivo")).toBeLessThan(
+      body.indexOf("Descargar la app"),
+    );
+    // Y QUE SE VEA. Lo encontro la tabla de sabotajes de la fase B: con
+    // `hidden` en el parrafo, el aviso sigue en el HTML y este test
+    // pasaba en verde — o sea que estaba comprobando que la cadena
+    // existe, no que la duena la lea. Esta pagina no lleva JavaScript
+    // (lo fija el primer test del describe), asi que lo unico que la
+    // puede esconder es la propia etiqueta.
+    expect(body).toContain('<p class="aviso">');
+    expect(body).not.toMatch(/class="aviso"[^>]/);
+    await app.close();
+  });
+
+  it("y el aviso no sale cuando no hay formulario que avisar", async () => {
+    // Bloqueado por intentos no se ofrece formulario: un aviso sobre un
+    // boton que no esta es ruido.
+    const app = await build();
+    for (let i = 0; i < 20; i++) {
+      await app.inject({
+        method: "POST",
+        url: "/apk",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: "codigo=000000",
+      });
+    }
+    const { body } = await app.inject({
+      method: "POST",
+      url: "/apk",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "codigo=000000",
+    });
+    expect(body).not.toContain("Descargar la app");
+    expect(body).not.toContain("puede dañar tu dispositivo");
+    await app.close();
+  });
+
   it("el input es numerico y de 6 digitos", async () => {
     const app = await build();
     const { body } = await app.inject({ method: "GET", url: "/apk" });
