@@ -2,8 +2,8 @@
 //
 // Lo que este banco fija:
 //
-//   1. El OWNER se crea igual que siempre: email, password temporal,
-//      cambio obligatorio en el primer login, tenant a ACTIVE.
+//   1. El OWNER se crea igual que siempre: email, tenant a ACTIVE. (Desde
+//      primer-acceso, sin contraseña provisional: con una invitación.)
 //   2. Sin caja NO se genera PIN de cajero: ni `pinHash` en el User, ni
 //      `ownerPin` en la respuesta, ni PIN en el email. Y la respuesta lo
 //      DICE con `cashierPinIssued: false`, en vez de un null mudo.
@@ -58,6 +58,7 @@ const users = new Map<string, FakeUser>();
 const tenants = new Map<string, FakeTenant>();
 const audits: Array<{ action: string; metadata: any }> = [];
 const sentEmails: Array<{ to: string; subject: string; text: string; html?: string }> = [];
+const invitaciones: any[] = [];
 
 // La salud la stubeamos: lo que este banco prueba es la activación, no
 // los checks (eso es `h1-salud-modulos.test.ts`).
@@ -144,6 +145,19 @@ const fakePrisma: any = {
       return { id: u.id, email: u.email, alias: u.alias };
     }),
   },
+  // primer-acceso · `activate` deja una invitación en la misma tabla que
+  // los enlaces de reset. Sin esta entrada el fake lanzaba DENTRO de la
+  // transacción y la activación caía con un 500.
+  passwordResetToken: {
+    create: vi.fn(async ({ data }: any) => {
+      const t = { id: randomUUID(), usedAt: null, ...data };
+      invitaciones.push(t);
+      return t;
+    }),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    findFirst: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+  },
   superAdminUser: {
     findUnique: vi.fn(async () => ({
       id: SUPER_ADMIN_ID,
@@ -214,6 +228,7 @@ beforeEach(() => {
   tenants.clear();
   audits.length = 0;
   sentEmails.length = 0;
+  invitaciones.length = 0;
   purgeCalls.n = 0;
   purgeThrows = false;
 });
@@ -227,9 +242,15 @@ describe("H1 · activar SIN caja", () => {
     const body = res.json();
     expect(body.tenant.onboardingState).toBe("ACTIVE");
     expect(body.owner.email).toBe("direccion@colegio.es");
-    expect(body.tempPassword).toHaveLength(16);
+    // primer-acceso (decisión 2) · sin contraseña provisional: una
+    // invitación de 7 días y el enlace una sola vez en la respuesta.
+    expect(body.tempPassword).toBeUndefined();
+    expect(body.invitacion.enlace).toContain("/bienvenida?token=");
+    expect(invitaciones).toHaveLength(1);
+    expect(invitaciones[0].type).toBe("INVITE");
     const owner = [...users.values()].find((u) => u.role === "OWNER")!;
-    expect(owner.mustChangePasswordAt).not.toBeNull();
+    expect(owner.passwordHash).toBeNull();
+    expect(owner.mustChangePasswordAt).toBeNull();
   });
 
   // clinica-8 (fase B, 11) · EL NOMBRE DE LA ACTIVACIÓN LLEGA A LA FILA.
@@ -275,6 +296,17 @@ describe("H1 · activar SIN caja", () => {
     expect(sentEmails).toHaveLength(1);
     expect(sentEmails[0]!.text).not.toMatch(/PIN/);
     expect(sentEmails[0]!.text).not.toMatch(/TPV/);
+  });
+
+  // primer-acceso · y tampoco de contraseñas. Es el sabotaje que pone en
+  // rojo volver a meter una provisional en el correo.
+  it("el email no lleva ninguna contraseña: lleva un enlace", async () => {
+    seed();
+    const app = await buildApp();
+    const body = (await activate(app)).json();
+    expect(sentEmails[0]!.text).toContain(body.invitacion.enlace);
+    expect(sentEmails[0]!.text).not.toMatch(/[Cc]ontraseña temporal/);
+    expect(sentEmails[0]!.text).toMatch(/Crea tu contraseña/);
   });
 
   it("sin Holded, el email no le pide al propietario que lo conecte", async () => {

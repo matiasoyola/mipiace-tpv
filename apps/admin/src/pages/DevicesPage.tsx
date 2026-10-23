@@ -128,7 +128,7 @@ export function DevicesPage() {
     }
   }
 
-  if (!devices) return <CenteredLoader label="Cargando dispositivos…" />;
+  if (!devices) return <CenteredLoader label="Cargando dispositivos…" error={error} />;
 
   return (
     <AdminShell title="Dispositivos">

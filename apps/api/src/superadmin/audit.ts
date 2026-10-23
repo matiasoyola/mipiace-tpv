@@ -75,6 +75,18 @@ const ActivateTenantMeta = Base.extend({
   cashierPinIssued: z.boolean().optional(),
 });
 
+// primer-acceso · «Reenviar invitación». El email del propietario y la
+// fecha de caducidad, y NI EL TOKEN NI EL ENLACE: la auditoría del
+// super-admin la lee gente, y un enlace de un solo uso ahí dentro es una
+// contraseña escrita en una pizarra.
+const ReenviarInvitacionMeta = Base.extend({
+  ownerEmail: z.string(),
+  caducaEl: z.string(),
+  // `true` cuando el reenvío mató una contraseña provisional del flujo
+  // viejo. Es lo que cuenta la historia de un propietario migrado.
+  anulabaProvisional: z.boolean(),
+});
+
 const UpdateTenantMeta = Base.extend({
   changes: z.record(
     z.object({
@@ -411,6 +423,7 @@ const META_SCHEMAS = {
   impersonate_write: ImpersonateWriteMeta,
   test_cashier_session: TestCashierSessionMeta,
   activate_tenant: ActivateTenantMeta,
+  reenviar_invitacion: ReenviarInvitacionMeta,
   create_super_admin: CreateSuperAdminMeta,
   delete_super_admin: DeleteSuperAdminMeta,
   resend_super_admin_invite: ResendSuperAdminInviteMeta,

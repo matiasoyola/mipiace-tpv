@@ -1,0 +1,774 @@
+{
+  "mapa-n1-360x720-todas": {
+    "innerWidth": 360,
+    "innerHeight": 720,
+    "clientWidth": 360,
+    "scrollWidth": 360,
+    "scrollHeight": 720,
+    "clientHeight": 720,
+    "desbordaHorizontal": false,
+    "chips": [
+      {
+        "zona": "ALL",
+        "texto": "Todas",
+        "left": 16,
+        "right": 94,
+        "alto": 56
+      },
+      {
+        "zona": "BARRA",
+        "texto": "Barra",
+        "left": 102,
+        "right": 173,
+        "alto": 56
+      },
+      {
+        "zona": "SALON",
+        "texto": "Salón",
+        "left": 181,
+        "right": 254,
+        "alto": 56
+      },
+      {
+        "zona": "TERRAZA",
+        "texto": "Terraza",
+        "left": 262,
+        "right": 349,
+        "alto": 56
+      }
+    ],
+    "chipsDesplazanSolos": {
+      "scrollWidth": 333,
+      "clientWidth": 191,
+      "puedeDesplazar": true,
+      "overflowX": "auto"
+    },
+    "mesasEnElArbol": 23,
+    "mesasALaVista": 14,
+    "mesasALaVistaPorNombre": [
+      "B1",
+      "B2",
+      "B3",
+      "B4",
+      "B5",
+      "B6",
+      "B7",
+      "B8",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6"
+    ],
+    "ladoDeMesa": {
+      "ancho": 88,
+      "alto": 88
+    },
+    "cabecera": {
+      "alto": 120,
+      "filas": 2
+    },
+    "ventaRapida": {
+      "left": 217,
+      "right": 344,
+      "alto": 56,
+      "dentro": true
+    }
+  },
+  "terraza-alcanzable-n1-360x720": {
+    "scrollLeftDelScroller": 142,
+    "paginaSeMovio": false,
+    "chipRect": {
+      "left": 120,
+      "right": 207
+    },
+    "dentroDeLaVentana": true,
+    "loQueHayEnSuCentro": "el propio chip"
+  },
+  "mapa-n1-360x720-terraza": {
+    "innerWidth": 360,
+    "innerHeight": 720,
+    "clientWidth": 360,
+    "scrollWidth": 360,
+    "scrollHeight": 720,
+    "clientHeight": 720,
+    "desbordaHorizontal": false,
+    "chips": [
+      {
+        "zona": "ALL",
+        "texto": "Todas",
+        "left": -126,
+        "right": -49,
+        "alto": 56
+      },
+      {
+        "zona": "BARRA",
+        "texto": "Barra",
+        "left": -41,
+        "right": 30,
+        "alto": 56
+      },
+      {
+        "zona": "SALON",
+        "texto": "Salón",
+        "left": 38,
+        "right": 112,
+        "alto": 56
+      },
+      {
+        "zona": "TERRAZA",
+        "texto": "Terraza",
+        "left": 120,
+        "right": 208,
+        "alto": 56
+      }
+    ],
+    "chipsDesplazanSolos": {
+      "scrollWidth": 334,
+      "clientWidth": 191,
+      "puedeDesplazar": true,
+      "overflowX": "auto"
+    },
+    "mesasEnElArbol": 8,
+    "mesasALaVista": 8,
+    "mesasALaVistaPorNombre": [
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8"
+    ],
+    "ladoDeMesa": {
+      "ancho": 88,
+      "alto": 88
+    },
+    "cabecera": {
+      "alto": 120,
+      "filas": 2
+    },
+    "ventaRapida": {
+      "left": 217,
+      "right": 344,
+      "alto": 56,
+      "dentro": true
+    }
+  },
+  "venta-n1-360x720-entrada": {
+    "innerWidth": 360,
+    "innerHeight": 720,
+    "scrollHeight": 1847,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": {
+      "top": 194,
+      "bottom": 606,
+      "alto": 412,
+      "visible": true
+    },
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 14,
+    "productosEnElArbol": 20,
+    "primerProducto": {
+      "top": 769,
+      "bottom": 860,
+      "alto": 91,
+      "visible": false,
+      "texto": "Bebidas 1"
+    },
+    "productosVisibles": 0,
+    "barraDelTicket": {
+      "top": 647,
+      "bottom": 720,
+      "alto": 73,
+      "visible": true
+    }
+  },
+  "venta-n1-360x720-familia": {
+    "innerWidth": 360,
+    "innerHeight": 720,
+    "scrollHeight": 1269,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": null,
+    "tiraDeFamilia": {
+      "top": 194,
+      "bottom": 250,
+      "alto": 56,
+      "visible": true
+    },
+    "cambiarFamilia": {
+      "top": 194,
+      "bottom": 250,
+      "alto": 56,
+      "visible": true
+    },
+    "familiasEnElArbol": 0,
+    "productosEnElArbol": 12,
+    "primerProducto": {
+      "top": 413,
+      "bottom": 533,
+      "alto": 120,
+      "visible": true,
+      "texto": "Cafe 10"
+    },
+    "productosVisibles": 4,
+    "barraDelTicket": {
+      "top": 647,
+      "bottom": 720,
+      "alto": 73,
+      "visible": true
+    }
+  },
+  "comanda-n1-360x720": {
+    "hojaAbierta": false,
+    "lineas": [],
+    "chipsEspera": 0,
+    "esperaDeLaUltima": null
+  },
+  "mapa-ap11-1280x800-todas": {
+    "innerWidth": 1280,
+    "innerHeight": 800,
+    "clientWidth": 1280,
+    "scrollWidth": 1280,
+    "scrollHeight": 803,
+    "clientHeight": 800,
+    "desbordaHorizontal": false,
+    "chips": [
+      {
+        "zona": "ALL",
+        "texto": "Todas",
+        "left": 523,
+        "right": 615,
+        "alto": 52
+      },
+      {
+        "zona": "BARRA",
+        "texto": "Barra",
+        "left": 623,
+        "right": 708,
+        "alto": 52
+      },
+      {
+        "zona": "SALON",
+        "texto": "Salón",
+        "left": 716,
+        "right": 802,
+        "alto": 52
+      },
+      {
+        "zona": "TERRAZA",
+        "texto": "Terraza",
+        "left": 810,
+        "right": 911,
+        "alto": 52
+      }
+    ],
+    "chipsDesplazanSolos": null,
+    "mesasEnElArbol": 23,
+    "mesasALaVista": 23,
+    "mesasALaVistaPorNombre": [
+      "B1",
+      "B2",
+      "B3",
+      "B4",
+      "B5",
+      "B6",
+      "B7",
+      "B8",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6",
+      "M7",
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8"
+    ],
+    "ladoDeMesa": {
+      "ancho": 136,
+      "alto": 136
+    },
+    "cabecera": {
+      "alto": 80,
+      "filas": 0
+    },
+    "ventaRapida": {
+      "left": 1103,
+      "right": 1260,
+      "alto": 56,
+      "dentro": true
+    }
+  },
+  "terraza-alcanzable-ap11-1280x800": {
+    "scrollLeftDelScroller": null,
+    "paginaSeMovio": false,
+    "chipRect": {
+      "left": 810,
+      "right": 911
+    },
+    "dentroDeLaVentana": true,
+    "loQueHayEnSuCentro": "el propio chip"
+  },
+  "mapa-ap11-1280x800-terraza": {
+    "innerWidth": 1280,
+    "innerHeight": 800,
+    "clientWidth": 1280,
+    "scrollWidth": 1280,
+    "scrollHeight": 800,
+    "clientHeight": 800,
+    "desbordaHorizontal": false,
+    "chips": [
+      {
+        "zona": "ALL",
+        "texto": "Todas",
+        "left": 523,
+        "right": 613,
+        "alto": 52
+      },
+      {
+        "zona": "BARRA",
+        "texto": "Barra",
+        "left": 621,
+        "right": 706,
+        "alto": 52
+      },
+      {
+        "zona": "SALON",
+        "texto": "Salón",
+        "left": 714,
+        "right": 800,
+        "alto": 52
+      },
+      {
+        "zona": "TERRAZA",
+        "texto": "Terraza",
+        "left": 808,
+        "right": 911,
+        "alto": 52
+      }
+    ],
+    "chipsDesplazanSolos": null,
+    "mesasEnElArbol": 8,
+    "mesasALaVista": 8,
+    "mesasALaVistaPorNombre": [
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8"
+    ],
+    "ladoDeMesa": {
+      "ancho": 136,
+      "alto": 136
+    },
+    "cabecera": {
+      "alto": 80,
+      "filas": 0
+    },
+    "ventaRapida": {
+      "left": 1103,
+      "right": 1260,
+      "alto": 56,
+      "dentro": true
+    }
+  },
+  "venta-ap11-1280x800-entrada": {
+    "innerWidth": 1280,
+    "innerHeight": 800,
+    "scrollHeight": 800,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": {
+      "top": 56,
+      "bottom": 300,
+      "alto": 244,
+      "visible": true
+    },
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 14,
+    "productosEnElArbol": 20,
+    "primerProducto": {
+      "top": 399,
+      "bottom": 469,
+      "alto": 70,
+      "visible": true,
+      "texto": "Bebidas 1"
+    },
+    "productosVisibles": 20,
+    "barraDelTicket": null
+  },
+  "venta-ap11-1280x800-familia": {
+    "innerWidth": 1280,
+    "innerHeight": 800,
+    "scrollHeight": 800,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": {
+      "top": 56,
+      "bottom": 300,
+      "alto": 244,
+      "visible": true
+    },
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 14,
+    "productosEnElArbol": 12,
+    "primerProducto": {
+      "top": 399,
+      "bottom": 519,
+      "alto": 120,
+      "visible": true,
+      "texto": "Cafe 10"
+    },
+    "productosVisibles": 12,
+    "barraDelTicket": null
+  },
+  "comanda-ap11-1280x800": {
+    "hojaAbierta": true,
+    "lineas": [
+      {
+        "texto": "Café Americano",
+        "recortado": true,
+        "anchoVisible": 276,
+        "anchoReal": 276,
+        "lineas": 1
+      },
+      {
+        "texto": "Café Solo",
+        "recortado": true,
+        "anchoVisible": 277,
+        "anchoReal": 277,
+        "lineas": 1
+      },
+      {
+        "texto": "Café Americano",
+        "recortado": true,
+        "anchoVisible": 135,
+        "anchoReal": 135,
+        "lineas": 2
+      },
+      {
+        "texto": "Café Solo",
+        "recortado": true,
+        "anchoVisible": 135,
+        "anchoReal": 135,
+        "lineas": 1
+      }
+    ],
+    "chipsEspera": 2,
+    "esperaDeLaUltima": {
+      "rect": {
+        "top": 461,
+        "bottom": 501
+      },
+      "dentroDeLaVentana": true,
+      "loQueHayEnSuCentro": "el propio Espera"
+    }
+  },
+  "mapa-d8-1442x811-todas": {
+    "innerWidth": 1442,
+    "innerHeight": 811,
+    "clientWidth": 1442,
+    "scrollWidth": 1442,
+    "scrollHeight": 851,
+    "clientHeight": 811,
+    "desbordaHorizontal": false,
+    "chips": [
+      {
+        "zona": "ALL",
+        "texto": "Todas",
+        "left": 685,
+        "right": 777,
+        "alto": 52
+      },
+      {
+        "zona": "BARRA",
+        "texto": "Barra",
+        "left": 785,
+        "right": 870,
+        "alto": 52
+      },
+      {
+        "zona": "SALON",
+        "texto": "Salón",
+        "left": 878,
+        "right": 964,
+        "alto": 52
+      },
+      {
+        "zona": "TERRAZA",
+        "texto": "Terraza",
+        "left": 972,
+        "right": 1073,
+        "alto": 52
+      }
+    ],
+    "chipsDesplazanSolos": null,
+    "mesasEnElArbol": 23,
+    "mesasALaVista": 23,
+    "mesasALaVistaPorNombre": [
+      "B1",
+      "B2",
+      "B3",
+      "B4",
+      "B5",
+      "B6",
+      "B7",
+      "B8",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6",
+      "M7",
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8"
+    ],
+    "ladoDeMesa": {
+      "ancho": 152,
+      "alto": 152
+    },
+    "cabecera": {
+      "alto": 80,
+      "filas": 0
+    },
+    "ventaRapida": {
+      "left": 1265,
+      "right": 1422,
+      "alto": 56,
+      "dentro": true
+    }
+  },
+  "terraza-alcanzable-d8-1442x811": {
+    "scrollLeftDelScroller": null,
+    "paginaSeMovio": false,
+    "chipRect": {
+      "left": 972,
+      "right": 1073
+    },
+    "dentroDeLaVentana": true,
+    "loQueHayEnSuCentro": "el propio chip"
+  },
+  "mapa-d8-1442x811-terraza": {
+    "innerWidth": 1442,
+    "innerHeight": 811,
+    "clientWidth": 1442,
+    "scrollWidth": 1442,
+    "scrollHeight": 811,
+    "clientHeight": 811,
+    "desbordaHorizontal": false,
+    "chips": [
+      {
+        "zona": "ALL",
+        "texto": "Todas",
+        "left": 685,
+        "right": 775,
+        "alto": 52
+      },
+      {
+        "zona": "BARRA",
+        "texto": "Barra",
+        "left": 783,
+        "right": 868,
+        "alto": 52
+      },
+      {
+        "zona": "SALON",
+        "texto": "Salón",
+        "left": 876,
+        "right": 962,
+        "alto": 52
+      },
+      {
+        "zona": "TERRAZA",
+        "texto": "Terraza",
+        "left": 970,
+        "right": 1073,
+        "alto": 52
+      }
+    ],
+    "chipsDesplazanSolos": null,
+    "mesasEnElArbol": 8,
+    "mesasALaVista": 8,
+    "mesasALaVistaPorNombre": [
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8"
+    ],
+    "ladoDeMesa": {
+      "ancho": 152,
+      "alto": 152
+    },
+    "cabecera": {
+      "alto": 80,
+      "filas": 0
+    },
+    "ventaRapida": {
+      "left": 1265,
+      "right": 1422,
+      "alto": 56,
+      "dentro": true
+    }
+  },
+  "venta-d8-1442x811-entrada": {
+    "innerWidth": 1442,
+    "innerHeight": 811,
+    "scrollHeight": 811,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": {
+      "top": 56,
+      "bottom": 300,
+      "alto": 244,
+      "visible": true
+    },
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 14,
+    "productosEnElArbol": 20,
+    "primerProducto": {
+      "top": 399,
+      "bottom": 471,
+      "alto": 72,
+      "visible": true,
+      "texto": "Bebidas 1"
+    },
+    "productosVisibles": 20,
+    "barraDelTicket": null
+  },
+  "venta-d8-1442x811-familia": {
+    "innerWidth": 1442,
+    "innerHeight": 811,
+    "scrollHeight": 811,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": {
+      "top": 56,
+      "bottom": 300,
+      "alto": 244,
+      "visible": true
+    },
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 14,
+    "productosEnElArbol": 12,
+    "primerProducto": {
+      "top": 399,
+      "bottom": 519,
+      "alto": 120,
+      "visible": true,
+      "texto": "Cafe 10"
+    },
+    "productosVisibles": 12,
+    "barraDelTicket": null
+  },
+  "comanda-d8-1442x811": {
+    "hojaAbierta": true,
+    "lineas": [
+      {
+        "texto": "Café Americano",
+        "recortado": true,
+        "anchoVisible": 276,
+        "anchoReal": 276,
+        "lineas": 1
+      },
+      {
+        "texto": "Café Solo",
+        "recortado": true,
+        "anchoVisible": 277,
+        "anchoReal": 277,
+        "lineas": 1
+      },
+      {
+        "texto": "Café Americano",
+        "recortado": true,
+        "anchoVisible": 135,
+        "anchoReal": 135,
+        "lineas": 2
+      },
+      {
+        "texto": "Café Solo",
+        "recortado": true,
+        "anchoVisible": 135,
+        "anchoReal": 135,
+        "lineas": 1
+      }
+    ],
+    "chipsEspera": 2,
+    "esperaDeLaUltima": {
+      "rect": {
+        "top": 461,
+        "bottom": 501
+      },
+      "dentroDeLaVentana": true,
+      "loQueHayEnSuCentro": "el propio Espera"
+    }
+  },
+  "venta-n1-360x449-buscando": {
+    "innerWidth": 360,
+    "innerHeight": 449,
+    "scrollHeight": 1421,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": null,
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 0,
+    "productosEnElArbol": 20,
+    "primerProducto": {
+      "top": 343,
+      "bottom": 434,
+      "alto": 91,
+      "visible": true,
+      "texto": "Tostada con mantequilla y merm"
+    },
+    "productosVisibles": 2,
+    "barraDelTicket": null
+  },
+  "venta-n1-360x449-sin-buscar": {
+    "innerWidth": 360,
+    "innerHeight": 449,
+    "scrollHeight": 1847,
+    "desbordaHorizontal": false,
+    "rejillaDeFamilias": {
+      "top": 194,
+      "bottom": 606,
+      "alto": 412,
+      "visible": false
+    },
+    "tiraDeFamilia": null,
+    "cambiarFamilia": null,
+    "familiasEnElArbol": 14,
+    "productosEnElArbol": 20,
+    "primerProducto": {
+      "top": 769,
+      "bottom": 860,
+      "alto": 91,
+      "visible": false,
+      "texto": "Bebidas 1"
+    },
+    "productosVisibles": 0,
+    "barraDelTicket": null
+  }
+}

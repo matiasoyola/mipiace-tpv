@@ -1244,7 +1244,7 @@ primera, y es porque los bancos miran la petición que sale, no la pantalla:
 
 | Suite | Resultado |
 |---|---|
-| `npx vitest run` (workspace, desde la raíz) | **444 ficheros · 6.382 tests**, 10 saltados |
+| `npx vitest run` (workspace, desde la raíz) | **453 ficheros · 6.504 tests**, 10 saltados (tras el segundo merge de master, §14.1) |
 | `pnpm test:e2e` (Postgres real, base propia de esta sesión) | **48 ficheros · 1.081 tests** |
 | `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio |
 
@@ -1435,6 +1435,49 @@ Y la suite entera + los tres `tsc` en verde ANTES de tocar nada de la fase B:
 `prisma generate` — el esquema de residencias trae 850 líneas nuevas y el
 cliente viejo no las conoce (es la memoria de la casa: «Prisma tras mergear
 master»).
+
+### 14.1 · Y un SEGUNDO merge, al terminar
+
+Al empujar, el PR salió `CONFLICTING`: master se había movido otra vez
+(`480ce9c` → `178e102`, veinte commits más, con `primer-acceso` y
+`hotfix-menu-capabilities` dentro). El conflicto se resuelve **en la rama** y
+el merge va dentro del PR: master no se empuja.
+
+**Dos conflictos, y los dos enseñan algo.**
+
+**`AdminShell.tsx` · el hotfix del menú llegó primero, y mejor.** Mientras la
+fase B gateaba «Comanderas» con un `if` más en la cadena del filtro,
+`hotfix-menu-capabilities` refactorizó la cadena entera a un `switch`
+exhaustivo en `capabilidadActiva`, con un `const nunca: never` en el
+`default` — «una capability sin rama no compila». Se queda **el suyo**, y la
+rama de `hosteleria` entra en su `switch`.
+
+Y su banco **obligó a cambiar la decisión**: recorre todas las capabilities del
+menú encendiéndolas de una en una y comprueba que con una encendida no se ve
+ninguna otra entrada gateada. `hosteleria` miraba DOS datos (el vertical **y**
+la caja), así que encenderla encendía de paso las de caja y el recorrido se
+caía. Ahora mira **sólo el vertical**, y no hace falta más: la pantalla de
+Comanderas vive dentro de un `CajaGate` (`App.tsx`), que es donde está la
+frontera. El menú decide qué se OFRECE. Un banco que obliga a simplificar una
+decisión es un buen banco.
+
+**`superadmin/tenants.ts` · `primer-acceso` escribió el mismo `alias`.** Los
+dos bloques llegaron a la misma línea por caminos distintos: allí para que la
+página de bienvenida pueda decir «Hola Carmen», aquí para que el TPV deje de
+pintar el email de la propietaria en «Atiende» y en el informe de la paciente.
+Se queda la suya —que además cambia `passwordHash` a `null`, porque ahora se
+entra con la invitación— y el comentario dice **las dos razones**, para que
+nadie quite la línea pensando que sólo sirve para una.
+
+Y una tercera cosa, más pequeña: el fake de usuario de
+`h1-activacion-sin-caja` tenía el campo `alias` declarado **dos veces** (uno
+por bloque). Se queda uno.
+
+**Verde después del segundo merge:** `npx vitest run` → **453 ficheros ·
+6.504 tests**, 10 saltados; los tres `tsc` limpios. En la primera pasada
+cayeron `move-to-table` y `h1-holded-mas-tarde`, y los dos pasan solos y en la
+siguiente corrida entera: es la caída bajo carga que la fase A ya anotó con
+`cashier-login`.
 
 ---
 

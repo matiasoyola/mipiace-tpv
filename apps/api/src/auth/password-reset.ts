@@ -73,6 +73,10 @@ export async function registerPasswordResetRoutes(
           data: {
             userId: user.id,
             tokenHash,
+            // primer-acceso · explícito aunque sea el default: la tabla
+            // guarda ahora dos clases de enlace y el que no diga de qué
+            // tipo es acabaría valiendo para las dos.
+            type: "RESET",
             expiresAt,
           },
         });
@@ -138,7 +142,10 @@ export async function registerPasswordResetRoutes(
       const prisma = getPrisma();
       const now = new Date();
       const candidates = await prisma.passwordResetToken.findMany({
-        where: { usedAt: null, expiresAt: { gt: now } },
+        // primer-acceso · `type: "RESET"` en el `where`, no en un `if`
+        // detrás: una invitación NO vale como enlace de reset. Es uno de
+        // los sabotajes del bloque, y así no hay rama que pueda colarla.
+        where: { type: "RESET", usedAt: null, expiresAt: { gt: now } },
         select: { id: true, tokenHash: true, userId: true },
         // En la práctica habrá <10 vivos a la vez globalmente.
         take: 1000,
@@ -166,6 +173,15 @@ export async function registerPasswordResetRoutes(
           where: { id: matched!.userId },
           data: {
             passwordHash: newHash,
+            // primer-acceso (decisión 4) · EL RESET LIMPIA
+            // `mustChangePassword`.
+            //
+            // Hasta aquí no lo limpiaba, y eso era el caso de hoy: el
+            // propietario que en vez de copiar la provisional del correo
+            // usaba «¿olvidaste tu contraseña?» elegía la suya, entraba, y
+            // se le volvía a pedir otra. Si alguien eligió su contraseña
+            // con un enlace, ya la ha elegido él.
+            mustChangePasswordAt: null,
             tokenVersion: { increment: 1 },
           },
         });

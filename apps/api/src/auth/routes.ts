@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 
 import { Prisma } from "@mipiacetpv/db";
 
+import { estadoDelContratoParaElPanel } from "../clinica/contrato.js";
 import { getPrisma } from "../context.js";
 import { decryptSecret, encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
@@ -385,6 +386,30 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           // Sólo lectura, como los otros cuatro: el interruptor lo mueve
           // el super-admin (D-48).
           residenciaEnabled: tenant.residenciaEnabled,
+          // primer-acceso (punto 3) · EL CONTRATO, EN LA MISMA RESPUESTA
+          // QUE DECIDE A DÓNDE ENTRA.
+          //
+          // `RootRouter` tiene que saber si lo primero que ve la
+          // propietaria es el contrato de datos, y tenía que saberlo sin
+          // una segunda petición: con dos llamadas en serie, la pantalla
+          // de inicio parpadea y la dueña ve medio segundo de un panel que
+          // va a abandonar.
+          //
+          // El estado lo calcula la MISMA función pura que decide el 423
+          // (`estadoDelTenant` → `@mipiacetpv/contrato-encargado`), así
+          // que la redirección y la negativa no pueden discrepar. Y
+          // `clinicaEncendida` sale del propio estado: `APAGADO` es
+          // exactamente «este negocio no tiene el módulo».
+          //
+          // Y en una sesión de impersonación va `null`: clinica-7 decisión
+          // 24 dice que Mi Piace no abre nada clínico, así que las rutas
+          // del contrato le contestan la 404 de siempre. Mandar al
+          // super-admin a una pantalla que no existe para él habría roto
+          // «configurar» sobre una clínica, que es para lo que la
+          // impersonación existe.
+          contratoClinico: auth.isImpersonation
+            ? null
+            : await estadoDelContratoParaElPanel(tenant.id, user.id),
         },
       };
     },

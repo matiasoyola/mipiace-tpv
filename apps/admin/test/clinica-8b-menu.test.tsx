@@ -151,11 +151,17 @@ describe("clinica-8 (18) · «Comanderas» sólo en hostelería", () => {
     expect(enlace(COMANDERAS)).toBeNull();
   });
 
-  it("y sin caja tampoco, aunque sea hostelería: se imprime desde el TPV", async () => {
+  it("mira SÓLO el vertical: la caja la exige la página, no el menú", async () => {
+    // Una capability del `switch` de `capabilidadActiva` es UN flag: el
+    // banco de hotfix-menu-capabilities las enciende de una en una y
+    // comprueba que con una encendida no se ve ninguna otra gateada. Así
+    // que «hosteleria» no puede mirar además la caja — y no hace falta:
+    // la pantalla vive dentro de un `CajaGate` (ver `App.tsx`), que es
+    // donde está la frontera. Esto decide qué se OFRECE.
     businessType = "HOSPITALITY";
     cajaEnabled = false;
     await pintar();
-    expect(enlace(COMANDERAS)).toBeNull();
+    expect(enlace(COMANDERAS)).not.toBeNull();
   });
 });
 

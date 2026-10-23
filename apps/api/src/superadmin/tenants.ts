@@ -71,6 +71,13 @@ import { computeOnboardingHealth } from "./onboarding-health.js";
 import { issueTestCashierSession, purgeTestData } from "./test-cashier.js";
 import { signImpersonationToken } from "./tokens.js";
 import { sendOwnerWelcomeEmail } from "./welcome-email.js";
+// primer-acceso · el correo del primer acceso y la función que decide su
+// marca según los módulos de la cuenta (decisión 5).
+import { marcaDelCorreo, sendOwnerInviteEmail } from "./invite-email.js";
+import {
+  crearInvitacion,
+  invitacionPendienteHasta,
+} from "../auth/invitacion.js";
 import {
   ERROR_SILENCIO,
   MENSAJE_SILENCIO,
@@ -466,6 +473,10 @@ export async function registerSuperAdminTenantsRoutes(
               mustChangePasswordAt: true,
               isTestCashier: true,
               deletedAt: true,
+              // primer-acceso · «sin contraseña utilizable» es el estado
+              // del OWNER recién activado. No se expone el hash: sólo si
+              // hay uno, que es lo que la tabla necesita saber.
+              passwordHash: true,
             },
           },
           stores: {
@@ -492,6 +503,20 @@ export async function registerSuperAdminTenantsRoutes(
       // ambos pero el front sólo lo pinta en DRAFT.
       const onboardingHealth = await computeOnboardingHealth(prisma, tenant.id);
       const ownerUser = tenant.users.find((u) => u.role === "OWNER") ?? null;
+      // No exponer al cajero técnico al super-admin como si fuera un
+      // usuario real — sale en el panel de modo prueba aparte.
+      const usuariosVisibles = tenant.users.filter(
+        (u) => !u.isTestCashier && u.deletedAt == null,
+      );
+      // primer-acceso · la invitación viva de cada usuario visible. Una
+      // consulta por usuario y no una sola con `IN`: son uno o dos, y el
+      // `where` de «viva» vive en una función que ya existe en vez de
+      // repetirse aquí con el riesgo de olvidar el `usedAt`.
+      const invitaciones = new Map<string, Date>();
+      for (const u of usuariosVisibles) {
+        const hasta = await invitacionPendienteHasta(prisma, u.id);
+        if (hasta) invitaciones.set(u.id, hasta);
+      }
       return {
         id: tenant.id,
         name: tenant.name,
@@ -564,18 +589,23 @@ export async function registerSuperAdminTenantsRoutes(
         blockedAt: tenant.blockedAt?.toISOString() ?? null,
         blockedReason: tenant.blockedReason,
         ownerEmail: ownerUser?.email ?? null,
-        users: tenant.users
-          // No exponer al cajero técnico al super-admin como si fuera
-          // un usuario real — sale en el panel de modo prueba aparte.
-          .filter((u) => !u.isTestCashier && u.deletedAt == null)
-          .map((u) => ({
-            id: u.id,
-            email: u.email,
-            role: u.role,
-            lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
-            twoFactorEnabled: u.twoFactorEnabledAt != null,
-            mustChangePassword: u.mustChangePasswordAt != null,
-          })),
+        users: usuariosVisibles.map((u) => ({
+          id: u.id,
+          email: u.email,
+          role: u.role,
+          lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+          twoFactorEnabled: u.twoFactorEnabledAt != null,
+          mustChangePassword: u.mustChangePasswordAt != null,
+          // primer-acceso · «Invitación pendiente (caduca dd/mm)» en vez
+          // de «Pendiente de cambiar password». Es la fecha del enlace
+          // vivo, no una columna del usuario: el estado lo cuenta el
+          // token, y así no hay dos sitios que puedan discrepar.
+          invitacionPendienteHasta:
+            invitaciones.get(u.id)?.toISOString() ?? null,
+          // Y si no tiene contraseña NI invitación viva, el enlace
+          // caducó: la tabla lo dice y ofrece reenviar.
+          sinContrasena: u.passwordHash == null,
+        })),
         stores: tenant.stores.map((s) => ({
           id: s.id,
           name: s.name,
@@ -2845,6 +2875,10 @@ export async function registerSuperAdminTenantsRoutes(
           // puesta-en-marcha (ADR-021) · probar el TPV ya no depende de
           // DRAFT, depende de que la cuenta no facture.
           facturaDesde: true,
+          // primer-acceso (decisión 5) · los dos datos que deciden la
+          // marca y el nombre del correo de bienvenida.
+          residenciaEnabled: true,
+          fiscalProfile: true,
         },
       });
       if (!tenant) {
@@ -2901,13 +2935,28 @@ export async function registerSuperAdminTenantsRoutes(
     },
   );
 
-  // ── Activar tenant: crear OWNER, mandar email, purgar pruebas ───────
+  // ── Activar tenant: crear OWNER, mandar la invitación, purgar ───────
   //
   // Frente 6 del prompt B-OnboardingV2. Valida health=ready, crea el
-  // OWNER user con password temporal, transiciona el tenant a ACTIVE y
-  // borra los rastros del modo prueba. Devolvemos la tempPassword una
-  // sola vez para que el super-admin la copie al cliente offline si el
-  // email no llegara.
+  // OWNER, transiciona el tenant a ACTIVE y borra los rastros del modo
+  // prueba.
+  //
+  // ── primer-acceso (decisión 2) · SIN CONTRASEÑA PROVISIONAL ─────────
+  //
+  // Hasta aquí esto generaba una contraseña de 16 caracteres raros, la
+  // mandaba por correo y la devolvía en la respuesta, y en el primer
+  // acceso se obligaba a cambiarla: dos contraseñas para entrar una vez.
+  //
+  // Ahora el OWNER **nace sin contraseña utilizable** (`passwordHash:
+  // null`, que `/auth/login` ya rechaza con su 401 genérico) y con una
+  // invitación pendiente de 7 días. Lo que se devuelve una vez es el
+  // ENLACE, para el botón «Copiar enlace» del super-admin cuando el
+  // correo no llega y hay que mandárselo por otro canal.
+  //
+  // Y `mustChangePasswordAt` se queda a `null`: el estado «le falta
+  // entrar por primera vez» ya lo cuenta la invitación viva, y tenerlo en
+  // dos sitios era lo que dejaba a un propietario con la contraseña
+  // elegida y el aviso puesto.
   app.post(
     "/super-admin/tenants/:id/activate",
     {
@@ -2947,6 +2996,10 @@ export async function registerSuperAdminTenantsRoutes(
           // puesta-en-marcha (ADR-021) · probar el TPV ya no depende de
           // DRAFT, depende de que la cuenta no facture.
           facturaDesde: true,
+          // primer-acceso (decisión 5) · los dos datos que deciden la
+          // marca y el nombre del correo de bienvenida.
+          residenciaEnabled: true,
+          fiscalProfile: true,
         },
       });
       if (!tenant) {
@@ -2987,8 +3040,6 @@ export async function registerSuperAdminTenantsRoutes(
         });
       }
 
-      const tempPassword = generateTemporaryPassword();
-      const passwordHash = await hashPassword(tempPassword);
       // v1.3-piloto-feedback · Lote 1: el OWNER también se loguea en el
       // TPV como cajero por defecto, así que generamos el pinHash en el
       // mismo activate y devolvemos el PIN en plano una vez para que el
@@ -3021,25 +3072,25 @@ export async function registerSuperAdminTenantsRoutes(
           data: {
             tenantId: id,
             email: lowerEmail,
-            // clinica-8 (fase B, 11) · EL NOMBRE DE LA ACTIVACIÓN LLEGA A
-            // PERSONAL.
+            // primer-acceso · el nombre que teclea el implantador se
+            // GUARDA. Antes sólo viajaba al correo y a la auditoría, y la
+            // página de bienvenida tiene que poder decir «Hola Carmen»
+            // sin pedirle que se presente otra vez.
             //
-            // `ownerName` se pedía en el formulario, se usaba para el
-            // email de bienvenida y para la auditoría, y **no se
-            // escribía en la fila**. Así que la propietaria nacía sin
-            // `alias` y su EMAIL era lo que el TPV pintaba en «Atiende»,
-            // en «Firmada por», en el informe de la paciente y en la
-            // barra de abajo (auditoría del 18-10, punto 17).
-            //
-            // Va en el mismo `create` y no en un `update` después: el
-            // nombre es parte de nacer, no un arreglo posterior, y un
-            // `update` best-effort fuera de la transacción dejaría
-            // cuentas con nombre y cuentas sin él según si falló.
+            // clinica-8 (fase B, 11) · y los dos bloques llegaron a esta
+            // misma línea por caminos distintos. Aquí hacía falta porque
+            // sin `alias` el TPV pintaba el EMAIL de la propietaria en
+            // «Atiende», en «Firmada por», en el informe de la paciente y
+            // en la barra de abajo (auditoría del 18-10, punto 17). La
+            // línea es una sola; lo que la sostiene son dos razones, y
+            // las dos quedan dichas para que nadie la quite pensando que
+            // sólo sirve para una.
             alias: body.ownerName.trim(),
-            passwordHash,
+            // Sin contraseña utilizable: se entra con la invitación.
+            passwordHash: null,
             pinHash,
             role: "OWNER",
-            mustChangePasswordAt: new Date(),
+            mustChangePasswordAt: null,
           },
           select: { id: true, email: true, alias: true },
         });
@@ -3047,7 +3098,11 @@ export async function registerSuperAdminTenantsRoutes(
           where: { id },
           data: { onboardingState: "ACTIVE" },
         });
-        return { owner, tenant: t };
+        // Dentro de la transacción a propósito: si la activación se
+        // deshace, la invitación se deshace con ella. Un enlace vivo
+        // apuntando a un OWNER que no existe sería un 410 sin explicación.
+        const invitacion = await crearInvitacion(tx, owner.id);
+        return { owner, tenant: t, invitacion };
       });
 
       // Limpieza best-effort: el tenant ya está ACTIVE y el OWNER creado.
@@ -3090,19 +3145,30 @@ export async function registerSuperAdminTenantsRoutes(
       }
 
       try {
-        await sendOwnerWelcomeEmail({
+        await sendOwnerInviteEmail({
           ownerEmail: activated.owner.email,
           ownerName: body.ownerName,
-          tempPassword,
+          enlace: activated.invitacion.enlace,
+          caducaEl: activated.invitacion.caducaEl,
+          // Decisión 5 · la marca la decide UNA función según los módulos:
+          // una residencia no recibe un correo que diga «Mipiacetpv».
+          marca: marcaDelCorreo({
+            residenciaEnabled: tenant.residenciaEnabled,
+            razonSocial: fiscalLegalName(tenant.fiscalProfile),
+            nombreDeLaCuenta: tenant.name,
+          }),
           // H1 · sin caja el email no habla de PIN ni de TPV; sin Holded
-          // no le pide al propietario que lo conecte.
+          // no le pide al propietario que lo conecte. Decisión 7: el PIN
+          // de caja se sigue mandando como hoy.
           ownerPin,
           expectsHolded: tenantHasHolded,
         });
       } catch (err) {
+        // Sin el enlace ni el token en el log. Lo que salva la activación
+        // es «Copiar enlace» en la respuesta, no un log que nadie lee.
         request.log.error(
           { event: "super_admin.activate_email_failed", tenantId: id, err },
-          "Email de bienvenida falló al activar — temporal visible en response",
+          "Email de invitación falló al activar — el enlace va en la respuesta",
         );
       }
 
@@ -3117,7 +3183,14 @@ export async function registerSuperAdminTenantsRoutes(
           email: activated.owner.email,
           name: body.ownerName,
         },
-        tempPassword,
+        // primer-acceso · lo que sustituye a la contraseña temporal. El
+        // enlace va una sola vez, para «Copiar enlace»; después se
+        // consigue otro con «Reenviar invitación», que anula este.
+        invitacion: {
+          email: activated.owner.email,
+          enlace: activated.invitacion.enlace,
+          caducaEl: activated.invitacion.caducaEl.toISOString(),
+        },
         // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero. Una
         // sola vez en la respuesta; el OWNER puede regenerarlo desde
         // `/auth/me/regenerate-owner-pin` si lo pierde.
@@ -3127,6 +3200,157 @@ export async function registerSuperAdminTenantsRoutes(
         ownerPin,
         cashierPinIssued: issueCashierPin,
         purge,
+      });
+    },
+  );
+
+  // ── primer-acceso · Reenviar la invitación ──────────────────────────
+  //
+  // Para cuando el correo no llega y hay que mandárselo por otro canal, y
+  // para el enlace que caducó. Anula el anterior y devuelve el nuevo, para
+  // que el implantador pueda copiarlo en la misma llamada.
+  //
+  // ── Y SIRVE PARA LO QUE YA HAY EN PRODUCCIÓN ────────────────────────
+  //
+  // Jardín de Gredos se activó el 23-10-2026 con el flujo viejo: su OWNER
+  // tiene una contraseña provisional y `mustChangePasswordAt` puesto. Así
+  // que reenviar **anula la provisional** (`passwordHash: null`), limpia
+  // el aviso y bumpa `tokenVersion`. Es lo que hace que el despliegue no
+  // necesite tocar la base a mano.
+  //
+  // Lo que NO hace: valer para un propietario que ya eligió su contraseña
+  // y lleva seis meses trabajando. A ése, reenviar le dejaría la cuenta
+  // sin contraseña hasta que abriera el correo — y el super-admin que
+  // pulsa el botón por costumbre no lo esperaría. Para ése existe
+  // «¿olvidaste tu contraseña?», que no le quita nada mientras no lo use.
+  app.post(
+    "/super-admin/tenants/:id/reenviar-invitacion",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          fiscalProfile: true,
+          residenciaEnabled: true,
+          holdedApiKeyCiphertext: true,
+          users: {
+            where: { role: "OWNER", deletedAt: null },
+            orderBy: { createdAt: "asc" },
+            select: {
+              id: true,
+              email: true,
+              alias: true,
+              passwordHash: true,
+              mustChangePasswordAt: true,
+            },
+          },
+        },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+      const owner = tenant.users[0];
+      if (!owner) {
+        return reply.code(409).send({
+          error: "SIN_PROPIETARIO",
+          message:
+            "Esta cuenta no tiene propietario todavía. Actívala primero: el alta del propietario manda su invitación.",
+        });
+      }
+      // Ya trabaja con su contraseña elegida: reenviar le dejaría la
+      // cuenta sin contraseña. Se dice qué hacer en su lugar.
+      if (owner.passwordHash != null && owner.mustChangePasswordAt == null) {
+        return reply.code(409).send({
+          error: "YA_TIENE_CONTRASENA",
+          message:
+            "Este propietario ya eligió su contraseña. Si la ha perdido, que use «¿Olvidaste tu contraseña?» en la pantalla de acceso.",
+        });
+      }
+
+      const anulabaProvisional = owner.passwordHash != null;
+      const invitacion = await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: owner.id },
+          data: {
+            // La provisional del flujo viejo queda muerta aquí mismo.
+            passwordHash: null,
+            mustChangePasswordAt: null,
+            tokenVersion: { increment: 1 },
+          },
+        });
+        return crearInvitacion(tx, owner.id);
+      });
+
+      try {
+        await writeAudit({
+          prisma,
+          superAdminId: ctx.superAdminId,
+          action: "reenviar_invitacion",
+          tenantId: id,
+          metadata: {
+            ...extractRequestSignals(request),
+            // El email sí; el enlace y el token NO — ni aquí ni en el log.
+            ownerEmail: owner.email,
+            caducaEl: invitacion.caducaEl.toISOString(),
+            anulabaProvisional,
+          },
+        });
+      } catch (err) {
+        request.log.error(
+          { event: "super_admin.reenviar_invitacion_audit_failed", tenantId: id, err },
+          "Auditoría del reenvío de invitación falló — no bloquea el reenvío",
+        );
+      }
+
+      let emailEnviado = true;
+      try {
+        await sendOwnerInviteEmail({
+          ownerEmail: owner.email,
+          ownerName: owner.alias?.trim() || owner.email.split("@")[0]!,
+          enlace: invitacion.enlace,
+          caducaEl: invitacion.caducaEl,
+          marca: marcaDelCorreo({
+            residenciaEnabled: tenant.residenciaEnabled,
+            razonSocial: fiscalLegalName(tenant.fiscalProfile),
+            nombreDeLaCuenta: tenant.name,
+          }),
+          // Sin PIN: el reenvío no tiene el PIN en claro (nunca se guarda)
+          // y el propietario lo regenera desde «Mi cuenta». Decisión 7.
+          expectsHolded: tenant.holdedApiKeyCiphertext != null,
+        });
+      } catch (err) {
+        emailEnviado = false;
+        request.log.error(
+          { event: "super_admin.reenviar_invitacion_email_failed", tenantId: id, err },
+          "Email del reenvío de invitación falló — el enlace va en la respuesta",
+        );
+      }
+
+      return reply.code(200).send({
+        invitacion: {
+          email: owner.email,
+          enlace: invitacion.enlace,
+          caducaEl: invitacion.caducaEl.toISOString(),
+        },
+        emailEnviado,
+        anulabaProvisional,
       });
     },
   );

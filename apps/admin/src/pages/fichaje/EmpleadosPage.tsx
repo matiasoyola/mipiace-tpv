@@ -88,7 +88,7 @@ export function EmpleadosPage() {
     }
   }
 
-  if (!rows) return <CenteredLoader label="Cargando empleados…" />;
+  if (!rows) return <CenteredLoader label="Cargando empleados…" error={error} />;
 
   const activos = rows.filter((r) => r.active);
   const bajas = rows.filter((r) => !r.active);

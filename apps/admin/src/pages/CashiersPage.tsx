@@ -90,7 +90,7 @@ export function CashiersPage() {
     }
   }
 
-  if (!cashiers) return <CenteredLoader label="Cargando cajeros…" />;
+  if (!cashiers) return <CenteredLoader label="Cargando cajeros…" error={error} />;
   const isOwner = readCurrentRole() === "OWNER";
 
   return (
