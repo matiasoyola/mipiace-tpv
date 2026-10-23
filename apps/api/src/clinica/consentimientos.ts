@@ -31,6 +31,7 @@
 
 import type { Prisma, PrismaClient } from "@mipiacetpv/db";
 import {
+  claseDeLaPlantilla,
   consentimientoVigente,
   consentimientosQueFaltan,
   firmanteCompleto,
@@ -385,6 +386,34 @@ export interface VistaDeConsentimientos {
   pideLaCita: readonly string[];
 }
 
+/**
+ * historia-1 (D-95) · **DE QUÉ PANTALLA ES ESTA LISTA.**
+ *
+ * `CLINICA` enseña las plantillas de la clínica (las que cuelgan de un
+ * servicio y la de la primera foto). `RESIDENCIA`, las del ingreso de un
+ * residente.
+ *
+ * Hace falta porque las cinco plantillas viven en el mismo paquete (D-95:
+ * un solo mecanismo) y **cada pantalla tiene que ofrecer las suyas**. Sin
+ * esto, la podóloga vería «Consentimiento para que mi foto se vea en el
+ * centro» en la lista de una paciente de quiropodia, y la dirección de la
+ * residencia vería «Consentimiento para cirugía de uña» en la de un
+ * residente. Las dos cosas son ruido, y el ruido en una lista de
+ * consentimientos es lo que hace que se firme el que no toca.
+ *
+ * Lo que NO cambia es la firma: `firmarConsentimiento` acepta cualquier
+ * plantilla, porque el ámbito es de la pantalla y no del documento.
+ */
+export type AmbitoDeLasPlantillas = "CLINICA" | "RESIDENCIA";
+
+const DISPARADORES_DEL_AMBITO: Record<
+  AmbitoDeLasPlantillas,
+  readonly string[]
+> = {
+  CLINICA: ["SERVICIO", "PRIMERA_FOTO"],
+  RESIDENCIA: ["INGRESO_RESIDENTE"],
+};
+
 /** Todo lo que la pantalla de consentimientos pinta, de una vez. */
 export async function vistaDeConsentimientos(
   prisma: PrismaClient,
@@ -393,6 +422,10 @@ export async function vistaDeConsentimientos(
     clientId: string;
     /** Los servicios de la cita, si se abre desde una. */
     servicioIds?: readonly string[];
+    /** historia-1 (D-95) · **`CLINICA` por defecto**, que es lo que
+     *  clinica-4 hacía: la ruta de la clínica no cambia de
+     *  comportamiento por este parámetro. */
+    ambito?: AmbitoDeLasPlantillas;
   },
 ): Promise<VistaDeConsentimientos> {
   const [filas, pideLaCita] = await Promise.all([
@@ -405,8 +438,11 @@ export async function vistaDeConsentimientos(
   const cuenta = paraLaCuenta(filas);
   // clinica-7 · UNA lectura de clave para toda la lista.
   const dek = await dekONada(input.tenantId, prisma);
+  const disparadores = DISPARADORES_DEL_AMBITO[input.ambito ?? "CLINICA"];
   return {
-    plantillas: PLANTILLAS_VIGENTES.map((p) => {
+    plantillas: PLANTILLAS_VIGENTES.filter((p) =>
+      disparadores.includes(p.disparador),
+    ).map((p) => {
       const vigente = consentimientoVigente(cuenta, p.id);
       const fila = vigente ? filas.find((f) => f.id === vigente.id) : null;
       return {
@@ -420,6 +456,10 @@ export async function vistaDeConsentimientos(
         vigente: fila ? aPantalla(fila, filas, dek) : null,
       };
     }),
+    // Y **los firmados van TODOS**, de cualquier ámbito. Es la pestaña
+    // «Documentos» de la historia, y esconder un consentimiento firmado
+    // porque es «de otra pantalla» sería esconder un documento de su
+    // expediente. Lo que se filtra es lo que se OFRECE para firmar.
     firmados: filas
       // Las filas de revocación no se enseñan como documentos: lo que se
       // enseña es la concesión, marcada como revocada. Dos líneas por el
@@ -618,7 +658,17 @@ export async function firmarConsentimiento(
     data: {
       tenantId: input.tenantId,
       clientId: input.clientId,
-      kind: "TREATMENT",
+      // historia-1 (D-95) · el `kind` sale de **la plantilla**, y no es
+      // un `TREATMENT` fijo. Con el fijo, las dos plantillas de la
+      // residencia —protección de datos e imagen— habrían escrito filas
+      // `TREATMENT`, y entonces el consentimiento de imagen que D-64 mira
+      // para pintar la foto en la puerta no lo habría encontrado nunca:
+      // esa comprobación busca `kind = IMAGE`.
+      //
+      // `claseDeLaPlantilla` devuelve `TREATMENT` cuando la plantilla no
+      // lo dice, que es lo que las tres de clinica-4 hacen. Nada de lo
+      // firmado antes cambia.
+      kind: claseDeLaPlantilla(plantilla),
       grantedAt: input.ahora,
       // `docRef` sigue siendo el puntero al documento, como en B1: aquí,
       // el nombre del fichero que la API sirve.

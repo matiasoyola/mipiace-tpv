@@ -7,13 +7,16 @@
 // (`textoCanonico`), que es la mitad que de verdad hace falta.
 
 export {
+  PLANTILLAS_DEL_INGRESO,
   PLANTILLAS_DE_SERVICIO,
   PLANTILLAS_IDS,
   PLANTILLAS_VIGENTES,
   PLANTILLA_DE_FOTOS,
+  claseDeLaPlantilla,
   plantillaDe,
   plantillaVigente,
   textoCanonico,
+  type ClaseDeConsentimiento,
   type DisparadorDePlantilla,
   type PlantillaDeConsentimiento,
   type PlantillaId,

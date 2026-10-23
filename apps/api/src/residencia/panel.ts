@@ -32,10 +32,12 @@
 
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
+  NOMBRE_DE_LA_AUSENCIA,
   addDays,
   calcularIndicadores,
   pinPorRenovar,
   cuantoVaHecho,
+  daysBetween,
   diaDelTurno,
   estaConfirmado,
   loQueNoSeHizo,
@@ -56,6 +58,7 @@ import { ventanaDelTurno } from "./relevo.js";
 // generar lo de quien no está, y las vueltas que la DUE tiene pendientes
 // de revisar.
 import { ausenciasDelPlan } from "./ausencias.js";
+import { estadoDeLosIngresos } from "./ingreso.js";
 import { obligacionesDelPanel, type OcurrenciaPintada } from "./obligaciones.js";
 
 /** Lo que hay abierto hoy. La primera fila, y la métrica de éxito. */
@@ -144,6 +147,53 @@ export interface PorArreglar {
     nombre: string;
     habitacion: string | null;
   }>;
+  /**
+   * historia-1 (D-92) · **LAS VUELTAS PENDIENTES DE REVISAR.**
+   *
+   * Quien vuelve de un hospital o de urgencias trae medicación cambiada e
+   * informes que alguien tiene que leer. Hasta que la DUE lo confirma con
+   * su firma, está aquí.
+   *
+   * Va en «lo que hay que arreglar» y no en «lo que hay abierto» porque
+   * no es una incidencia: nadie ha escalado nada, no suena en ningún
+   * móvil y no hay plazo. Es una tarea de la DUE que el panel no deja
+   * perder — y cuando existan PAI (historia-2) y medicación, se
+   * convertirá en sus tareas de revisión y conciliación.
+   */
+  vueltasPorRevisar: Array<{
+    clientId: string;
+    absenceId: string;
+    nombre: string;
+    habitacion: string | null;
+    /** De dónde volvió: «ingresado en el hospital», «en urgencias». */
+    deDonde: string;
+    /** Cuándo volvió, en ISO. */
+    volvioEn: string;
+    /** Cuántos días lleva la revisión sin hacer. Lo pinta el panel: a los
+     *  dos días, una conciliación de medicación sin hacer es un riesgo. */
+    diasEsperando: number;
+  }>;
+  /**
+   * historia-1 (D-94) · **LOS INGRESOS CON PENDIENTES.**
+   *
+   * Lo que D-94 pide del panel de dirección: hoy lo que falta de un
+   * ingreso se descubre cuando lo pide un inspector (R20).
+   *
+   * Sólo los que tienen algo pendiente, y los vencidos primero: un PAI
+   * inicial a 30 días que ya pasó es otra cosa que un contrato que falta
+   * desde ayer.
+   */
+  ingresosConPendientes: Array<{
+    clientId: string;
+    nombre: string;
+    ingreso: string;
+    pendientes: number;
+    vencidos: number;
+    /** Los nombres de lo que falta, para no tener que abrir la ficha.
+     *  Recortado a cinco: una lista de doce en una fila del panel no se
+     *  lee, y el resto se ve en su pantalla. */
+    queFalta: string[];
+  }>;
 }
 
 export interface Panel {
@@ -205,7 +255,7 @@ export async function loQueHayQueArreglar(
   tenantId: string,
   ahora: Date,
 ): Promise<PorArreglar> {
-  const [pins, ocupaciones] = await Promise.all([
+  const [pins, ocupaciones, vueltas, ingresos] = await Promise.all([
     prisma.carePin.findMany({
       where: { tenantId },
       select: {
@@ -256,6 +306,29 @@ export async function loQueHayQueArreglar(
         },
       },
     }),
+    // historia-1 (D-92) · las vueltas que piden revisión y nadie ha
+    // confirmado. El índice parcial
+    // `resident_absences_por_revisar_idx` es exactamente esta consulta.
+    prisma.residentAbsence.findMany({
+      where: {
+        tenantId,
+        reviewRequired: true,
+        reviewedAt: null,
+        endedAt: { not: null },
+      },
+      orderBy: { endedAt: "asc" },
+      select: {
+        id: true,
+        clientId: true,
+        kind: true,
+        endedAt: true,
+        client: { select: { firstName: true, lastName: true } },
+      },
+    }),
+    // historia-1 (D-94) · el estado de los ingresos. Es una función y no
+    // una consulta porque los elementos `auto` se COMPRUEBAN contra la
+    // realidad (la cama, la dieta, el plan): ver `ingreso.ts`.
+    estadoDeLosIngresos(prisma, tenantId, { hoy: utcToWallDate(ahora) }),
   ]);
 
   const pinesPorRenovar: PorArreglar["pinesPorRenovar"] = [];
@@ -292,7 +365,54 @@ export async function loQueHayQueArreglar(
   pinesPorRenovar.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
   residentesSinPlan.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
 
-  return { pinesPorRenovar, residentesSinPlan };
+  // ── historia-1 (D-92) · las vueltas por revisar ──────────────────
+  //
+  // La habitación sale de la misma ocupación que ya se leyó para «sin
+  // plan»: una consulta menos, y además es la correcta —la ocupación
+  // VIGENTE—, que es la que dice dónde hay que ir a verla.
+  const habitacionPorCliente = new Map(
+    ocupaciones.map((o) => [o.clientId, o.bed.room.number as string | null]),
+  );
+  const vueltasPorRevisar: PorArreglar["vueltasPorRevisar"] = vueltas.map((v) => ({
+    clientId: v.clientId,
+    absenceId: v.id,
+    nombre: `${v.client.firstName} ${v.client.lastName}`.trim(),
+    habitacion: habitacionPorCliente.get(v.clientId) ?? null,
+    deDonde: NOMBRE_DE_LA_AUSENCIA[v.kind],
+    volvioEn: v.endedAt!.toISOString(),
+    // Días de CALENDARIO del centro y no horas: «lleva 2 días» es lo que
+    // se entiende, y «lleva 38 horas» obliga a dividir.
+    diasEsperando: daysBetween(utcToWallDate(v.endedAt!), utcToWallDate(ahora)),
+  }));
+
+  // ── historia-1 (D-94) · los ingresos con pendientes ──────────────
+  //
+  // `estadoDeLosIngresos` ya los ordena con los que más deben arriba, así
+  // que aquí sólo se filtra y se recorta.
+  const ingresosConPendientes: PorArreglar["ingresosConPendientes"] = ingresos
+    .filter((i) => i.pendientes > 0)
+    .map((i) => ({
+      clientId: i.clientId,
+      nombre: i.nombre,
+      ingreso: i.ingreso,
+      pendientes: i.pendientes,
+      vencidos: i.vencidos,
+      queFalta: i.elementos
+        .filter((e) => !e.hecho)
+        // Los vencidos primero dentro de la fila, por lo mismo que el
+        // orden de la lista: un plazo pasado es otra cosa que algo que
+        // falta.
+        .sort((a, b) => Number(b.vencido) - Number(a.vencido))
+        .slice(0, 5)
+        .map((e) => e.nombre),
+    }));
+
+  return {
+    pinesPorRenovar,
+    residentesSinPlan,
+    vueltasPorRevisar,
+    ingresosConPendientes,
+  };
 }
 
 // ── 1 · QUÉ HAY ABIERTO HOY ──────────────────────────────────────────

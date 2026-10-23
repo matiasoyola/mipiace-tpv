@@ -104,8 +104,15 @@ export interface Barrido {
  */
 export async function referenciados(): Promise<Map<ClaseDeFichero, Set<string>>> {
   const prisma = getPrisma();
-  const [fotos, consentimientos, informes, residentes, voces, evidencias] =
-    await Promise.all([
+  const [
+    fotos,
+    consentimientos,
+    informes,
+    residentes,
+    voces,
+    evidencias,
+    contratos,
+  ] = await Promise.all([
       prisma.clinicalPhoto.findMany({ select: { fileName: true } }),
       prisma.clientConsent.findMany({
         where: { pdfFileName: { not: null } },
@@ -127,6 +134,15 @@ export async function referenciados(): Promise<Map<ClaseDeFichero, Set<string>>>
         where: { evidenceFileName: { not: null } },
         select: { evidenceFileName: true },
       }),
+      // historia-1 (D-94) · el contrato de estancia adjunto al elemento
+      // del ingreso. **La clase nueva entra en el barrido el mismo día
+      // que nace**: un barrido que no conoce una clase deja sus ficheros
+      // acumulándose para siempre, que es justo la deuda que residencia-6
+      // vino a cerrar.
+      prisma.admissionChecklistItem.findMany({
+        where: { fileName: { not: null } },
+        select: { fileName: true },
+      }),
     ]);
 
   const de = (xs: Array<Record<string, string | null>>, campo: string): Set<string> =>
@@ -141,6 +157,7 @@ export async function referenciados(): Promise<Map<ClaseDeFichero, Set<string>>>
     ["RESIDENTE", de(residentes, "photoFileName")],
     ["VOZ", de(voces, "voiceFileName")],
     ["EVIDENCIA", de(evidencias, "evidenceFileName")],
+    ["CONTRATO", de(contratos, "fileName")],
   ]);
 }
 
