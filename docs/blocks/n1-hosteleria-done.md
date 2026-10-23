@@ -495,6 +495,53 @@ que es lo que `principio-venta-bajo-estres` (regla 6) ya manda.
 
 Captura `03-buscando-teclado-tost`.
 
+### 9.2-bis · Una SEGUNDA sesión de Code en el mismo worktree
+
+Mientras se medía, una segunda sesión de Claude Code abierta por error con este
+mismo encargo (PID 21932, arrancada 23-10 a las 11:38, prompt «Retomas el bloque
+n1-hosteleria… con último commit ed6c12f») estaba **conduciendo el mismo N1 y
+escribiendo en esta misma carpeta**. Es la causa de que la pantalla cambiara
+entre medidas: mesa B2 → mapa → filtro Terraza → mesa T1 → búsqueda, sin que
+nadie de esta sesión tocara nada.
+
+Dejó **19 capturas** (`01-arranque-n1` … `19-reintento`), diez de ellas
+commiteadas por error en `b61996c`. **Se retiran todas**: no se sabe con qué
+criterio se tomaron ni qué estado tenía el aparato en cada una, y mezcladas con
+las de esta pasada no se puede decir cuál enseña qué. Las seis que se quedan son
+las de esta sesión (`00-estado-al-empezar`, `01-mapa-terraza`,
+`02-venta-familia-plegada`, `03-buscando-teclado`, `03-buscando-teclado-tost`,
+`04-tras-back`).
+
+Y dejó estado en Sirope-ensayo, consultado en producción con SELECT de sólo
+lectura:
+
+| estado | mesa | total | hora |
+|---|---|---|---|
+| VOIDED | B2 | 0,00 € | 11:41:23 |
+| VOIDED | T1 | 0,00 € | 11:42:41 |
+| **DRAFT** | **T1** | **9,00 €** | **11:46:53** |
+
+**Ningún ticket cobrado, así que ningún `TEST` que borrar.** Lo que queda es la
+mesa T1 abierta con 9,00 € y una comanda de cocina (nº 1, sección BARRA, mesa
+T1, enviada 11:54:35) con `lan_received_at` **nulo**: el AP11 nunca la recibió.
+Las dos cosas se van con «Resetear ensayo».
+
+**Lección, y vale para cualquier bloque con hierro:** dos sesiones en el mismo
+worktree no sólo se pisan los ficheros — se pisan **el aparato**. Antes de una
+pasada por adb, comprobar que no hay otra sesión viva
+(`ps aux | grep -i claude` y el `cwd` de cada pid con `lsof`).
+
+### 9.2-ter · El envío a cocina no llegó
+
+La comanda nº 1 salió del N1 pero el AP11 no la recibió: el TPV lo dijo en
+pantalla —«La comanda no llegó a imprimirse · Cocina no recibe ni por internet
+ni por la wifi, y el papel tampoco salió»— y la base lo confirma
+(`lan_received_at` nulo).
+
+No es de este bloque —no se ha tocado nada del envío— pero **bloquea el paso del
+§9 que pide ver la comanda llegar al AP11**. Para cerrar la pasada hace falta el
+KDS del AP11 levantado y vinculado.
+
 ### 9.3 · Lo que queda de la pasada
 
 Sin hacer todavía: 3–6 líneas con dos cafés distintos, comanda revisada, envío a
