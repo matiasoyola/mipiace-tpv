@@ -6194,7 +6194,13 @@ model ResidentProfile {
 
   /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
   /// ingreso y pedirla sería un campo que se rellena mal.
-  admissionDate          DateTime  @map("admission_date") @db.Date
+  ///
+  /// alta-minima · **OPCIONAL desde el 23-10-2026.** El primer día de una
+  /// residencia real lo que hay es un listado de nombres: la señora ya
+  /// vive aquí y no saber su fecha de ingreso no hace que necesite menos
+  /// cuidados. Lo que falta lo enumera `datosQueFaltan` y el programa no
+  /// deja de recordarlo; lo que NO puede es dejarla fuera del programa.
+  admissionDate          DateTime? @map("admission_date") @db.Date
   /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
   /// aquí. El motivo es texto corto y libre a propósito: «se va con su
   /// hija», «traslado a hospital», «fallecimiento». Un enum habría
@@ -6211,11 +6217,24 @@ model ResidentProfile {
   /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
   /// la Ley de Dependencia (lo reconoce la administración, y puede no
   /// tenerlo). Son dos cosas distintas: ver los enums.
-  dependencyLevel DependencyLevel  @map("dependency_level")
+  ///
+  /// alta-minima · el NIVEL también es opcional, y arrastra una
+  /// consecuencia: **sin nivel no se precarga plan de cuidados** (no hay
+  /// plantilla que aplicar). El residente nace sin plan, el parte ya sabe
+  /// enseñarlo sin ruido (residencia-6 §4) y «como siempre» y «algo no va
+  /// bien» funcionan igual —las dimensiones OBS son del centro, no del
+  /// plan—. «Plan de cuidados» entra en `datosQueFaltan` como
+  /// imprescindible hasta que la dirección lo cargue.
+  dependencyLevel DependencyLevel? @map("dependency_level")
   dependencyGrade DependencyGrade? @map("dependency_grade")
   /// Privada, concertada o temporal. Los pagadores y la vigencia de la
   /// plaza son Fase 3.
-  placeType       PlaceType        @map("place_type")
+  ///
+  /// alta-minima · opcional, y es el único de los tres que el listado del
+  /// primer día suele traer (segunda columna del Excel). Si es
+  /// `CONCERTADA`, el grado reconocido pasa a imprescindible: sin grado no
+  /// se factura a la Junta.
+  placeType       PlaceType?       @map("place_type")
 
   /// El FAMILIAR RESPONSABLE del PAI: a quién se llama. Las tres columnas
   /// son opcionales porque hay residentes sin familia localizable, y un
