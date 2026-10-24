@@ -29,6 +29,26 @@
 // abre su lista, y esa lista es su propia ruta (las de residencia-4 para
 // el libro, las de aquí para los relevos y las obligaciones). Traerlas
 // todas sería mandar al navegador el libro entero para pintar un número.
+//
+// ── cuadro-de-control · Y AHORA TAMBIÉN LO PIDE LA BARRA LATERAL ────
+//
+// Esta misma respuesta pinta los contadores del menú de una residencia
+// («Incidencias 4», «Relevos 2»), y es a propósito que salga de aquí y
+// no de una ruta de contadores: el número del menú y el número del panel
+// tienen que ser **el mismo número**, y con dos fuentes se separan el día
+// que una de las dos cambie de criterio.
+//
+// Lo que se añadió en este bloque es poco y de la misma forma que el
+// resto —todo cabe en el `Promise.all` y nada recorre el plan dos veces—:
+//
+//   · `centro` y `yo` (`laCabecera`): el nombre del centro y sus plazas
+//     para la cabecera de la barra, cuántos residentes hay dentro, y
+//     quién mira para el saludo.
+//   · `abierto.noPuedeEsperar`: las CINCO incidencias abiertas más
+//     graves, una fila cada una. Es la única lista nueva, y está acotada
+//     en el `take`.
+//   · `turno.turno.empiezaEn` / `.terminaEn`: las horas del turno en
+//     curso, para «turno de mañana, hasta las 15:00».
 
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
@@ -54,9 +74,60 @@ import {
   type ValorDeIndicador,
 } from "@mipiacetpv/residencia-plan";
 
+// cuadro-de-control · el nombre en castellano del tipo de incidencia,
+// el MISMO mapa que usan el libro, la guardia y el parte de relevo: «lo
+// que no puede esperar» no puede nombrar una caída de otra forma que la
+// lista que abre.
+import { NOMBRE_DEL_TIPO } from "./catalogo/plantilla-de-gravedad.js";
 import { FRECUENCIA_SELECT, deColumnas } from "./frecuencia-columnas.js";
 import { ventanaDelTurno } from "./relevo.js";
 import { obligacionesDelPanel, type OcurrenciaPintada } from "./obligaciones.js";
+
+/**
+ * cuadro-de-control · **LO QUE NO PUEDE ESPERAR**, una fila cada una.
+ *
+ * Las cifras de arriba contestan «cuántas»; esto contesta «cuáles», que
+ * es la pregunta que la dirección se hace a continuación y que hoy le
+ * cuesta un toque y una lista de cien filas.
+ *
+ * ── CINCO, Y LAS CINCO MÁS GRAVES ──────────────────────────────────
+ *
+ * `take` de cinco sobre el mismo orden que el libro (gravedad y, dentro,
+ * antigüedad). Lo que pasa de cinco se ve en «Ver incidencias»: un panel
+ * que crece con el centro deja de caber en una pantalla, y una lista de
+ * treinta filas en el panel es el libro otra vez.
+ *
+ * ── SIN DESCRIPCIÓN, COMO LA LISTA ─────────────────────────────────
+ *
+ * `descriptionCifrado` no se pide ni se descifra: el título de la fila es
+ * el **tipo** («Caída», «Avería») y la habitación, que es lo que la lista
+ * del libro ya enseña y por la misma razón (es salud, y se descifra
+ * cuando alguien abre la ficha de verdad).
+ *
+ * ── EL ESTADO LO COMPONE LA PANTALLA ───────────────────────────────
+ *
+ * Aquí van los HECHOS —no tiene constancia de familia, espera que la
+ * cierre otro, tiene un aviso sin acusar— y no la frase. Es lo que hace
+ * ya `GET /residencia/incidencias`, y mezclar las dos formas dejaría dos
+ * sitios donde se decide cómo se lee una incidencia.
+ */
+export interface IncidenciaQueNoEspera {
+  id: string;
+  nivel: string;
+  tipo: string;
+  nombreDelTipo: string;
+  sujeto: string;
+  residente: string | null;
+  habitacion: string | null;
+  abiertaEn: string;
+  /** De residente y sin una sola constancia de familia (D-32 a D-34):
+   *  no se puede cerrar hasta decidir si se comunica o no. */
+  sinConstanciaDeFamilia: boolean;
+  /** N3-N4: la cierra otra persona (D-28). */
+  esperaCierreDeOtro: boolean;
+  /** Los canales con un aviso de guardia vivo y sin acusar. */
+  avisosSinAcuse: string[];
+}
 
 /** Lo que hay abierto hoy. La primera fila, y la métrica de éxito. */
 export interface QueHayAbierto {
@@ -71,6 +142,8 @@ export interface QueHayAbierto {
   /** N3-N4 abiertas que esperan que las cierre otra persona (D-28). */
   esperandoCierreDeOtro: number;
   total: number;
+  /** cuadro-de-control · las cinco más graves, una fila cada una. */
+  noPuedeEsperar: IncidenciaQueNoEspera[];
 }
 
 /** El bloque de relevos. */
@@ -99,7 +172,19 @@ export interface RelevosDelPanel {
 
 /** El turno en curso, por planta. */
 export interface TurnoEnCurso {
-  turno: { id: string; code: string; name: string } | null;
+  /** cuadro-de-control · `empiezaEn` y `terminaEn` son las dos «HH:MM»
+   *  del turno del centro, y existen para la cabecera del panel: «turno
+   *  de mañana, **hasta las 15:00**». Sin la hora de fin, «turno de
+   *  mañana» no dice cuánto queda, que es lo que la dirección mira a las
+   *  14:40. Se devuelven tal cual están en `CenterShift` (no se
+   *  formatean) porque la hora la lee una pantalla, no un humano. */
+  turno: {
+    id: string;
+    code: string;
+    name: string;
+    empiezaEn: string;
+    terminaEn: string;
+  } | null;
   careDay: string;
   plantas: Array<{
     floorId: string | null;
@@ -178,7 +263,54 @@ export interface FichasIncompletas extends ResumenDeFichas {
 /** Cuántos nombres lleva la tarjeta. El resto los recorre el botón. */
 const NOMBRES_EN_LA_TARJETA = 5;
 
-export interface Panel {
+/**
+ * cuadro-de-control · cuántas filas lleva «lo que no puede esperar».
+ *
+ * **Cuatro**, y el número lo decidió el bucle visual: con cinco, el panel
+ * medía 1010 px en una pantalla de 768 y las obligaciones de hoy —que son
+ * lo otro que hay que mirar— se quedaban bajo el pliegue. El bloque dice
+ * «máximo 4-5»; cuatro es lo que cabe.
+ */
+const CUANTAS_NO_PUEDEN_ESPERAR = 4;
+
+/**
+ * cuadro-de-control · **LA CABECERA: EL CENTRO Y QUIÉN MIRA.**
+ *
+ * Tres cosas que el panel no traía y que la pantalla necesita para dejar
+ * de parecer un listado y parecer un cuadro de control:
+ *
+ *   · **El nombre del centro y sus plazas**, que es lo que sustituye a la
+ *     marca del TPV arriba de la barra lateral (decisión 3). «Jardín de
+ *     Gredos · Residencia · 49 plazas»: quien dirige un centro no
+ *     necesita que le recuerden de quién es el software, necesita saber
+ *     en qué centro está — y con dos centros en la misma mano, eso es lo
+ *     único que los distingue.
+ *   · **Cuántos residentes hay dentro**, para la derecha de la cabecera.
+ *   · **Quién mira**, para el saludo. Sale del alias (o del trozo de
+ *     delante del correo), igual que en todas las firmas de residencia.
+ *
+ * `fuera` es `null` **a propósito y hasta que existan las ausencias**:
+ * hoy no hay ninguna tabla que diga que doña Carmen está en el hospital,
+ * así que un `0` sería afirmar que no hay nadie fuera, y eso no se sabe.
+ * `null` lo lee la pantalla como «no lo enseñes» y deja sólo el total
+ * (decisión 4 del bloque).
+ */
+export interface CabeceraDelPanel {
+  centro: {
+    nombre: string;
+    /** Camas ACTIVAS del centro. Las plazas son las camas: no hay una
+     *  columna de «plazas» que pueda discrepar del edificio. */
+    plazas: number;
+    /** Residentes con una cama vigente ahora mismo. */
+    dentro: number;
+    /** Residentes fuera del centro. `null` mientras no existan las
+     *  ausencias; ver la nota de arriba. */
+    fuera: number | null;
+  };
+  yo: { nombre: string };
+}
+
+export interface Panel extends CabeceraDelPanel {
   abierto: QueHayAbierto;
   relevos: RelevosDelPanel;
   obligaciones: {
@@ -212,9 +344,9 @@ export interface Panel {
 /** Arma el panel entero. Una llamada. */
 export async function construirPanel(
   prisma: PrismaClient,
-  input: { tenantId: string; ahora: Date },
+  input: { tenantId: string; ahora: Date; userId: string },
 ): Promise<Panel> {
-  const { tenantId, ahora } = input;
+  const { tenantId, ahora, userId } = input;
   const hoy = utcToWallDate(ahora);
   const mes = hoy.slice(0, 7);
 
@@ -227,6 +359,7 @@ export async function construirPanel(
     fichasIncompletas,
     indicadores,
     cuantosResidentes,
+    cabecera,
   ] = await Promise.all([
     queHayAbierto(prisma, tenantId),
     relevosDelPanel(prisma, tenantId, ahora),
@@ -250,9 +383,17 @@ export async function construirPanel(
     // no está empezando); «¿cuántas fichas hay a medias?» sólo con los
     // vivos, porque la de quien se fue no se va a completar nunca.
     prisma.residentProfile.count({ where: { tenantId } }),
+    // cuadro-de-control · la cabecera, en el MISMO `Promise.all` y por la
+    // misma razón que las dos de arriba: son cuatro lecturas por índice
+    // de tenant y ninguna recorre el plan. Pedirlas aparte desde el
+    // navegador serían dos idas más en serie — y la barra lateral las
+    // necesita para pintar el nombre del centro, así que irían en TODAS
+    // las pantallas, no sólo en el panel.
+    laCabecera(prisma, tenantId, userId),
   ]);
 
   return {
+    ...cabecera,
     abierto,
     relevos,
     obligaciones,
@@ -263,6 +404,51 @@ export async function construirPanel(
     mes,
     centroVacio: cuantosResidentes === 0,
     generadoEn: ahora.toISOString(),
+  };
+}
+
+// ── cuadro-de-control · LA CABECERA ──────────────────────────────────
+
+/**
+ * El nombre del centro, sus plazas, cuántos hay dentro y quién mira.
+ *
+ * Cuatro lecturas y ninguna cara: dos `count` sobre índices de tenant y
+ * dos `findUnique` por clave primaria. Es lo que permite que entre en el
+ * `Promise.all` del panel sin mover el presupuesto de los 10 segundos
+ * (residencia-5, bloque C §1).
+ */
+export async function laCabecera(
+  prisma: PrismaClient,
+  tenantId: string,
+  userId: string,
+): Promise<CabeceraDelPanel> {
+  const [tenant, plazas, dentro, usuario] = await Promise.all([
+    prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { name: true },
+    }),
+    // Las camas ACTIVAS. Una cama dada de baja no es una plaza: el
+    // edificio es la fuente de «cuántas plazas tiene el centro», y así no
+    // hay un número que pueda discrepar de la pantalla de Edificio.
+    prisma.bed.count({ where: { tenantId, active: true } }),
+    prisma.bedAssignment.count({ where: { tenantId, toAt: null } }),
+    prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { alias: true, email: true },
+    }),
+  ]);
+  return {
+    centro: {
+      nombre: tenant.name,
+      plazas,
+      dentro,
+      // Ver la nota de `CabeceraDelPanel`: `null` hasta que existan las
+      // ausencias, no `0`.
+      fuera: null,
+    },
+    yo: {
+      nombre: usuario.alias ?? (usuario.email.split("@")[0] ?? usuario.email),
+    },
   };
 }
 
@@ -468,7 +654,7 @@ async function queHayAbierto(
   prisma: PrismaClient,
   tenantId: string,
 ): Promise<QueHayAbierto> {
-  const [porNivel, avisos, deResidente, abiertas] = await Promise.all([
+  const [porNivel, avisos, deResidente, abiertas, masGraves] = await Promise.all([
     // `groupBy` y no cinco `count`: una ida a la base en vez de cinco, y
     // el índice parcial `WHERE open` de la migración la sostiene.
     prisma.incident.groupBy({
@@ -495,6 +681,44 @@ async function queHayAbierto(
       },
     }),
     prisma.incident.count({ where: { tenantId, open: true } }),
+    // cuadro-de-control · **las cinco más graves, para «lo que no puede
+    // esperar»**. Mismo orden que el libro (`GET
+    // /residencia/incidencias`) para que la primera fila del panel sea la
+    // primera fila de la lista que abre: gravedad y, dentro de un nivel,
+    // antigüedad.
+    //
+    // `take` de cinco, y por eso esta consulta no engorda con el centro:
+    // lo que sobra se ve en «Ver incidencias».
+    //
+    // **Sin `descriptionCifrado`.** No se pide, así que no se descifra:
+    // el título de la fila es el tipo y la habitación, igual que en la
+    // lista del libro.
+    prisma.incident.findMany({
+      where: { tenantId, open: true },
+      orderBy: [{ severity: "desc" }, { openedAt: "asc" }],
+      take: CUANTAS_NO_PUEDEN_ESPERAR,
+      select: {
+        id: true,
+        subject: true,
+        severity: true,
+        incidentType: true,
+        openedAt: true,
+        client: { select: { firstName: true, lastName: true } },
+        room: { select: { number: true } },
+        _count: { select: { familyCommunications: true } },
+        // Sólo los avisos VIVOS y sin acusar: los mismos estados que
+        // cuenta `avisosSinAcuse` de aquí arriba, así que «2 avisos sin
+        // acuse» y «Enfermería avisada, sin acuse» no pueden
+        // contradecirse.
+        alerts: {
+          where: {
+            ackedAt: null,
+            state: { in: ["PENDING", "DELIVERED", "ESCALATED"] },
+          },
+          select: { channel: true },
+        },
+      },
+    }),
   ]);
 
   const cuenta = new Map(porNivel.map((g) => [g.severity, g._count._all]));
@@ -515,6 +739,25 @@ async function queHayAbierto(
       (i) => i.severity === "N3" || i.severity === "N4",
     ).length,
     total: abiertas,
+    noPuedeEsperar: masGraves.map((i) => ({
+      id: i.id,
+      nivel: i.severity,
+      tipo: i.incidentType,
+      nombreDelTipo: NOMBRE_DEL_TIPO[i.incidentType] ?? i.incidentType,
+      sujeto: i.subject,
+      residente: i.client
+        ? `${i.client.firstName} ${i.client.lastName}`.trim()
+        : null,
+      habitacion: i.room?.number ?? null,
+      abiertaEn: i.openedAt.toISOString(),
+      // Las dos mismas reglas que las cifras de aquí arriba, aplicadas a
+      // una fila: no se vuelven a consultar, se leen de lo que ya trajo
+      // el `select`.
+      sinConstanciaDeFamilia:
+        i.subject === "RESIDENT" && i._count.familyCommunications === 0,
+      esperaCierreDeOtro: i.severity === "N3" || i.severity === "N4",
+      avisosSinAcuse: [...new Set(i.alerts.map((a) => a.channel as string))],
+    })),
   };
 }
 
@@ -777,7 +1020,17 @@ async function turnoEnCurso(
   });
 
   return {
-    turno: turno ? { id: turno.id, code: turno.code, name: turno.name } : null,
+    turno: turno
+      ? {
+          id: turno.id,
+          code: turno.code,
+          name: turno.name,
+          // cuadro-de-control · las dos «HH:MM» tal cual: ver la nota de
+          // `TurnoEnCurso`.
+          empiezaEn: turno.startsAt,
+          terminaEn: turno.endsAt,
+        }
+      : null,
     careDay,
     plantas: plantasPintadas,
     noHechoDeTurnosCerrados: noHechoCerrados.length,
