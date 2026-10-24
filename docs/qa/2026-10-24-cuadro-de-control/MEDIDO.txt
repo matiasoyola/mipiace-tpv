@@ -1,0 +1,18 @@
+cuadro-de-control · lo medido en el bucle visual, en el producto de
+verdad y con Jardín de Gredos sembrado. El escritorio a 1366×768 (el
+portátil de la directora, que es la medida del bloque) y la mano a 390.
+
+Lo que se mide y por qué: que el panel CABE EN UNA PANTALLA es la
+decisión 4 del bloque y jsdom no la puede comprobar — ahí el alto es
+siempre 0 y cualquier maqueta pasa en verde. Se miden las dos cajas: la
+página y el <main>, que es quien lleva el overflow del shell.
+
+  panel a 1366×768: main 768px de contenido en 768px · página 768/768 · ancho 1366/1366 → CABE SIN SCROLL
+  menú de la residencia: 6 entradas · Panel | Residentes3 | Incidencias6 | Relevos2 | Obligaciones1 | Configuración
+  panel a 1366×768: todos los botones ≥ 36 px
+  Configuración a 1366×768: main 768px de contenido en 768px · página 768/768 · ancho 1366/1366 → CABE SIN SCROLL
+  panel tranquilo a 1366×768: main 768px de contenido en 768px · página 768/768 · ancho 1366/1366 → CABE SIN SCROLL
+  panel a 390: nada se sale por la derecha
+  panel a 390: todos los botones ≥ 36 px
+  menú plegado a 390: 6 entradas · Panel | Residentes3 | Incidencias6 | Relevos2 | Obligaciones1 | Configuración
+  Configuración a 390: nada se sale por la derecha
