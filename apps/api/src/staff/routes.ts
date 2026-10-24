@@ -65,6 +65,11 @@ import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { ensureClinicaEnabled } from "../clinica/gate.js";
 import { getPrisma } from "../context.js";
 import {
+  escribirElNombre,
+  nombreLimpio,
+  otroConEseNombre,
+} from "../lib/un-solo-nombre.js";
+import {
   setSkillsForStaff,
   SkillMatrixError,
 } from "../agenda/skill-matrix.js";
@@ -266,6 +271,11 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
         role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
         deletedAt: null,
         isTestCashier: false,
+        // clinica-9 (6) · y el actor de sistema no es personal. Ver
+        // `clinica/actor-paciente.ts` y el comentario de
+        // `PERSONAL_DE_LA_CAJA` en `cashiers/routes.ts`: la promesa
+        // estaba escrita desde clinica-2 y no la cumplía ninguna lista.
+        isSystemActor: false,
       },
       orderBy: { createdAt: "asc" },
       select: {
@@ -360,22 +370,50 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
       if (!user) return notFoundUser(reply);
       const prisma = getPrisma();
 
-      const displayName = body.displayName.trim();
+      const displayName = nombreLimpio(body.displayName);
+      if (displayName == null) {
+        return reply.code(400).send({
+          error: "INVALID_DISPLAY_NAME",
+          message: "El nombre no puede estar vacío.",
+        });
+      }
       const color = body.color?.trim() || null;
-      const profile = await prisma.staffProfile.upsert({
-        where: { userId },
-        create: {
-          userId,
+
+      // clinica-9 (5) · EL NOMBRE SE ESCRIBE EN LAS DOS COLUMNAS.
+      //
+      // «Nombre en la agenda» era lo único que la dueña de una clínica
+      // podía teclear de sí misma —la propietaria no sale en Cajeros— y
+      // no llegaba a ninguna de las seis superficies que pintan
+      // `users.alias`: cajeros recientes, «Atiende», «Firmada por»,
+      // «corregido por», la hoja de cierre y el contrato. Ver
+      // `lib/un-solo-nombre.ts`.
+      //
+      // La colisión se comprueba con la MISMA pregunta que Cajeros. Y se
+      // rechaza en vez de guardar a medias: dos personas con el mismo
+      // nombre en el TPV es la recepcionista eligiendo a ciegas en la
+      // pantalla del PIN.
+      if (
+        await otroConEseNombre(prisma, {
           tenantId: auth.tenantId,
-          displayName,
-          color,
-          active: body.active ?? true,
-        },
-        update: {
-          displayName,
-          color,
-          ...(body.active !== undefined ? { active: body.active } : {}),
-        },
+          nombre: displayName,
+          exceptoUserId: userId,
+        })
+      ) {
+        return reply.code(409).send({
+          error: "ALIAS_TAKEN",
+          message: `Ya hay alguien llamado ${displayName}. Pon un nombre que los distinga (por ejemplo, con la inicial del apellido).`,
+        });
+      }
+
+      await escribirElNombre(prisma, {
+        tenantId: auth.tenantId,
+        userId,
+        nombre: displayName,
+        crearPerfil: true,
+        perfil: { color, active: body.active },
+      });
+      const profile = await prisma.staffProfile.findUniqueOrThrow({
+        where: { userId },
         select: {
           userId: true,
           displayName: true,

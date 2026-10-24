@@ -618,3 +618,83 @@ describe("clinica-5 · una sesión v1 de clinica-3 se sigue leyendo (sabotaje)",
     });
   });
 });
+
+// ── clinica-9 (1) · UN TIPO MARCADO SE GUARDA, COBRE O NO ────────────
+//
+// La pasada en hierro del 24-10 encontró una sesión con «Pie de riesgo»
+// marcado y las cuatro comprobaciones rellenas que acabó en la historia
+// diciendo sólo «General». La sospecha del prompt era que un tipo SIN
+// SERVICIO EN SU CATEGORÍA se descartaba al cerrar — en la «Clínica demo»
+// no hay ningún servicio de pie de riesgo, que es justo el caso.
+//
+// No era eso: lo que se perdía se perdía en la pantalla, antes del POST
+// (ver `SesionPodologia.cargar`). Pero la garantía que el prompt pide —un
+// tipo marcado se guarda cobre o no, regla 11 de clinica-5— no tenía
+// sabotaje propio, y sin sabotaje una regla es una frase. Éste lo es: con
+// un `filter` que tire los tipos sin línea en `normalizarSesionV2`, los
+// cuatro `expect` de abajo caen.
+describe("clinica-9 · un tipo sin servicio en su categoría sobrevive al cierre (sabotaje)", () => {
+  // El catálogo de la «Clínica demo» del 24-10: una consulta GENERAL y
+  // nada en la categoría de pie de riesgo.
+  const CONSULTA = "77777777-7777-4777-8777-777777777777";
+  const DEMO: ServicioDeSesion[] = [
+    {
+      serviceId: CONSULTA,
+      nombre: "Consulta diagnóstico",
+      precio: 20,
+      iva: 0,
+      tipo: "GENERAL",
+      nivelQuiropodia: null,
+      causaExencion: "E1",
+    },
+  ];
+
+  const cierre = normalizarSesionV2(
+    entrada({
+      tipos: ["PIE_RIESGO", "GENERAL"],
+      bloques: {
+        PIE_RIESGO: {
+          sensibilidad: "NORMAL",
+          pulsos: { L: "PRESENTE", R: "PRESENTE" },
+          ulcera: "NO",
+          deformidad: "NO",
+        },
+        GENERAL: { servicios: [CONSULTA] },
+      },
+      catalogo: DEMO,
+    }),
+  );
+
+  it("el tipo queda escrito aunque su categoría no tenga ni un servicio", () => {
+    if (!cierre.ok) throw new Error("debería cerrar");
+    expect(cierre.cuerpo.tipos).toEqual(["PIE_RIESGO", "GENERAL"]);
+  });
+
+  it("y con él su bloque entero, con el riesgo ya congelado", () => {
+    if (!cierre.ok) throw new Error("debería cerrar");
+    const r = cierre.cuerpo.bloques.PIE_RIESGO;
+    expect(r).toBeTruthy();
+    expect(r?.sensibilidad).toBe("NORMAL");
+    expect(r?.pulsos).toEqual({ L: "PRESENTE", R: "PRESENTE" });
+    expect(r?.ulcera).toBe("NO");
+    expect(r?.deformidad).toBe("NO");
+    // Las cuatro normales: el riesgo más bajo de la guía, y escrito.
+    expect(r?.riesgo?.categoria).toBe(0);
+    expect(r?.riesgo?.nombre).toBe("Riesgo muy bajo");
+  });
+
+  it("lo que pasa a caja es sólo lo del tipo que sí cobra", () => {
+    if (!cierre.ok) throw new Error("debería cerrar");
+    expect(cierre.cuerpo.tratamientos).toEqual([CONSULTA]);
+  });
+
+  it("y la lectura de la historia devuelve los DOS tipos", () => {
+    if (!cierre.ok) throw new Error("debería cerrar");
+    const leido = tiposDeLaSesion({
+      ...cierre.cuerpo,
+      firma: { autorNombre: "Rosario", colegiado: null, firmadaEn: HOY },
+    } as CuerpoDeSesionV2);
+    expect(leido.tipos).toEqual(["PIE_RIESGO", "GENERAL"]);
+    expect(leido.bloques.PIE_RIESGO?.riesgo?.categoria).toBe(0);
+  });
+});

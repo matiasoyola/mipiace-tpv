@@ -25,13 +25,27 @@
 // diabético, la diferencia entre encontrar una úlcera y encontrar una
 // amputación.
 //
-// ── PENDIENTE DE VALIDAR CON ROSARIO ──────────────────────────────────
+// ── PENDIENTE DE CONFIRMAR CON LA SANITARIA DEL CENTRO ────────────────
 //
 // Dicho aquí y no sólo en el `-done`, igual que la regla de niveles: la
-// tabla es la de la guía, pero **qué hace Rosario con cada categoría** (el
-// plazo exacto dentro de la horquilla, si deriva, si la deformidad la
-// valora ella o el traumatólogo) está sin confirmar. El riesgo PROPONE la
-// próxima cita; no la crea.
+// tabla es la de la guía, pero **qué hace cada centro con cada categoría**
+// (el plazo exacto dentro de la horquilla, si deriva, si la deformidad la
+// valora la podóloga o el traumatólogo) está sin confirmar. El riesgo
+// PROPONE la próxima cita; no la crea.
+//
+// clinica-9 (10) · ESTO ES UNA NOTA DE DESARROLLO Y SE QUEDA AQUÍ.
+//
+// Hasta este bloque, la frase «Pendiente de validar con Rosario» viajaba
+// dentro de `FUENTE_DEL_RIESGO` y salía IMPRESA en la tarjeta de pie de
+// riesgo de la sesión — o sea, en la pantalla que la sanitaria tiene
+// delante de la paciente, y en el informe que se lleva. La pasada en
+// hierro del 24-10 la fotografió (captura 27).
+//
+// Dos cosas mal a la vez: una nota interna del equipo en una pantalla de
+// producto, y **el nombre de un cliente en un texto de la aplicación**.
+// Ningún texto de la app nombra a un cliente: el mismo código corre en la
+// clínica de Rosario y en la siguiente, y la segunda leería un recado que
+// no es suyo.
 
 import { PIES, type Pie } from "./mapa.js";
 
@@ -43,7 +57,7 @@ export const VERSION_DEL_RIESGO = 1;
  *  escriban con las mismas palabras y no haya dos redacciones de la misma
  *  guía. */
 export const FUENTE_DEL_RIESGO =
-  "IWGDF Guidelines 2023 · prevención de úlceras (estratificación del riesgo). Pendiente de validar con Rosario.";
+  "IWGDF Guidelines 2023 · prevención de úlceras (estratificación del riesgo).";
 
 // ── Las cuatro comprobaciones ─────────────────────────────────────────
 

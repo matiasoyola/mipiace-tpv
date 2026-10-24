@@ -207,22 +207,150 @@ export function sortClientsAz(items: ClientRow[]): ClientRow[] {
   );
 }
 
+// ── clinica-9 (3) · EL BUSCADOR QUE NO ENCONTRABA A LA PACIENTE ──────
+//
+// La pasada en hierro del 24-10, captura 05: en «Nueva cita» se teclea
+// «Carmen Prueba» y sale **«Sin coincidencias»** — existiendo «Carmen
+// Prueba Demo, 600000001». La recepción hace lo único que la pantalla le
+// ofrece, «+ Nuevo cliente», y la clínica se queda con DOS fichas de la
+// misma persona y DOS historias clínicas (captura 40). En una clínica eso
+// no es un duplicado de CRM: es media historia escondida.
+//
+// El fallo estaba aquí y era de una línea: lo tecleado se comparaba
+// ENTERO contra CADA campo por separado. «Carmen Prueba» no está dentro
+// de `firstName` («Carmen») ni dentro de `lastName` («Prueba Demo»), así
+// que no casaba ninguno. Por el mismo motivo «Prueba Carmen» tampoco, y
+// «Jose» no encontraba a «José».
+//
+// Lo que se busca ahora: **cada palabra de lo tecleado tiene que aparecer
+// en alguna parte de la ficha** (nombre + apellidos + teléfono + email),
+// sin tildes y sin mayúsculas. Por palabras y no por la cadena entera
+// porque así da igual el orden y da igual dónde esté el corte entre
+// nombre y apellidos — que es lo que nadie sabe al teclear.
+//
+// El teléfono, además, se compara **sólo con sus dígitos**: en la ficha
+// está «600 000 001» y en el mostrador se teclea «600000001».
+
+/** Sin tildes, sin mayúsculas. `NFD` + quitar los diacríticos. */
+export function normalizarParaBuscar(x: string): string {
+  return x
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Sólo los dígitos: «+34 600 00 00 01» → «34600000001». */
+function soloDigitos(x: string): string {
+  return x.replace(/\D/g, "");
+}
+
+/** Todo lo buscable de una ficha, ya normalizado y en una cadena. */
+function pajarDe(c: {
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+}): string {
+  return normalizarParaBuscar(
+    [c.firstName, c.lastName, c.phone ?? "", c.email ?? ""].join(" "),
+  );
+}
+
+/**
+ * ¿Esta ficha casa con lo tecleado?
+ *
+ * Pura y exportada porque la usan dos sitios que tienen que decidir lo
+ * MISMO: la lista de resultados y el aviso de «ya existe alguien
+ * parecido» del alta. Con dos criterios, el buscador podría no encontrar
+ * a quien el aviso sí considera parecido — y entonces el aviso saldría
+ * justo cuando ya es tarde, o no saldría nunca.
+ */
+export function clienteCasaCon(
+  c: {
+    firstName: string;
+    lastName: string;
+    phone: string | null;
+    email: string | null;
+  },
+  query: string,
+): boolean {
+  const palabras = normalizarParaBuscar(query).split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return true;
+  const pajar = pajarDe(c);
+  const telefono = soloDigitos(c.phone ?? "");
+  return palabras.every((p) => {
+    if (pajar.includes(p)) return true;
+    // Una palabra que son dígitos se busca también contra el teléfono sin
+    // separadores: la ficha dice «600 000 001» y el mostrador teclea
+    // «600000001».
+    const d = soloDigitos(p);
+    return d.length > 0 && telefono.includes(d);
+  });
+}
+
 export function searchClientsLocal(
   items: ClientRow[],
   query: string,
   limit = 50,
 ): ClientRow[] {
-  const needle = query.trim().toLowerCase();
-  const base = needle
-    ? items.filter(
-        (c) =>
-          c.firstName.toLowerCase().includes(needle) ||
-          c.lastName.toLowerCase().includes(needle) ||
-          (c.phone ?? "").toLowerCase().includes(needle) ||
-          (c.email ?? "").toLowerCase().includes(needle),
-      )
-    : items;
+  const q = query.trim();
+  const base = q ? items.filter((c) => clienteCasaCon(c, q)) : items;
   return sortClientsAz(base).slice(0, limit);
+}
+
+/**
+ * clinica-9 (3) · LOS QUE SE LE PARECEN, ANTES DE CREAR OTRA FICHA.
+ *
+ * Se pregunta con lo que se va a GUARDAR (nombre, apellidos, teléfono,
+ * email), no con lo que se tecleó en el buscador: entre una cosa y la
+ * otra la recepción ha podido escribir el apellido entero, y es
+ * entonces cuando el parecido se ve.
+ *
+ * Qué cuenta como parecido, y por qué así:
+ *
+ *   · **el mismo teléfono** (sólo dígitos, y a partir de 6 para que un
+ *     «600» no empareje medio fichero). Dos personas no comparten móvil;
+ *     cuando pasa —una madre y su hija— el aviso se puede ignorar de un
+ *     toque.
+ *   · **el mismo email**.
+ *   · **el nombre de pila y el primer apellido iguales**, sin tildes ni
+ *     mayúsculas. Es el caso de la pasada: «Carmen Prueba» contra
+ *     «Carmen Prueba Demo».
+ *
+ * Lo que NO se hace es impedir el alta: dos pacientes pueden llamarse
+ * igual. Se enseña a quién se parece, con su teléfono, y la recepción
+ * decide.
+ */
+export function clientesParecidosA(
+  items: ClientRow[],
+  datos: {
+    firstName: string;
+    lastName: string;
+    phone?: string | null;
+    email?: string | null;
+  },
+  limit = 3,
+): ClientRow[] {
+  const nombre = normalizarParaBuscar(datos.firstName);
+  const apellido = normalizarParaBuscar(datos.lastName).split(/\s+/)[0] ?? "";
+  const telefono = soloDigitos(datos.phone ?? "");
+  const email = normalizarParaBuscar(datos.email ?? "");
+  if (nombre === "" && telefono === "" && email === "") return [];
+  const parecidos = items.filter((c) => {
+    if (telefono.length >= 6 && soloDigitos(c.phone ?? "") === telefono) {
+      return true;
+    }
+    if (email !== "" && normalizarParaBuscar(c.email ?? "") === email) {
+      return true;
+    }
+    if (nombre === "" || apellido === "") return false;
+    const suNombre = normalizarParaBuscar(c.firstName);
+    const suApellido =
+      normalizarParaBuscar(c.lastName).split(/\s+/)[0] ?? "";
+    return suNombre === nombre && suApellido === apellido;
+  });
+  return sortClientsAz(parecidos).slice(0, limit);
 }
 
 // ─── ¿Hay que volver a bajarse los clientes? ──────────────────────────

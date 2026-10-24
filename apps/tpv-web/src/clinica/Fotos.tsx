@@ -162,6 +162,77 @@ function ImagenDeFoto(props: {
  * no sabe decir si tiene flash es una cámara sin flash, no una excepción
  * que tumbe la pantalla con el pie delante.
  */
+// ── clinica-9 (14) · POCA LUZ, Y LA LENOVO NO TIENE FLASH ────────────
+//
+// La Lenovo TB311FU (M11) de la consulta **no tiene flash**:
+// `android.flash.info.available = FALSE`. Así que el botón «Luz» no sale
+// —`pistaConLinterna` pregunta a la pista y la pista dice que no— y eso
+// está bien: un botón de luz que no enciende nada es peor que no tenerlo.
+//
+// Lo que no está bien es que, con el visor a oscuras, la pantalla no diga
+// NADA. La podóloga dispara, la foto sale negra, y se entera al mirarla.
+// La constraint de 15 fps de clinica-8 ayuda y no hace milagros: un pie
+// a la altura de la rodilla, a la sombra de la propia tablet, sale
+// oscuro.
+//
+// Así que se mide lo que hay y se dice una frase: «Poca luz · acerca la
+// lámpara». Sin más — ni bloquear el disparo (una foto oscura de algo que
+// ya no se va a poder repetir es mejor que ninguna), ni intentar aclarar
+// el JPEG, que sería inventar píxeles en una imagen clínica.
+//
+// ── La medida ────────────────────────────────────────────────────────
+//
+// Luminancia media (Rec. 601) de un frame reducido a un pañuelo. No hace
+// falta más resolución: lo que se pregunta es «¿está oscuro?», no qué hay
+// en la foto.
+
+/** El umbral de «esto está oscuro», de 0 (negro) a 255 (blanco). */
+export const LUZ_BAJA = 55;
+
+/**
+ * Y el de volver a «hay luz», más alto a propósito.
+ *
+ * Con un solo umbral, un visor que ronde el límite enciende y apaga el
+ * aviso varias veces por segundo mientras la podóloga encuadra: un
+ * cartel que parpadea no se lee, molesta. Con la banda, para encenderse
+ * hay que bajar de 55 y para apagarse hay que subir de 75.
+ */
+export const LUZ_SUFICIENTE = 75;
+
+/**
+ * La luminancia media de un frame RGBA, de 0 a 255.
+ *
+ * Pura y exportada: es lo único de esto que se puede probar sin una
+ * cámara. Un buffer vacío devuelve 255 —«hay luz de sobra»— porque no
+ * haber podido medir no es haber medido oscuridad, y el aviso tiene que
+ * fallar hacia callarse.
+ */
+export function luminanciaMedia(datos: ArrayLike<number>): number {
+  if (datos.length < 4) return 255;
+  let suma = 0;
+  let n = 0;
+  for (let i = 0; i + 2 < datos.length; i += 4) {
+    // Rec. 601: el ojo pesa el verde mucho más que el azul.
+    suma += 0.299 * datos[i]! + 0.587 * datos[i + 1]! + 0.114 * datos[i + 2]!;
+    n += 1;
+  }
+  return n === 0 ? 255 : suma / n;
+}
+
+/**
+ * ¿Hay que enseñar el aviso, dado lo que se acaba de medir y lo que se
+ * estaba enseñando?
+ *
+ * Es la histéresis, aparte y pura. Ver `LUZ_SUFICIENTE`.
+ */
+export function avisarDePocaLuz(
+  luminancia: number,
+  avisandoAhora: boolean,
+): boolean {
+  if (avisandoAhora) return luminancia < LUZ_SUFICIENTE;
+  return luminancia < LUZ_BAJA;
+}
+
 export function pistaConLinterna(stream: MediaStream): boolean {
   try {
     const pista = stream.getVideoTracks()[0];
@@ -250,6 +321,8 @@ function Camara(props: {
   /** ¿La cámara de este aparato tiene flash que se pueda encender? */
   const [hayLinterna, setHayLinterna] = useState(false);
   const [linterna, setLinterna] = useState(false);
+  /** clinica-9 (14) · el visor está oscuro. Ver `luminanciaMedia`. */
+  const [pocaLuz, setPocaLuz] = useState(false);
   /** El JPEG recién hecho que todavía no tiene zona. Ver `disparar`. */
   const [capturada, setCapturada] = useState<string | null>(null);
   /** Sube con «Repetir la foto»: es lo que vuelve a arrancar el stream
@@ -277,6 +350,7 @@ function Camara(props: {
     setPintando(false);
     setLinterna(false);
     setHayLinterna(false);
+    setPocaLuz(false);
     (async () => {
       try {
         const permiso = await ensureCameraPermission();
@@ -454,6 +528,46 @@ function Camara(props: {
   // aquí y no en el `disabled` para que el aspecto del botón y su
   // `aria-disabled` no puedan separarse de la condición real.
   const bloqueado = disparando || error != null || !pintando;
+
+  // ── clinica-9 (14) · ¿ESTÁ OSCURO? ────────────────────────────────
+  //
+  // Un vistazo cada segundo y medio al frame, reducido a 32×24. No es un
+  // bucle de render: es un `setInterval` que dibuja un pañuelo y suma.
+  // Lo caro de medir luz sería hacerlo en cada frame a 1600×1200.
+  //
+  // Sólo mientras hay visor: con la foto ya hecha, con error o antes de
+  // que pinte, no hay nada que medir y el aviso no tendría sentido.
+  //
+  // Y falla hacia CALLARSE: en jsdom no hay `getContext` ni frames, y lo
+  // que no se puede medir no se avisa (`luminanciaMedia` devuelve 255).
+  useEffect(() => {
+    if (!pintando || error != null || capturada != null) {
+      setPocaLuz(false);
+      return;
+    }
+    const medir = () => {
+      const v = videoRef.current;
+      if (!v || v.videoWidth === 0) return;
+      try {
+        const c = document.createElement("canvas");
+        c.width = 32;
+        c.height = 24;
+        const ctx = c.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        const luz = luminanciaMedia(
+          ctx.getImageData(0, 0, c.width, c.height).data,
+        );
+        setPocaLuz((antes) => avisarDePocaLuz(luz, antes));
+      } catch {
+        // Un canvas «sucio» (otro origen) o una pista que ya murió. No
+        // se avisa de lo que no se ha podido medir.
+      }
+    };
+    medir();
+    const t = setInterval(medir, 1500);
+    return () => clearInterval(t);
+  }, [pintando, error, capturada, cual, reintento]);
 
   // ── LA FOTO YA HECHA, ESPERANDO SU ZONA ────────────────────────────
   //
@@ -754,6 +868,21 @@ function Camara(props: {
             the click»), y en la tablet la podóloga habría tocado el
             disparador sin que pasara nada. `pointer-events-none` y por
             encima: el aviso informa, no estorba. */}
+        {/* clinica-9 (14) · POCA LUZ. Encima del visor, sin tapar el
+            disparador y sin recibir toques: dice qué hacer y ya. No
+            bloquea la foto — una foto oscura de algo que ya no se va a
+            poder repetir es mejor que ninguna. */}
+        {pocaLuz && !error && (
+          <div
+            data-test="poca-luz"
+            className="absolute top-3 left-3 right-28 pointer-events-none"
+          >
+            <span className="inline-flex items-center gap-2 bg-amber-500/95 text-amber-950 px-3.5 py-2 rounded-xl text-[13.5px] font-medium">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              Poca luz · acerca la lámpara
+            </span>
+          </div>
+        )}
         <div className="absolute bottom-28 left-4 right-4 text-center pointer-events-none">
           {error ? (
             <span className="inline-flex items-center gap-2 bg-red-600/90 text-white px-3.5 py-2 rounded-xl text-[13.5px]">

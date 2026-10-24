@@ -159,6 +159,28 @@ export interface AgendaDay {
   // dinero: un aviso viejo de «queda cobrar» sobre algo ya cobrado manda a
   // la recepción a cobrar dos veces. Que sin red no salga es lo seguro.
   sesionesPorCobrar?: string[];
+  /**
+   * clinica-9 (9) · LAS PRÓXIMAS CITAS PROPUESTAS de las sesiones de este
+   * día que ya están cobradas, y cuyo paciente NO tiene ninguna cita por
+   * delante.
+   *
+   * La pantalla de cierre le promete a la sanitaria que «la recepción
+   * elige el hueco con el paciente al cobrar»; esto es lo que hace que
+   * alguien se lo diga a la recepción. Ni un dato de salud: de quién,
+   * cuántas semanas y a partir de qué día (`clinica/proxima-cita.ts`).
+   *
+   * Fuera de la caché offline como sus dos vecinas, y por lo mismo: una
+   * propuesta vieja sobre un paciente que ya tiene cita manda a la
+   * recepción a dar una cita de más.
+   */
+  proximasCitas?: Array<{
+    appointmentId: string;
+    clientId: string;
+    /** `S2` / `S4` / `S8`. */
+    propuesta: string;
+    /** «YYYY-MM-DD» desde el que buscar hueco. */
+    desde: string;
+  }>;
   // clinica-8 · LA MARCA SANITARIA DE QUIEN MIRA, al día. El TPV la lee en
   // el login del cajero y esa sesión dura el turno entero, así que marcar a
   // alguien sanitario desde el panel no le llegaba hasta re-entrar: la
@@ -272,6 +294,7 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       days?: AgendaDayInfo[];
       valoracionesPendientes?: string[];
       sesionesPorCobrar?: string[];
+      proximasCitas?: AgendaDay["proximasCitas"];
       esSanitario?: boolean;
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
@@ -295,6 +318,7 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       appointments: await mergePendingLocal(day),
       valoracionesPendientes: res.valoracionesPendientes ?? [],
       sesionesPorCobrar: res.sesionesPorCobrar ?? [],
+      proximasCitas: res.proximasCitas ?? [],
       // Fuera de la caché, igual que las dos de arriba: se añade DESPUÉS
       // de `writeDay`.
       ...(res.esSanitario === undefined

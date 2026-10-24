@@ -723,7 +723,12 @@ describe("clinica-5 · el riesgo del pie (IWGDF)", () => {
   it("y la guía se cita en la tarjeta, con su «pendiente de validar»", async () => {
     await conPieDeRiesgo();
     expect(texto()).toContain("IWGDF");
-    expect(texto()).toMatch(/pendiente de validar/i);
+    // clinica-9 (10) · y NADA MÁS. «Pendiente de validar con Rosario» era
+    // una nota interna del equipo impresa en la pantalla que la sanitaria
+    // tiene delante de la paciente —y en su informe—, con el nombre de un
+    // cliente dentro. Ningún texto de la app nombra a un cliente.
+    expect(texto()).not.toMatch(/pendiente de validar/i);
+    expect(texto()).not.toMatch(/rosario/i);
   });
 
   it("el pie de riesgo sin servicio asignado se ve «sin cobro»", async () => {
@@ -979,9 +984,19 @@ describe("clinica-3 · «igual que la última vez»", () => {
     ).toBe("true");
   });
 
-  it("está DESACTIVADO en la primera visita: no hay última", async () => {
+  // clinica-9 (15) · en la primera visita YA NO SE PINTA. Era un botón
+  // grande, coral y apagado en lo alto de la tarjeta, justo en la visita
+  // en la que la pantalla está más llena y en la que no se puede
+  // entender («¿igual que qué última vez?»). No hay anterior: no hay
+  // botón.
+  it("NO SE PINTA en la primera visita: no hay última", async () => {
     await montar(vista({ verImportes: true, conAnterior: false }));
-    expect(botonPorTexto("↺ Igual que la última vez")!.disabled).toBe(true);
+    expect(botonPorTexto("↺ Igual que la última vez")).toBeUndefined();
+    // Y con anterior sigue estando, que es la otra mitad.
+    act(() => root.unmount());
+    host.remove();
+    await montar(vista({ verImportes: true }));
+    expect(botonPorTexto("↺ Igual que la última vez")).toBeDefined();
   });
 });
 

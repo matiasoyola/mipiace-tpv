@@ -321,7 +321,7 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
       phone: fiscal.phone ?? undefined,
     },
     store: {
-      name: input.store.name,
+      name: rotuloDeLaCabecera(input.store.name, input.tenant.name),
       address: serializeFiscalAddress(input.store.fiscalAddress?.address),
       phone: input.store.fiscalAddress?.phone ?? undefined,
     },
@@ -364,4 +364,50 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
         }
       : undefined,
   };
+}
+
+
+// ── clinica-9 (15) · EL ROTULO DE LA CABECERA DEL TICKET ─────────────
+//
+// La pasada en hierro del 24-10 (captura 37) leyó el ticket de la
+// «Clínica demo» y arriba del todo ponía **«Tienda principal»**. No es el
+// nombre de nada: es el que el sistema le pone a la tienda que crea solo
+// cuando activa una cuenta que no tenía ninguna
+// (`superadmin/test-cashier.ts`). La paciente se lleva un papel con el
+// nombre de un almacén genérico donde tendría que estar el de la
+// consulta.
+//
+// El nombre de la tienda está en la cabecera para DISTINGUIR una de otra
+// en un negocio con varias. Cuando no distingue nada —porque es el que
+// puso el sistema, o porque es el mismo del negocio— lo que toca arriba
+// es el nombre del negocio.
+//
+// No se mira cuántas tiendas hay: eso sería una consulta más en cada
+// ticket que se imprime, y además no es la pregunta. La pregunta es si
+// ese rótulo lo escribió alguien o lo inventamos nosotros.
+
+/** El nombre que el sistema le pone a la tienda que crea él solo. Vive
+ *  aquí —y no en la API— porque es aquí donde hay que reconocerlo para
+ *  no imprimirlo. `superadmin/test-cashier.ts` lo importa de aquí: un
+ *  solo sitio donde está escrito. */
+export const NOMBRE_DE_TIENDA_POR_DEFECTO = "Tienda principal";
+
+/**
+ * Qué va arriba del ticket: el nombre de la tienda, o el del negocio.
+ *
+ * Pura y exportada porque la usan los DOS caminos que imprimen —el
+ * documento (PDF, email, lectura en pantalla) y el ESC/POS del papel— y
+ * dos copias serían dos cabeceras distintas para el mismo cobro.
+ */
+export function rotuloDeLaCabecera(
+  nombreDeLaTienda: string | null | undefined,
+  nombreDelNegocio: string,
+): string {
+  const tienda = (nombreDeLaTienda ?? "").trim();
+  if (tienda.length === 0) return nombreDelNegocio;
+  if (tienda === NOMBRE_DE_TIENDA_POR_DEFECTO) return nombreDelNegocio;
+  if (tienda.toLowerCase() === nombreDelNegocio.trim().toLowerCase()) {
+    return nombreDelNegocio;
+  }
+  return tienda;
 }

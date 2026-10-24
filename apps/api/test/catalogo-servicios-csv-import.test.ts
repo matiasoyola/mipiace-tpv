@@ -659,12 +659,18 @@ describe("clinica-8 · el fichero deja la clínica lista para cobrar", () => {
     expect(primeras).toEqual(["POD-001"]);
   });
 
-  it("y los tratamientos de la sesión son los 16 que no son la valoración", async () => {
+  // clinica-9 (2) · los 17, valoración incluida: con la «Consulta
+  // diagnóstico» fuera de la sesión, la primera visita de cada paciente
+  // nuevo cerraba a 0 € (pasada en hierro del 24-10).
+  it("y los tratamientos de la sesión son los 17: la valoración también", async () => {
     await post({ csv: CSV_ROSARIO, confirmar: true });
     const marcados = [...productos.values()].filter(
       (p) => agendas.get(p.id)!.tratamientoSesion,
     );
-    expect(marcados).toHaveLength(16);
+    expect(marcados).toHaveLength(17);
+    const consulta = [...productos.values()].find((p) => p.sku === "POD-001")!;
+    expect(agendas.get(consulta.id)!.primeraValoracion).toBe(true);
+    expect(agendas.get(consulta.id)!.tratamientoSesion).toBe(true);
   });
 
   it("las cinco categorías quedan con su tipo de visita", async () => {

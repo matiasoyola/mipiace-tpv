@@ -581,9 +581,11 @@ function fiscalString(profile: unknown, keys: string[]): string | null {
 //      quiropodia. Son tres productos distintos y el nivel que la sesión
 //      propone elige cuál pasa a caja: con dos, la sesión propone un nivel
 //      que no existe y cierra sin línea.
-//   3. **una primera valoración.** Es el servicio con el que se cita la
-//      primera visita, y sin él la valoración inicial no tiene cómo
-//      cobrarse ni cómo proponerse.
+//   3. **una primera valoración, y COBRABLE EN LA SESIÓN.** Es el servicio
+//      con el que se cita la primera visita, y sin él la valoración
+//      inicial no tiene cómo cobrarse ni cómo proponerse. Y sin
+//      `tratamientoSesion`, el botón no sale dentro de la sesión: la
+//      primera visita se anota y se cierra a 0 € (clinica-9 §2).
 //
 // Devuelve la lista de lo que FALTA, en la palabra del implantador, para
 // que la pantalla pueda decir qué arreglar sin que nadie abra la base.
@@ -604,6 +606,7 @@ async function medirCatalogoClinico(
       select: {
         nivelQuiropodia: true,
         primeraValoracion: true,
+        tratamientoSesion: true,
         product: { select: { tags: true } },
       },
     }),
@@ -642,9 +645,27 @@ async function medirCatalogoClinico(
     }
   }
 
-  // 3 · la primera valoración.
-  if (!agendas.some((a) => a.primeraValoracion)) {
+  // 3 · la primera valoración, Y QUE SE PUEDA COBRAR EN LA SESIÓN.
+  //
+  // clinica-9 (2) · las dos marcas, y no sólo la primera. El CSV de
+  // Rosario traía «Consulta diagnóstico» con `primera_valoracion=si` y
+  // `tratamiento_sesion=no`, que es exactamente lo que la pasada en
+  // hierro del 24-10 cobró: la primera visita de la paciente no salía en
+  // «Qué se cobra» de la sesión, la sesión cerraba sin ni una línea y la
+  // consulta se quedaba a 0 €. Con una marca de las dos, el catálogo
+  // parecía completo y la clínica no cobraba la primera visita de CADA
+  // paciente nuevo — que en una implantación es el día entero.
+  //
+  // El check mira las dos por separado para poder decir cuál falta: «no
+  // hay primera valoración» y «la primera valoración no se cobra en la
+  // sesión» se arreglan en columnas distintas del fichero.
+  const primeras = agendas.filter((a) => a.primeraValoracion);
+  if (primeras.length === 0) {
     falta.push("ningún servicio es la primera valoración");
+  } else if (!primeras.some((a) => a.tratamientoSesion)) {
+    falta.push(
+      "la primera valoración no es tratamiento de sesión (no se podría cobrar la primera visita)",
+    );
   }
 
   return { falta };

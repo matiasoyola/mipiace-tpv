@@ -15,7 +15,12 @@ import {
   type TicketPaymentEscpos,
   type TicketReceiptInput,
 } from "@mipiacetpv/escpos-builder";
-import { changeFromCash, esCausaExencion, netToGross } from "@mipiacetpv/ticket-model";
+import {
+  changeFromCash,
+  esCausaExencion,
+  netToGross,
+  rotuloDeLaCabecera,
+} from "@mipiacetpv/ticket-model";
 import type {
   CausaExencion,
   TicketTotals,
@@ -186,10 +191,13 @@ export function ticketToEscposInput(
     taxId: fiscal.taxId,
     fiscalAddress: fiscal.address,
     phone: fiscal.phone,
-    businessName:
-      ticket.register.store.name && ticket.register.store.name.length > 0
-        ? ticket.register.store.name
-        : ticket.tenant.name,
+    // clinica-9 (15) · el MISMO rótulo que el documento. Ver
+    // `rotuloDeLaCabecera`: «Tienda principal» es el nombre que el
+    // sistema se inventa, no el de la consulta.
+    businessName: rotuloDeLaCabecera(
+      ticket.register.store.name,
+      ticket.tenant.name,
+    ),
     businessAddress: formatAddress(ticket.register.store.fiscalAddress),
     internalNumber: ticket.internalNumber,
     issuedAt,

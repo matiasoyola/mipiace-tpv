@@ -653,6 +653,12 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
           role: { in: ["MANAGER", "OWNER"] },
           pinHash: { not: null },
           deletedAt: null,
+          // clinica-9 (6) · el actor de sistema no autoriza nada. Hoy no
+          // puede colarse —el CHECK `users_system_actor_no_credentials`
+          // le prohíbe el `pin_hash`, así que `pinHash: { not: null }` ya
+          // lo deja fuera— y el filtro va igual: la garantía no puede
+          // depender de que nadie relaje el CHECK (clinica-2).
+          isSystemActor: false,
         },
         select: { id: true, email: true, alias: true, pinHash: true },
       });

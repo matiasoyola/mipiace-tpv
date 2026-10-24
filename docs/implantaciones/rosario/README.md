@@ -20,7 +20,7 @@ Las cinco columnas de siempre (`sku,nombre,precio_con_iva,iva,categoria`) **más
 |---|---|---|
 | `tipo_visita` | `QUIROPODIA` / `PIE_RIESGO` / `CIRUGIA` / `BIOMECANICA` / `GENERAL` | Es de la **categoría** (S5): los servicios lo heredan y es lo que hace que la sesión ofrezca la tarjeta de cada tipo. Todas las filas de una misma categoría tienen que decir lo mismo. |
 | `primera_valoracion` | `si` / `no` | El servicio con el que se cita la primera visita. |
-| `tratamiento_sesion` | `si` / `no` | Sale como botón dentro de la sesión. |
+| `tratamiento_sesion` | `si` / `no` | Sale como botón dentro de la sesión. **El servicio de la primera valoración tiene que llevarla también** (clinica-9, ver abajo). |
 | `nivel_quiropodia` | 1 / 2 / 3 | «Este servicio **es** el nivel N». Es lo que convierte el nivel que la sesión propone en una línea de ticket. Uno por nivel. |
 
 Sin estas cuatro, el catálogo entra igual —exento, reservable y con su
@@ -65,6 +65,32 @@ habría que tocarlo en su panel).
 
 El comercio tiene que tener la **historia clínica encendida** antes de cargar: un `E1` en un tenant
 sin ella es una fila saltada con su motivo, no un producto exento callado.
+
+## clinica-9 · la primera consulta se cobra, y lleva LAS DOS marcas
+
+Hasta el 24-10 este fichero traía `POD-001` con `primera_valoracion=si` y
+`tratamiento_sesion=no`. Las dos columnas parecen la misma pregunta y no lo son:
+
+- `primera_valoracion` dice **con qué servicio se CITA** la primera visita.
+- `tratamiento_sesion` dice **qué botones salen dentro de la sesión**, o sea
+  qué se puede marcar como hecho y qué pasa a caja al cerrarla.
+
+Con la segunda en `no`, la «Consulta diagnóstico» no salía en «Qué se cobra»
+de la sesión. La pasada en hierro del 24-10 cerró y firmó la primera visita de
+una paciente **a 0,00 €** sin que nada lo dijera: la sesión no tenía ni una
+línea que cobrar. Y le pasa a la primera visita de **cada** paciente nuevo, que
+en una implantación es el día entero.
+
+Está corregido en el fichero (`POD-001 … GENERAL,si,si,`) y el check de
+onboarding **«Catálogo clínico completo» lo exige**: una primera valoración que
+no es tratamiento de sesión bloquea la activación con el motivo escrito
+(`la primera valoración no es tratamiento de sesión (no se podría cobrar la
+primera visita)`). En la «Clínica demo» ya estaba corregido a mano desde el
+panel de la dueña.
+
+**Si el fichero ya se cargó con la marca mal**, un SKU que existe no se pisa:
+hay que ponerla a mano en Catálogo de agenda (el servicio → «Se hace dentro de
+la sesión»).
 
 ## Dudas abiertas con Rosario
 

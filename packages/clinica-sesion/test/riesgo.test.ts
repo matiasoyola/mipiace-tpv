@@ -197,6 +197,10 @@ describe("clinica-5 · la tabla y la fuente", () => {
     // que Rosario no lo ha confirmado.
     expect(FUENTE_DEL_RIESGO).toContain("IWGDF");
     expect(FUENTE_DEL_RIESGO).toContain("2023");
-    expect(FUENTE_DEL_RIESGO).toMatch(/pendiente de validar/i);
+    // clinica-9 (10) · y NADA MÁS: la nota interna «Pendiente de validar
+    // con Rosario» salía impresa en la tarjeta de la sesión y en el
+    // informe de la paciente. Ningún texto de la app nombra a un cliente.
+    expect(FUENTE_DEL_RIESGO).not.toMatch(/pendiente de validar/i);
+    expect(FUENTE_DEL_RIESGO).not.toMatch(/rosario/i);
   });
 });

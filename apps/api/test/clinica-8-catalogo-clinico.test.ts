@@ -32,6 +32,10 @@ interface Escenario {
     tags: string[];
     nivelQuiropodia?: number | null;
     primeraValoracion?: boolean;
+    /** clinica-9 (2) · «sale como botón dentro de la sesión». Sin esto,
+     *  un servicio marcado como primera valoración no se puede cobrar en
+     *  la visita en la que se usa. */
+    tratamientoSesion?: boolean;
   }>;
 }
 
@@ -46,7 +50,7 @@ const ROSARIO: Required<Pick<Escenario, "categorias" | "servicios">> = {
     { slug: "órtesis", visitType: "GENERAL" },
   ],
   servicios: [
-    { tags: ["consulta"], primeraValoracion: true },
+    { tags: ["consulta"], primeraValoracion: true, tratamientoSesion: true },
     { tags: ["quiropodia"], nivelQuiropodia: 1 },
     { tags: ["quiropodia"], nivelQuiropodia: 2 },
     { tags: ["quiropodia"], nivelQuiropodia: 3 },
@@ -97,6 +101,7 @@ function prismaFor(e: Escenario): any {
         (e.servicios ?? []).map((s) => ({
           nivelQuiropodia: s.nivelQuiropodia ?? null,
           primeraValoracion: s.primeraValoracion ?? false,
+          tratamientoSesion: s.tratamientoSesion ?? false,
           product: { tags: s.tags },
         })),
     },
@@ -162,12 +167,42 @@ describe("clinica-8 · el check «Catálogo clínico completo»", () => {
     expect(c.value).toContain("ningún servicio es la primera valoración");
   });
 
+  // ── clinica-9 (2) · LA PRIMERA CONSULTA TIENE QUE PODER COBRARSE ──
+  //
+  // El CSV de Rosario traía «Consulta diagnóstico» con
+  // `primera_valoracion=si` y `tratamiento_sesion=no`. Con el check de
+  // clinica-8 eso salía COMPLETO: hay primera valoración. Y la pasada en
+  // hierro del 24-10 cerró la primera visita de la paciente a 0 € porque
+  // el servicio no salía en «Qué se cobra» de la sesión.
+  //
+  // Sabotaje: quítale el `else if` a `medirCatalogoClinico` y este test
+  // se pone verde con el catálogo que no cobra.
+  it("la primera valoración que NO es tratamiento de sesión bloquea", async () => {
+    const { c, ready } = await check({
+      ...ROSARIO,
+      servicios: ROSARIO.servicios.map((s) =>
+        s.primeraValoracion ? { ...s, tratamientoSesion: false } : s,
+      ),
+    });
+    expect(c.ok).toBe(false);
+    expect(c.value).toContain("la primera valoración no es tratamiento de sesión");
+    expect(ready).toBe(false);
+  });
+
+  it("y el fichero corregido —las dos marcas— pasa", async () => {
+    const { c, ready } = await check(ROSARIO);
+    expect(c.ok).toBe(true);
+    expect(ready).toBe(true);
+  });
+
   it("un centro SIN quiropodia no tiene que inventarse los tres niveles", async () => {
     // Una fisioterapeuta no hace quiropodia. Exigirle los tres niveles
     // sería pedirle tres servicios falsos para poder activarse.
     const { c, ready } = await check({
       categorias: [{ slug: "fisio", visitType: "GENERAL" }],
-      servicios: [{ tags: ["fisio"], primeraValoracion: true }],
+      servicios: [
+        { tags: ["fisio"], primeraValoracion: true, tratamientoSesion: true },
+      ],
     });
     expect(c.ok).toBe(true);
     expect(ready).toBe(true);
