@@ -390,8 +390,16 @@ function SesionPodologiaDentro(props: {
    * la misma regla que el resto del estado de esta pantalla ya cumplía
    * (las marcas, el dolor y los consejos sobrevivían a la recarga; los
    * tipos no).
+   *
+   * Guarda la CITA que sembró y no un `true` pelado: hoy esta pantalla se
+   * desmonta entre una cita y otra (la agenda la pinta dentro de un
+   * `{sesionDe && …}`), así que un booleano bastaría — pero el día que
+   * alguien la reutilice sin desmontarla, un `true` dejaría la segunda
+   * cita SIN sus tipos sugeridos, y eso es el mismo fallo con el signo
+   * cambiado. Con el id, la pregunta que se hace es la correcta: «¿ya
+   * sembré los de ESTA cita?».
    */
-  const sembrado = useRef(false);
+  const sembrado = useRef<string | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -406,8 +414,8 @@ function SesionPodologiaDentro(props: {
       // clinica-6 · salvo que se venga de la historia viva, que manda los
       // suyos: ahí la podóloga acaba de decir a qué viene hoy, y eso pesa
       // más que lo que diga el catálogo de los servicios de la cita.
-      if (!sembrado.current) {
-        sembrado.current = true;
+      if (sembrado.current !== props.appointmentId) {
+        sembrado.current = props.appointmentId;
         setTipos(
           (props.tiposIniciales && props.tiposIniciales.length > 0
             ? props.tiposIniciales
