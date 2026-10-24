@@ -95,11 +95,16 @@ import {
 } from "../lib/agenda-health.js";
 import { createPortal } from "react-dom";
 
+import { NOMBRE_DE_PROXIMA_CITA } from "@mipiacetpv/clinica-sesion";
 import type { TipoDeVisita } from "@mipiacetpv/clinica-sesion";
 
 import { CobrosPendientes } from "../clinica/CobrosPendientes.js";
 import { HistoriaViva } from "../clinica/HistoriaViva.js";
 import { SesionPodologia } from "../clinica/SesionPodologia.js";
+import {
+  diaRecordado,
+  recordarDiaDeLaAgenda,
+} from "../lib/dia-de-la-agenda.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 // B-reservas-8 · el bono que se ofrece al dar la cita.
 import { BonoDeLaCita } from "./AgendaPage.bono.js";
@@ -361,6 +366,8 @@ export interface AgendaPageProps {
     ticketId: string;
     clientName: string | null;
     serviceLabel: string;
+    /** clinica-9 (15) · quién atiende la cita, para «Atendido por». */
+    atendidoPor?: string | null;
   }) => void;
 }
 
@@ -377,7 +384,13 @@ export function AgendaPage({
   // lo toque lee lo de siempre.
   bonoEtiqueta = "bono",
 }: AgendaPageProps) {
-  const [date, setDate] = useState<string>(todayLocalDate());
+  // clinica-9 (12) · con el día en el que se estaba, si fue hace nada.
+  // Ver `lib/dia-de-la-agenda.ts`: el camino de la tablet es una
+  // navegación de verdad y se lleva por delante todo el estado de React,
+  // el día incluido.
+  const [date, setDate] = useState<string>(() =>
+    diaRecordado(todayLocalDate()),
+  );
   const [day, setDay] = useState<AgendaDay | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
@@ -579,6 +592,12 @@ export function AgendaPage({
 
   useEffect(() => {
     void loadDay(date);
+    // clinica-9 (12) · y se apunta el día. Aquí y no en cada `setDate`
+    // porque hay media docena de sitios que lo cambian (las flechas, el
+    // selector, la tira de siete días, volver de una cita movida) y uno
+    // que se olvidara sería el único camino desde el que la tablet
+    // volvería a «Hoy».
+    recordarDiaDeLaAgenda(date);
   }, [date, loadDay]);
 
   // agenda-lista (hallazgo 🟡 1) · la agenda se asegura de tener los
@@ -823,6 +842,16 @@ export function AgendaPage({
     }
   }
 
+  /** El nombre del profesional asignado a una cita, o `null`. El mismo
+   *  que encabeza su columna en la rejilla. */
+  function profesionalDeLaCita(appt: AgendaAppointment): string | null {
+    const id =
+      appt.assignments.find((a) => a.reservableType === "STAFF")?.staffUserId ??
+      null;
+    if (!id) return null;
+    return day?.staff.find((s) => s.userId === id)?.displayName ?? null;
+  }
+
   function entrarEnElBorrador(appointmentId: string, ticketId: string) {
     if (!onEnterDraft) {
       flash("Ticket pre-poblado abierto en caja.");
@@ -835,6 +864,13 @@ export function AgendaPage({
       ticketId,
       clientName: appt ? clientNameOrNull(appt.clientId) : null,
       serviceLabel: appt ? serviceNames(appt) : "",
+      // clinica-9 (15) · «Atendido por» YA PUESTO. Era un campo de texto
+      // libre en blanco en el cobro de una cita que ya sabe quién la
+      // atiende: la recepción lo dejaba vacío o lo tecleaba a mano con
+      // la paciente delante, y en el ticket acababa un nombre a medias o
+      // ninguno. Sale de la asignación de la cita, que es la MISMA
+      // columna de la agenda en la que está pintada.
+      atendidoPor: appt ? profesionalDeLaCita(appt) : null,
     });
     onClose();
   }
@@ -1318,6 +1354,63 @@ export function AgendaPage({
         </button>
         )}
       </div>
+
+      {/* ── clinica-9 (9) · LA PRÓXIMA CITA PROPUESTA ──────────────────
+          La pantalla de cierre le promete a la sanitaria que «la recepción
+          elige el hueco con el paciente al cobrar». La pasada del 24-10
+          cobró una sesión con «4 semanas» propuestas y en el cobro no
+          salió nada: la propuesta se quedó dentro de la historia clínica,
+          que es el único sitio donde la recepción no mira.
+          Sale AQUÍ, en la agenda del día, que es donde la recepción está
+          cuando acaba de cobrar y la paciente sigue delante. Y se apaga
+          sola en cuanto esa persona tiene una cita por delante: un
+          recordatorio que hay que apagar a mano acaba encendido siempre.
+          Sólo para quien cobra, como el resto de lo de caja. */}
+      {puedeCobrar && (day?.proximasCitas ?? []).length > 0 && (
+        <div
+          data-test="proximas-citas-propuestas"
+          className="px-3 md:px-6 py-2 bg-mipiace-coral-soft/60 border-b border-mipiace-coral/20 space-y-1.5"
+        >
+          {(day?.proximasCitas ?? []).map((p) => (
+            <div
+              key={p.appointmentId}
+              className="flex items-center gap-3 flex-wrap text-[13px] text-mipiace-ink"
+            >
+              <span className="flex-1 min-w-0">
+                <b className="font-semibold">
+                  {clientLabel(p.clientId).nombre}
+                </b>{" "}
+                se va sin la próxima cita · la sanitaria propuso{" "}
+                {NOMBRE_DE_PROXIMA_CITA[
+                  p.propuesta as keyof typeof NOMBRE_DE_PROXIMA_CITA
+                ]?.toLowerCase() ?? p.propuesta}
+                .
+              </span>
+              <button
+                data-test={`dar-proxima-cita-${p.appointmentId}`}
+                onClick={() => {
+                  // El día propuesto pasa a ser el de la agenda: es el
+                  // punto de partida de «Buscar hueco», que busca sobre
+                  // el día que se está viendo.
+                  setDate(p.desde);
+                  setDetail(null);
+                  setBookError(null);
+                  setDraft({
+                    clientId: p.clientId,
+                    clientName: clientNameOrNull(p.clientId),
+                    serviceIds: [],
+                    staffUserId: null,
+                    start: null,
+                  });
+                }}
+                className="shrink-0 min-h-touch px-4 rounded-2xl bg-mipiace-coral text-white text-[13px] font-semibold"
+              >
+                Dársela ahora
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* B-reservas-7a · el día CERRADO se dice arriba y con su nombre, no
           se deduce de una rejilla vacía. «Cerrado · Virgen del Prado» es lo
@@ -2712,7 +2805,18 @@ function BookingPanel(props: {
             Servicios {totalDuration > 0 && `· ${totalDuration} min`}
             {endHHMM && ` · fin ${endHHMM}`}
           </label>
-          <div className="mt-1 space-y-1 max-h-52 overflow-y-auto">
+          {/* clinica-9 (13) · SIN CAJA DE CUATRO LÍNEAS CON SCROLL PROPIO.
+              `max-h-52 overflow-y-auto` dejaba los 17 servicios de una
+              clínica dentro de una ventana de ~4 filas con su barra
+              dentro del panel, que ya scrollea (pasada del 24-10,
+              capturas 08-09): dos scrolls anidados, y el de dentro sólo
+              se mueve si el dedo cae justo encima. La lista ocupa ahora
+              lo que ocupe y el panel entero hace el scroll, que es el
+              gesto que la recepción ya está haciendo.
+              Lo que la hace manejable no es recortarla: es que esté
+              agrupada por categoría y ordenada por uso (clinica-8 fase
+              B, 17, `servicios-de-la-cita.ts`). */}
+          <div className="mt-1 space-y-1">
             {/* agenda-lista · una lista vacía no es una frase. Tres causas
                 distintas, tres mensajes, porque se arreglan en sitios
                 distintos: el catálogo, la matriz, o nada. */}

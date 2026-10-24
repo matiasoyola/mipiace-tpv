@@ -142,6 +142,16 @@ const DIA = {
 
 let llamadas: Array<{ path: string; init?: any }>;
 let sesionesPorCobrar: string[];
+/** clinica-9 (9) · las propuestas de próxima cita que manda la API. */
+let proximasCitas: Array<{
+  appointmentId: string;
+  clientId: string;
+  propuesta: string;
+  desde: string;
+}>;
+/** clinica-9 (4) · las citas del día que contesta la API. Por defecto, la
+ *  de Carmen de hoy; un test la mueve a otro día. */
+let citasDelDia: Array<typeof CITA>;
 let container: HTMLDivElement;
 let root: Root;
 
@@ -152,6 +162,8 @@ beforeEach(async () => {
   await __resetOutboxForTests();
   llamadas = [];
   sesionesPorCobrar = [];
+  proximasCitas = [];
+  citasDelDia = [CITA];
   cacheMock.clinica = false;
   apiMock.apiWithCashier.mockReset();
   apiMock.apiWithCashier.mockImplementation(async (path: string, init?: any) => {
@@ -159,11 +171,12 @@ beforeEach(async () => {
     if (path.startsWith("/agenda?")) {
       return {
         staff: [ROSA],
-        appointments: [CITA],
+        appointments: citasDelDia,
         slotMinutes: 15,
         days: [DIA],
         valoracionesPendientes: [],
         sesionesPorCobrar,
+        proximasCitas,
       };
     }
     if (path === "/agenda/availability") return { slots: [] };
@@ -328,5 +341,114 @@ describe("clinica-8 · en una clínica, primero la sesión y después el cobro",
     expect(
       container.querySelector<HTMLElement>('[data-test="sesion-de-hoy"]')!.className,
     ).toContain("bg-mipiace-coral-soft");
+  });
+});
+
+// ── clinica-9 (4) · LA SESIÓN SE ABRE EL DÍA DE LA CITA ─────────────
+//
+// La pasada del 24-10 abrió desde la agenda del sábado la cita del lunes
+// 26 y el botón decía «Sesión de hoy». No lo era: la sesión se firmó con
+// la fecha del sábado.
+//
+// Sabotaje: devuelve `props.citaEsDeHoy` a `true` fijo en el detalle.
+describe("clinica-9 · la cita de otro día no dice «Sesión de hoy»", () => {
+  it("hoy: el botón es el de siempre y no hay aviso", async () => {
+    cacheMock.clinica = true;
+    await render({ esSanitario: true });
+    await abrirDetalle();
+    expect(porTexto("Sesión de hoy")).not.toBeNull();
+    expect(
+      container.querySelector('[data-test="sesion-fuera-del-dia"]'),
+    ).toBeNull();
+  });
+
+  it("mañana: «Ver la sesión» y la línea que lo explica", async () => {
+    cacheMock.clinica = true;
+    // La misma cita, movida al día siguiente. La agenda la pide por su
+    // día y el mock contesta lo que haya en `citasDelDia`.
+    citasDelDia = [
+      {
+        ...CITA,
+        start: "2026-10-20T08:00:00.000Z",
+        end: "2026-10-20T08:30:00.000Z",
+      },
+    ];
+    await render({ esSanitario: true });
+    // La tira de siete días: «mar 20».
+    const chip = [...container.querySelectorAll<HTMLElement>("button")].find(
+      (b) => (b.textContent ?? "").trim().toLowerCase().includes("20"),
+    );
+    if (!chip) throw new Error("no hay chip del día 20");
+    await click(chip);
+    await abrirDetalle();
+    expect(porTexto("Sesión de hoy")).toBeNull();
+    expect(porTexto("Ver la sesión")).not.toBeNull();
+    expect(
+      container.querySelector('[data-test="sesion-fuera-del-dia"]')
+        ?.textContent,
+    ).toContain("se abre el día de la cita");
+  });
+});
+
+// ── clinica-9 (9) · LA PRÓXIMA CITA PROPUESTA, OFRECIDA ─────────────
+//
+// La sesión se cierra con «Próxima cita: 4 semanas» y la pantalla le
+// promete a la sanitaria que «la recepción elige el hueco con el paciente
+// al cobrar». La pasada del 24-10 cobró esa sesión y en el cobro no salió
+// nada: la propuesta se quedó dentro de la historia clínica.
+//
+// Sabotaje: quita la banda de `AgendaPage` y caen los tres.
+describe("clinica-9 · la próxima cita propuesta se ofrece en la agenda", () => {
+  const PROPUESTA = {
+    appointmentId: "ap-carmen",
+    clientId: "cl-carmen",
+    propuesta: "S4",
+    desde: "2026-11-16",
+  };
+
+  it("sin propuestas no hay banda: no es ruido fijo", async () => {
+    await render();
+    expect(
+      container.querySelector('[data-test="proximas-citas-propuestas"]'),
+    ).toBeNull();
+  });
+
+  it("con una, dice de quién y cuántas semanas propuso la sanitaria", async () => {
+    proximasCitas = [PROPUESTA];
+    await render();
+    const banda = container.querySelector(
+      '[data-test="proximas-citas-propuestas"]',
+    );
+    expect(banda).not.toBeNull();
+    expect(banda!.textContent).toContain("4 semanas");
+    expect(banda!.textContent).toContain("Dársela ahora");
+  });
+
+  it("«Dársela ahora» lleva la agenda al día propuesto y abre la cita", async () => {
+    proximasCitas = [PROPUESTA];
+    await render();
+    const boton = container.querySelector<HTMLElement>(
+      '[data-test="dar-proxima-cita-ap-carmen"]',
+    );
+    if (!boton) throw new Error("no hay botón de dar la próxima cita");
+    await click(boton);
+    // La agenda se ha ido al día propuesto: es el punto de partida de
+    // «Buscar hueco», que busca sobre el día que se está viendo.
+    expect(
+      llamadas.some((l) => l.path === `/agenda?date=${PROPUESTA.desde}`),
+    ).toBe(true);
+    // Y la hoja de «Nueva cita» está abierta.
+    expect(container.textContent).toContain("Nueva cita");
+  });
+
+  it("sólo para quien cobra: a un sanitario sin caja no se le ofrece", async () => {
+    // La banda lleva a dar una cita, que sí puede; pero el aviso es de
+    // caja —sale de lo que se acaba de cobrar— y sigue el mismo criterio
+    // que el resto de lo de caja en esta pantalla.
+    proximasCitas = [PROPUESTA];
+    await render({ puedeCobrar: false });
+    expect(
+      container.querySelector('[data-test="proximas-citas-propuestas"]'),
+    ).toBeNull();
   });
 });

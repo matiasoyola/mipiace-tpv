@@ -66,6 +66,7 @@ import {
   cobrosPendientesDe,
   sesionesPorCobrarDe,
 } from "../clinica/cobros-pendientes.js";
+import { proximasCitasPropuestasDe } from "../clinica/proxima-cita.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import { checkoutAppointment } from "./checkout.js";
 import {
@@ -259,6 +260,19 @@ export async function registerAgendaRoutes(
         desde: from,
         hasta: to,
       });
+      // clinica-9 (9) · y las PRÓXIMAS CITAS PROPUESTAS de las sesiones ya
+      // cobradas. La pantalla de cierre le promete a la sanitaria que «la
+      // recepción elige el hueco con el paciente al cobrar», y hasta este
+      // bloque no se lo decía nadie: la propuesta se quedaba dentro de la
+      // historia clínica, que es el único sitio donde la recepción no
+      // mira. Ver `clinica/proxima-cita.ts` — ni un dato de salud, y la
+      // capability lo primero.
+      const proximasCitas = await proximasCitasPropuestasDe(prismaFor(), {
+        tenantId: auth.tenantId,
+        desde: from,
+        hasta: to,
+        tz: CENTER_TZ,
+      });
       // B-reservas-7a · la rejilla deja de ser ciega. Los cuatro campos de
       // antes siguen ahí y con el mismo nombre: quien no lea los nuevos no
       // se entera de que existen. Todo esto viaja a la caché offline del
@@ -292,6 +306,7 @@ export async function registerAgendaRoutes(
         days,
         valoracionesPendientes,
         sesionesPorCobrar,
+        proximasCitas,
         ...(esSanitario === null ? {} : { esSanitario }),
       };
     },

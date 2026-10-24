@@ -1053,6 +1053,8 @@ export function TpvHome(props: {
                 activeTicketId: entry.ticketId,
                 clientName: entry.clientName,
                 serviceLabel: entry.serviceLabel,
+                // clinica-9 (15) · «Atendido por» ya puesto en el cobro.
+                atendidoPor: entry.atendidoPor ?? null,
               },
             })
           }

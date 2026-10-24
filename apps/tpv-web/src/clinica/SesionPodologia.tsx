@@ -1993,14 +1993,21 @@ function ComunDeLaSesion(props: {
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-3xl p-5">
-      <button
-        type="button"
-        onClick={props.onRepetir}
-        disabled={!props.hayAnterior}
-        className="w-full h-14 bg-mipiace-coral-soft text-mipiace-coral-dark font-semibold rounded-2xl text-[15px] mb-3.5 disabled:opacity-45 disabled:cursor-not-allowed"
-      >
-        ↺ Igual que la última vez
-      </button>
+      {/* clinica-9 (15) · EN LA PRIMERA VISITA NO SE PINTA.
+          Era un botón grande, coral y desactivado en lo alto de la
+          tarjeta: en la primera visita de una paciente —que es cuando
+          más llena está la pantalla— lo primero que se ve es una acción
+          apagada que no se puede entender («¿igual que qué última
+          vez?»). No hay anterior: no hay botón. */}
+      {props.hayAnterior && (
+        <button
+          type="button"
+          onClick={props.onRepetir}
+          className="w-full h-14 bg-mipiace-coral-soft text-mipiace-coral-dark font-semibold rounded-2xl text-[15px] mb-3.5"
+        >
+          ↺ Igual que la última vez
+        </button>
+      )}
 
       <Seccion titulo="Dolor hoy (0 = nada · 10 = el peor)">
         {/* clinica-8 (fase B, 13) · EL «10» YA NO CAE SOLO EN OTRA FILA.

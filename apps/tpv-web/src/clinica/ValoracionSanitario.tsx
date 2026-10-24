@@ -93,6 +93,8 @@ export interface VistaValoracion {
     | { puede: true; valoracionId: string; validadaEn: string }
     | { puede: false; motivo: string; mensaje: string };
   textosConfirmacion: Record<keyof Confirmaciones, string>;
+  /** clinica-9 (7) · si hay por dónde mandar el test. Nunca la dirección. */
+  paciente?: { tieneEmail: boolean };
 }
 
 const ETIQUETA: Record<Respuesta, string> = {
@@ -286,6 +288,11 @@ export function ValoracionSanitario(props: {
 
   const v = vista.valoracion;
   const validada = v?.estado === "VALIDADA";
+  // clinica-9 (7) · `?? false` y no `?? true`: contra una API anterior a
+  // este bloque el campo no viene, y entonces la pantalla se comporta
+  // como hasta ahora en vez de decirle a la sanitaria que una paciente
+  // con correo no lo tiene.
+  const sinEmail = vista.paciente?.tieneEmail === false;
 
   return (
     <div className="space-y-4">
@@ -332,15 +339,29 @@ export function ValoracionSanitario(props: {
       {!v && (
         <>
           <p className="text-[13px] text-slate-500 leading-relaxed">
-            Antes del primer tratamiento hace falta la valoración inicial.
-            Mándale el test por email o ábrele la tablet de la sala.
+            Antes del primer tratamiento hace falta la valoración inicial.{" "}
+            {sinEmail
+              ? "Este paciente no tiene email en su ficha: ábrele la tablet de la sala."
+              : "Mándale el test por email o ábrele la tablet de la sala."}
           </p>
-          <BotonesDelTest ocupado={ocupado} onAccion={accion} />
+          <BotonesDelTest
+            ocupado={ocupado}
+            onAccion={accion}
+            sinEmail={sinEmail}
+          />
         </>
       )}
 
       {/* ── 2 · la franja de alertas ───────────────────────────────── */}
-      {v && <FranjaDeAlertas alertas={vista.alertas} validada={validada} />}
+      {v && (
+        <FranjaDeAlertas
+          alertas={vista.alertas}
+          validada={validada}
+          // clinica-9 (7) · antes de que conteste no hay nada «sin
+          // resolver»: hay un test sin contestar.
+          respondida={v.estado !== "PENDIENTE_PACIENTE"}
+        />
+      )}
 
       {/* ── El aviso verde de después de validar ───────────────────── */}
       {v && validada && (
@@ -358,17 +379,38 @@ export function ValoracionSanitario(props: {
 
       {/* ── El enlace vivo, y reenviarlo ───────────────────────────── */}
       {v && v.estado === "PENDIENTE_PACIENTE" && (
-        <div className="bg-amber-50 text-amber-700 rounded-2xl px-4 py-3.5 text-[13.5px] leading-snug space-y-3">
+        <div
+          data-test="valoracion-pendiente"
+          className="bg-amber-50 text-amber-700 rounded-2xl px-4 py-3.5 text-[13.5px] leading-snug space-y-3"
+        >
           <div>
-            El paciente todavía no ha contestado.
-            {v.enlace?.activo && v.enlace.caducaEn && (
-              <> El enlace que se le mandó vale hasta el {dia(v.enlace.caducaEn)}.</>
+            El paciente todavía no ha contestado.{" "}
+            {/* clinica-9 (7) · SIN EMAIL NO SE MANDÓ NADA.
+                La pasada del 24-10 (captura 14) leyó «El enlace que se le
+                mandó vale hasta el 22 de noviembre» en la pantalla de una
+                paciente sin correo en su ficha. No se le mandó: no hay a
+                dónde. La sanitaria esperaba una respuesta que no podía
+                llegar, y lo único que había que hacer era darle la
+                tablet. */}
+            {sinEmail ? (
+              <>
+                No tiene email en su ficha, así que no se le ha podido
+                mandar nada: <b className="font-semibold">ábrele la tablet
+                de la sala</b> y lo contesta aquí. (Si prefieres mandárselo,
+                ponle el email en su ficha.)
+              </>
+            ) : (
+              v.enlace?.activo &&
+              v.enlace.caducaEn && (
+                <>El enlace que se le mandó vale hasta el {dia(v.enlace.caducaEn)}.</>
+              )
             )}
           </div>
           <BotonesDelTest
             ocupado={ocupado}
             onAccion={accion}
             reenviar={v.canal === "EMAIL"}
+            sinEmail={sinEmail}
           />
         </div>
       )}
@@ -465,8 +507,35 @@ export function ValoracionSanitario(props: {
 
 // ── La franja de alertas ─────────────────────────────────────────────
 
-function FranjaDeAlertas(props: { alertas: Alertas; validada: boolean }) {
+function FranjaDeAlertas(props: {
+  alertas: Alertas;
+  validada: boolean;
+  /** clinica-9 (7) · ¿ha contestado ya el paciente? */
+  respondida: boolean;
+}) {
   const { alertas, sinResolver } = props.alertas;
+  // ── clinica-9 (7) · UN TEST SIN CONTESTAR NO ES UNA ALERTA ────────
+  //
+  // Antes de que el paciente conteste, TODAS las preguntas cuentan como
+  // «sin resolver», así que la pantalla pintaba una franja roja con
+  // «ALERTAS · 10 respuestas sin resolver» sobre una valoración que
+  // nadie ha abierto todavía (pasada del 24-10, captura 14). Rojo es el
+  // color de «este paciente es anticoagulado»; gastarlo en «todavía no
+  // ha contestado» es enseñar a no mirarlo.
+  //
+  // Mientras no haya contestado, la franja dice lo que hay: nada que
+  // mirar todavía. Las alertas de verdad no pueden existir aún — salen
+  // de respuestas que no hay.
+  if (!props.respondida) {
+    return (
+      <div
+        data-test="sin-contestar"
+        className="bg-mipiace-stone text-slate-500 rounded-2xl px-3.5 py-3 text-[13px]"
+      >
+        Sin alertas todavía: el test está sin contestar.
+      </div>
+    );
+  }
   if (alertas.length === 0 && sinResolver.length === 0) {
     return (
       <div className="bg-mipiace-stone text-slate-500 rounded-2xl px-3.5 py-3 text-[13px]">
@@ -650,9 +719,16 @@ function BotonesDelTest(props: {
   ocupado: boolean;
   onAccion: (c: "enviar" | "tablet") => void;
   reenviar?: boolean;
+  /** clinica-9 (7) · sin email no hay a dónde mandarlo. */
+  sinEmail?: boolean;
 }) {
   return (
     <div className="flex gap-2 flex-wrap">
+      {/* clinica-9 (7) · el botón de mandar NO SALE sin email. Ofrecerlo
+          es ofrecer un camino que contesta «este paciente no tiene
+          email» después de pulsarlo: el error se sabe antes, así que se
+          dice antes y queda un solo camino, el que funciona. */}
+      {!props.sinEmail && (
       <button
         type="button"
         disabled={props.ocupado}
@@ -666,6 +742,7 @@ function BotonesDelTest(props: {
         )}
         {props.reenviar ? "Reenviar el test" : "Enviar el test"}
       </button>
+      )}
       <button
         type="button"
         disabled={props.ocupado}
