@@ -366,16 +366,32 @@ describe("a dónde entra después de elegir la contraseña", () => {
 });
 
 describe("la pantalla del contrato", () => {
-  it("abre con las tres líneas en llano y el texto legal PLEGADO", async () => {
+  // contrato-lectura-completa · ESTE CASO CAMBIÓ DE FORMA.
+  //
+  // En primer-acceso el texto legal iba PLEGADO en un `<details>` y las
+  // tres líneas en llano lo sustituían. El 24-10-2026 se vio que así se
+  // podía marcar la casilla y aceptar sin haberlo abierto, y el bloque
+  // `contrato-lectura-completa` lo desplegó: el texto está a la vista en
+  // un recuadro con su propio scroll, y las tres líneas se quedan ENCIMA
+  // como resumen.
+  //
+  // Lo que primer-acceso fijó y sigue en pie es el ORDEN —lo llano
+  // primero— y que la pantalla abre con el botón de aceptar. La puerta del
+  // recorrido tiene su propio banco en
+  // `contrato-lectura-completa-pantallas.test.tsx`.
+  it("abre con las tres líneas en llano PRIMERO y el texto legal a la vista", async () => {
     meContrato = { estado: "SIN_CONTRATO", falta: true, puedeAceptar: true };
     await render(<ContratoTratamientoPage />);
-    expect(container.querySelector('[data-test="contrato-en-llano"]')).toBeTruthy();
-    const plegado = container.querySelector("details")!;
-    expect(plegado).toBeTruthy();
-    expect(plegado.hasAttribute("open")).toBe(false);
-    expect(plegado.querySelector("summary")!.textContent).toContain(
-      "Leer el contrato completo",
-    );
+    const llano = container.querySelector('[data-test="contrato-en-llano"]')!;
+    expect(llano).toBeTruthy();
+    const legal = container.querySelector('[data-test="contrato-texto"]')!;
+    expect(legal).toBeTruthy();
+    // Lo llano, antes del texto legal.
+    expect(
+      llano.compareDocumentPosition(legal) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Y ya no hay nada plegado que se pueda no abrir.
+    expect(container.querySelector("details")).toBeNull();
     const aceptar = container.querySelector('[data-test="contrato-aceptar"]')!;
     expect(aceptar.textContent).toContain("Acepto");
   });
