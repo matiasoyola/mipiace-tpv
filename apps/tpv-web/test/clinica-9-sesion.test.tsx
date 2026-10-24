@@ -379,3 +379,28 @@ describe("clinica-9 · firmar un consentimiento no borra el tipo marcado", () =>
     });
   });
 });
+
+// ── clinica-9 (11) · LA HOJA DE FIRMAR DICE LA GRAVEDAD ─────────────
+//
+// Pasada del 24-10, captura 32: la hoja «Revisa lo que se va a firmar»
+// decía «Pie izq. · Bajo 3.º–5.º dedo: Callo (heloma)» y la lista de la
+// tarjeta, dos dedos más arriba, decía «Callo (heloma) (moderada)». La
+// hoja es lo ÚLTIMO que se lee antes de firmar algo que ya no se edita, y
+// «callo» y «callo severo» no son la misma anotación.
+//
+// Sabotaje: quita el sufijo de gravedad de `HojaDeConfirmarCierre` y cae.
+describe("clinica-9 · la hoja de firmar dice la gravedad de cada lesión", () => {
+  it("la zona sale con su lesión Y su gravedad", async () => {
+    await montar();
+    const zona = host.querySelector('[data-zona="L:h"]') as HTMLElement;
+    await pulsar(zona);
+    await pulsar(botonPorTexto("Callo (heloma)"));
+    await pulsar(botonPorTexto("Moderada"));
+    await pulsar(botonPorTexto("3"));
+    await pulsar(botonPorTexto("Cerrar sesión y cobrar"));
+
+    const hoja = porTest("confirmar-cierre");
+    expect(hoja).not.toBeNull();
+    expect(hoja!.textContent).toContain("Callo (heloma) (moderada)");
+  });
+});
