@@ -408,5 +408,6 @@ contadores, los objetivos táctiles y lo que se sale por la derecha.
 ## 12 · Estado de la rama
 
 - Rama `residencia-cuadro-de-control`, desde `origin/master`. **Pusheada.**
-- **PR contra `master`.** Ni merges ni despliegues.
+- **PR contra `master`: [#48](https://github.com/matiasoyola/mipiace-tpv/pull/48).** Ni merges ni
+  despliegues.
 - CI: `ci`, `smoke`, `e2e`.
