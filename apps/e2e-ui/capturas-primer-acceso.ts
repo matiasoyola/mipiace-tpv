@@ -9,6 +9,11 @@
 //
 //   correo → contraseña → contrato → «Nuevo ingreso», y nada más.
 //
+// contrato-lectura-completa (24-10-2026) cambió una pantalla de este
+// recorrido: el texto del contrato ya no va plegado y el botón no se
+// enciende hasta que se ha recorrido entero. La pasada baja el recuadro
+// hasta el final antes de marcar la casilla, que es lo que hace Carmen.
+//
 // Hermana de `capturas-residencia5.ts` y vive en el repo por lo mismo: el
 // día que alguien quiera volver a ver estas pantallas tiene que poder
 // hacerlo sin reconstruir el guion de memoria.
@@ -47,7 +52,11 @@ const OUTBOX =
     );
     const m = /^\s*EMAIL_OUTBOX_FILE\s*=\s*(.*)$/m.exec(env);
     if (!m?.[1]) throw new Error("Falta EMAIL_OUTBOX_FILE en apps/api/.env");
-    return m[1].trim();
+    // Sin las comillas: `.env.example` las pone en todos sus valores, y
+    // con ellas la ruta es un fichero que no existe (ENOENT a la primera
+    // línea de la pasada). Mismo trato que `seed/base-de-datos.ts` le da
+    // a `DATABASE_URL`.
+    return m[1].trim().replace(/^["']|["']$/g, "");
   })();
 
 const SALIDA = new URL("../../docs/qa/2026-10-23-primer-acceso/", import.meta.url)
@@ -258,12 +267,31 @@ async function main(): Promise<void> {
       .first()
       .waitFor({ timeout: 15_000 });
     await foto(carmenMovil, "08-contrato-390");
-    // Y con el texto legal desplegado, que es lo que se ve si lo abre.
-    await carmenMovil.getByText("Leer el contrato completo").click();
-    await foto(carmenMovil, "09-contrato-desplegado-390");
+    // contrato-lectura-completa · el texto legal YA NO SE PLIEGA: está a
+    // la vista en un recuadro con su propio scroll, y lo que esta foto
+    // enseña es el final del texto, que es lo que abre el botón.
+    await carmenMovil.$eval('[data-test="contrato-texto"]', (el) => {
+      el.scrollTo({ top: el.scrollHeight });
+    });
+    await foto(carmenMovil, "09-contrato-al-final-390");
 
     // ══ 6 · Acepta y cae en el panel vacío ═════════════════════════
     console.log("\n6 · acepta y aterriza en el panel vacío");
+    // Antes de poder marcar la casilla hay que haber llegado al final:
+    // es la puerta de contrato-lectura-completa.
+    await carmen.$eval('[data-test="contrato-texto"]', (el) => {
+      el.scrollTo({ top: el.scrollHeight });
+    });
+    await carmen.waitForFunction(
+      () =>
+        (
+          document.querySelector(
+            '[data-test="contrato-casilla"]',
+          ) as HTMLInputElement | null
+        )?.disabled === false,
+      undefined,
+      { timeout: 10_000 },
+    );
     await carmen.getByLabel(/He leído el contrato/).check();
     const t1 = Date.now();
     await carmen.getByRole("button", { name: "Acepto" }).click();
