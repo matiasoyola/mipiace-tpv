@@ -545,8 +545,18 @@ export function TestPaciente(props: TestPacienteProps) {
           Va abajo, pequeña y en gris: tiene que encontrarla quien la
           busca —la profesional— sin competir con «Sí» y «No» para quien
           está contestando. */}
+      {/* clinica-9 (8) · UN BOTÓN DE VERDAD, Y GRANDE.
+          Era un enlace subrayado en gris claro al pie de una pantalla
+          hecha a 20 px para una señora de 78 años (pasada del 24-10,
+          captura 15). Quien tiene la tablet en la mano es la paciente, y
+          lo que hace cuando termina —o cuando no quiere seguir— es
+          devolverla: es la segunda acción de esta pantalla, no una nota
+          al pie.
+          Sigue siendo la acción SECUNDARIA —blanca con borde, no coral—
+          porque la primera es contestar; lo que cambia es que ahora se
+          ve y se puede tocar sin apuntar. */}
       {props.onDevolverLaTablet && (
-        <div className="mt-6 flex justify-center">
+        <div className="mt-8 flex justify-center">
           <button
             type="button"
             data-test="devolver-la-tablet"
@@ -558,7 +568,7 @@ export function TestPaciente(props: TestPacienteProps) {
               if (paso.tipo === "gracias") props.onDevolverLaTablet!();
               else setDevolviendo(true);
             }}
-            className="min-h-touch px-4 rounded-2xl text-[15px] text-slate-500 underline underline-offset-4"
+            className="min-h-[72px] w-full max-w-[520px] px-6 rounded-[20px] bg-white border-2 border-slate-300 text-mipiace-ink text-[20px] font-semibold"
           >
             Devolver la tablet al centro
           </button>

@@ -114,7 +114,25 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
   /** El de la sanitaria sin caja: mismo register, rol CLINICIAN. */
   let tokenSanitaria = "";
 
-  const DIA = "2026-09-10";
+  /**
+   * clinica-9 (4) · EL DÍA DE LAS CITAS DE ESTE FICHERO ES HOY.
+   *
+   * Era `"2026-09-10"`, una fecha fija, porque hasta este bloque la fecha de
+   * una cita no significaba nada. Ahora sí: `cerrarSesion` sólo firma la
+   * sesión el día de la cita (`sePuedeCerrarLaSesion`), así que una cita de
+   * septiembre de 2026 contestaría `409 FUERA_DEL_DIA` y este fichero entero
+   * se iría a rojo por una fecha, no por el cobro, que es lo que prueba.
+   *
+   * El día es el de PARED DEL CENTRO, el mismo que mira la regla. Una pasada
+   * que empezara a las 23:59 y cerrara a las 00:00 cae dentro del margen de
+   * la madrugada (hasta las 6), así que no hay carrera con el cambio de día.
+   */
+  const DIA = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 
   function cabecera(t: string) {
     return { authorization: `Bearer ${t}` };

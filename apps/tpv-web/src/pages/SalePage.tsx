@@ -413,6 +413,15 @@ export interface AppointmentContext {
   // Para el encabezado y el aviso de vuelta a la agenda.
   clientName: string | null;
   serviceLabel: string;
+  /**
+   * clinica-9 (15) · quién atiende la cita, para que «Atendido por» del
+   * cobro venga puesto en vez de en blanco.
+   *
+   * Es una SEMILLA: en cuanto el campo existe, manda lo que se teclee en
+   * él. La recepción lo puede cambiar —a veces atiende otra persona— y
+   * lo que no tiene que hacer es teclear lo que el sistema ya sabe.
+   */
+  atendidoPor?: string | null;
 }
 
 export interface SalePageProps {
@@ -3752,6 +3761,8 @@ export function SalePage(props: SalePageProps) {
                   ? etiquetaDeMostrador(mostrador.numero)
                   : undefined
           }
+          // clinica-9 (15) · ver `AppointmentContext.atendidoPor`.
+          attendedByInicial={appointmentContext?.atendidoPor ?? null}
           doneLabel={appointmentContext ? "Volver a la agenda" : undefined}
           onPaid={
             appointmentContext

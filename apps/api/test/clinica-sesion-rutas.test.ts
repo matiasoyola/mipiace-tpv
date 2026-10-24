@@ -42,7 +42,7 @@ import {
   llaveroFake,
 } from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CUESTIONARIO_V1 } from "@mipiacetpv/clinica-valoracion";
 
@@ -574,7 +574,20 @@ function cerrarCon(
 
 const CERRAR_MINIMO = cerrarCon([QUIROPODIA]);
 
+// clinica-9 (4) · EL RELOJ DE ESTE BANCO ES EL DEL DÍA DE LA CITA.
+//
+// La sesión se firma el día de la cita (`sePuedeCerrarLaSesion`), y las
+// citas de este fichero son del 7 de octubre de 2026 — con el reloj de
+// verdad, cerrar cualquiera de ellas contesta `FUERA_DEL_DIA`. Antes de
+// este bloque la fecha no significaba nada y por eso daba igual.
+//
+// Sólo se finge `Date`: nada de temporizadores, que aquí hay rutas con
+// `await` y un `setTimeout` fingido las dejaría colgadas.
+const AHORA = new Date("2026-10-07T10:00:00.000Z");
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(AHORA);
   clinicaEncendida = true;
   entradas = [];
   valoraciones = [];
@@ -707,6 +720,10 @@ beforeEach(() => {
       staffUserId: DUENA_ID,
     },
   ];
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 /** Le da a Carmen una valoración VALIDADA: la puerta abierta. */
@@ -2429,5 +2446,98 @@ describe("clinica-4 · la vista serializada lleva la segunda puerta", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().consentimientos).toBeDefined();
     expect(r.json().consentimientos.puede).toBe(true);
+  });
+});
+
+// ── clinica-9 (4) · LA SESIÓN SE FIRMA EL DÍA DE LA CITA ────────────
+//
+// Pasada en hierro del 24-10 (capturas 22 y 33): desde la agenda del
+// sábado se abrió la cita del LUNES 26 y la pantalla dijo «Cita de hoy ·
+// 10:00». Al cerrarla, la sesión quedó firmada el sábado. La fecha de la
+// visita es el dato del que cuelga toda la historia.
+//
+// `CITA_VIEJA_ID` es del 21 de septiembre y el reloj de este banco es el
+// 7 de octubre: es la misma situación, mirando hacia atrás.
+//
+// Sabotaje: quita el `if (!sePuedeCerrarLaSesion(cita))` de
+// `cerrarSesion` y caen los tres primeros.
+describe("clinica-9 · la cita de otro día no se firma hoy", () => {
+  beforeEach(() => conValoracionValidada());
+
+  it("cerrarla da 409 FUERA_DEL_DIA y no escribe nada", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_VIEJA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe("FUERA_DEL_DIA");
+    expect(r.json().message).toMatch(/21 de septiembre/);
+    expect(r.json().message).toMatch(/se abre el día de la cita/i);
+    expect(entradas).toHaveLength(0);
+  });
+
+  it("la de HOY se cierra igual que siempre", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(201);
+    expect(entradas).toHaveLength(1);
+  });
+
+  it("y la visita que acaba pasada la medianoche TAMBIÉN", async () => {
+    // Las 00:10 del 8 de octubre en Madrid. La sanitaria tiene la sesión
+    // a medio escribir en la pantalla —no hay borrador— y negarle el
+    // cierre no protege ninguna fecha: tira el trabajo de la visita.
+    vi.setSystemTime(new Date("2026-10-07T22:10:00.000Z"));
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(201);
+  });
+
+  it("la VISTA se abre igual, y dice de qué día es la cita", async () => {
+    // Leer se puede cualquier día: una cita pasada sigue siendo el sitio
+    // desde el que se revisa lo que se escribió ese día (clinica-2). Lo
+    // que la vista trae es el motivo, para que la pantalla lo diga en vez
+    // de ofrecer un botón que la API va a rechazar.
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_VIEJA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().dia).toMatchObject({
+      delaCita: "2026-09-21",
+      esHoy: false,
+      sePuedeCerrar: false,
+    });
+    expect(r.json().dia.mensaje).toMatch(/21 de septiembre/);
+  });
+
+  it("y en la cita de hoy el bloque dice que sí", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().dia).toEqual({
+      delaCita: "2026-10-07",
+      esHoy: true,
+      sePuedeCerrar: true,
+      mensaje: null,
+    });
   });
 });

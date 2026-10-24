@@ -28,6 +28,7 @@
 //     device. La Store y el Register quedan — son el punto de partida
 //     productivo del cliente.
 
+import { NOMBRE_DE_TIENDA_POR_DEFECTO } from "@mipiacetpv/ticket-model";
 import { randomInt } from "node:crypto";
 
 import { DeviceKind, Prisma, type PrismaClient, TicketStatus } from "@mipiacetpv/db";
@@ -81,7 +82,11 @@ export async function provisionTestCashier(
     const created = await prisma.store.create({
       data: {
         tenantId,
-        name: "Tienda principal",
+        // clinica-9 (15) · el nombre vive en `@mipiacetpv/ticket-model`,
+        // que es donde hay que reconocerlo para NO imprimirlo en la
+        // cabecera del ticket (`rotuloDeLaCabecera`). Un solo sitio
+        // donde está escrito.
+        name: NOMBRE_DE_TIENDA_POR_DEFECTO,
         ticketDelivery: {
           emailAutoIfCustomerHasEmail: true,
           showQrButton: true,

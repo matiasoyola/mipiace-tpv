@@ -47,7 +47,7 @@
 // «la que tiene compilada» podría ofrecer un acto que el servidor va a
 // tirar.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
 import {
@@ -187,6 +187,14 @@ export interface VistaDeLaSesion {
     puede: boolean;
     faltan: Array<{ id: string; titulo: string }>;
     mensaje: string;
+  };
+  /** clinica-9 (4) · el día de la cita. Lo decide el servidor con la
+   *  misma función que rechaza el cierre: ver `sePuedeCerrarLaSesion`. */
+  dia?: {
+    delaCita: string;
+    esHoy: boolean;
+    sePuedeCerrar: boolean;
+    mensaje: string | null;
   };
   tratamientos: ServicioEnPantalla[];
   tiposSugeridos: TipoDeVisita[];
@@ -354,6 +362,45 @@ function SesionPodologiaDentro(props: {
     useState<ExploracionEnPantalla | null>(null);
   const [avisoExploracion, setAvisoExploracion] = useState<string | null>(null);
 
+  /**
+   * clinica-9 (1) · LA SEMILLA SE SIEMBRA UNA VEZ, Y LA RECARGA NO LA
+   * VUELVE A SEMBRAR.
+   *
+   * Lo encontró la pasada en hierro del 24-10: una sesión con «General» y
+   * «Pie de riesgo» marcados, las cuatro comprobaciones del pie rellenas
+   * («riesgo muy bajo»), y la hoja de firmar diciendo «Tipo de visita:
+   * General». La exploración del pie de una paciente diabética no llegó a
+   * la historia.
+   *
+   * El camino era éste: para hacer una foto hay que firmar el
+   * consentimiento de fotos, firmarlo llama a `onFirmado`, `onFirmado`
+   * llama a `cargar()` — y `cargar()` volvía a SEMBRAR los tipos con los
+   * de los servicios de la cita. Lo que la sanitaria había marcado se
+   * perdía sin decir nada, y con el tipo se iba su bloque entero (los
+   * bloques se derivan de `tipos`).
+   *
+   * No es «un tipo sin servicio en su categoría se descarta al cerrar»,
+   * que era la sospecha: el servidor guarda un tipo marcado cobre o no
+   * (regla 11 de clinica-5, fijada en `normalizarSesionV2`). Lo que se
+   * perdía era anterior, y en la pantalla.
+   *
+   * Así que la semilla se siembra la PRIMERA vez y sólo esa. Una recarga
+   * refresca lo que es del servidor —la puerta, los consentimientos, la
+   * última exploración— y no toca nada de lo que hay a medio escribir. Es
+   * la misma regla que el resto del estado de esta pantalla ya cumplía
+   * (las marcas, el dolor y los consejos sobrevivían a la recarga; los
+   * tipos no).
+   *
+   * Guarda la CITA que sembró y no un `true` pelado: hoy esta pantalla se
+   * desmonta entre una cita y otra (la agenda la pinta dentro de un
+   * `{sesionDe && …}`), así que un booleano bastaría — pero el día que
+   * alguien la reutilice sin desmontarla, un `true` dejaría la segunda
+   * cita SIN sus tipos sugeridos, y eso es el mismo fallo con el signo
+   * cambiado. Con el id, la pregunta que se hace es la correcta: «¿ya
+   * sembré los de ESTA cita?».
+   */
+  const sembrado = useRef<string | null>(null);
+
   const cargar = useCallback(async () => {
     setError(null);
     try {
@@ -367,13 +414,19 @@ function SesionPodologiaDentro(props: {
       // clinica-6 · salvo que se venga de la historia viva, que manda los
       // suyos: ahí la podóloga acaba de decir a qué viene hoy, y eso pesa
       // más que lo que diga el catálogo de los servicios de la cita.
-      setTipos(
-        (props.tiposIniciales && props.tiposIniciales.length > 0
-          ? props.tiposIniciales
-          : v.tiposSugeridos
-        ).filter((t) => TIPOS_DE_VISITA.includes(t)),
-      );
-      setExploracion(v.exploracion.departeDe);
+      if (sembrado.current !== props.appointmentId) {
+        sembrado.current = props.appointmentId;
+        setTipos(
+          (props.tiposIniciales && props.tiposIniciales.length > 0
+            ? props.tiposIniciales
+            : v.tiposSugeridos
+          ).filter((t) => TIPOS_DE_VISITA.includes(t)),
+        );
+        // Y la exploración por lo mismo: parte de la última, pero si la
+        // sanitaria lleva media exploración tecleada, una recarga no se
+        // la puede llevar.
+        setExploracion(v.exploracion.departeDe);
+      }
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "No se pudo abrir la sesión.",
@@ -812,6 +865,22 @@ function SesionPodologiaDentro(props: {
           arreglarlo —«Firmar ahora», que lleva a su pestaña—, y no un
           error rojo: es la decisión 7 del prompt. El botón de cerrar sale
           desactivado abajo y el servidor se niega igual. */}
+      {/* clinica-9 (4) · LA CITA NO ES DE HOY.
+          La pasada del 24-10 abrió la cita del lunes 26 desde la agenda y
+          la pantalla la llamó «Cita de hoy»; al firmarla, la sesión quedó
+          con la fecha del sábado. Lo primero de la pantalla, encima de
+          todo, y con el día de la cita escrito: lo que hay que entender
+          es qué día es esta cita, no que algo ha fallado. */}
+      {vista.dia && !vista.dia.sePuedeCerrar && (
+        <div
+          data-test="cita-de-otro-dia"
+          className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-[14px] text-amber-900 leading-snug"
+        >
+          <b className="font-semibold">{vista.dia.mensaje}</b> Puedes mirar la
+          historia y la exploración; lo de hoy se anota en la cita de hoy.
+        </div>
+      )}
+
       {!vista.consentimientos.puede && (
         <FaltaConsentimiento
           mensaje={vista.consentimientos.mensaje}
@@ -1263,7 +1332,11 @@ function SesionPodologiaDentro(props: {
               // clinica-4 · y sin los consentimientos que pide el
               // servicio tampoco se cierra (decisión 7). El motivo lo
               // dice la banda de arriba, no este botón.
-              !vista.consentimientos.puede
+              !vista.consentimientos.puede ||
+              // clinica-9 (4) · ni fuera del día de la cita. Igual que
+              // las dos de arriba: el botón se apaga y el motivo lo dice
+              // la banda, y quien GARANTIZA es `cerrarSesion`.
+              vista.dia?.sePuedeCerrar === false
             }
             className="h-touch-lg px-7 rounded-[18px] bg-mipiace-coral text-white font-medium text-[16px] disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.98] transition-transform motion-reduce:transform-none"
           >
@@ -1375,9 +1448,17 @@ function HojaDeConfirmarCierre(props: {
                     const lesion = props.lesiones.find(
                       (l) => l.id === m.lesion,
                     );
+                    // clinica-9 (11) · CON SU GRAVEDAD. La hoja es lo
+                    // último que se lee antes de firmar, y «callo» y
+                    // «callo severo» no son la misma anotación: la lista
+                    // de la tarjeta ya la decía y aquí se perdía, justo
+                    // en el sitio donde se repasa.
+                    const g = m.gravedad
+                      ? ` (${NOMBRE_DE_GRAVEDAD[m.gravedad].toLowerCase()})`
+                      : "";
                     return `${nombreDeZonaConMapa(clave, props.mapa)}: ${
                       lesion?.label ?? m.lesion
-                    }`;
+                    }${g}`;
                   })
                   .join(" · ")}
           </FilaDelResumen>
@@ -1654,7 +1735,16 @@ function Cabecera(props: { vista: VistaDeLaSesion }) {
             {c.paciente.edad != null && (
               <Ficha titulo="Edad">{c.paciente.edad} años</Ficha>
             )}
-            <Ficha titulo="Cita de hoy">
+            {/* clinica-9 (4) · «Cita de hoy» sólo si lo es. Con la cita
+                de otro día la ficha dice QUÉ día, que es lo que la
+                pasada del 24-10 no tuvo delante. */}
+            <Ficha
+              titulo={
+                props.vista.dia && !props.vista.dia.esHoy
+                  ? `Cita del ${diaCorto(c.citaDeHoy.empieza)}`
+                  : "Cita de hoy"
+              }
+            >
               {hora(c.citaDeHoy.empieza)}
               {c.citaDeHoy.servicios.length > 0 &&
                 ` · ${c.citaDeHoy.servicios.join(" + ")}`}
@@ -1911,14 +2001,21 @@ function ComunDeLaSesion(props: {
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-3xl p-5">
-      <button
-        type="button"
-        onClick={props.onRepetir}
-        disabled={!props.hayAnterior}
-        className="w-full h-14 bg-mipiace-coral-soft text-mipiace-coral-dark font-semibold rounded-2xl text-[15px] mb-3.5 disabled:opacity-45 disabled:cursor-not-allowed"
-      >
-        ↺ Igual que la última vez
-      </button>
+      {/* clinica-9 (15) · EN LA PRIMERA VISITA NO SE PINTA.
+          Era un botón grande, coral y desactivado en lo alto de la
+          tarjeta: en la primera visita de una paciente —que es cuando
+          más llena está la pantalla— lo primero que se ve es una acción
+          apagada que no se puede entender («¿igual que qué última
+          vez?»). No hay anterior: no hay botón. */}
+      {props.hayAnterior && (
+        <button
+          type="button"
+          onClick={props.onRepetir}
+          className="w-full h-14 bg-mipiace-coral-soft text-mipiace-coral-dark font-semibold rounded-2xl text-[15px] mb-3.5"
+        >
+          ↺ Igual que la última vez
+        </button>
+      )}
 
       <Seccion titulo="Dolor hoy (0 = nada · 10 = el peor)">
         {/* clinica-8 (fase B, 13) · EL «10» YA NO CAE SOLO EN OTRA FILA.

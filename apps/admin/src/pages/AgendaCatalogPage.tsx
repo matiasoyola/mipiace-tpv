@@ -20,6 +20,7 @@ import { useNavigate } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
+import { useTenantCapabilities } from "../capabilities.js";
 import {
   api,
   ApiError,
@@ -212,6 +213,10 @@ export function AgendaCatalogPage() {
   const effective = readEffectiveAuth();
   const canEdit = effective.canEdit;
   const readonlyTip = readonlyReasonLabel(effective.readonlyReason);
+  // clinica-9 (15) · ¿este comercio usa Holded? `!== false` como en el
+  // resto de la casa: mientras no se sepa, se habla como siempre.
+  const capacidades = useTenantCapabilities();
+  const conHolded = capacidades?.holdedEnabled !== false;
 
   function handleAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -309,10 +314,19 @@ export function AgendaCatalogPage() {
 
   return (
     <AdminShell title="Agenda · Catálogo">
+      {/* clinica-9 (15) · SIN HOLDED NO SE HABLA DE HOLDED.
+          La «Clínica demo» no tiene Holded —su catálogo entró por el CSV
+          del super-admin— y esta pantalla le decía que el precio «viene
+          de Holded» y que los servicios «se crean en Holded». Es mandar
+          a la dueña a un sitio que ella no tiene, y lo leyó la pasada del
+          24-10. El nombre del ERP sale de `useTenantCapabilities`, que
+          esta pantalla ya tenía a mano. */}
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">
         Añade a cada servicio los datos que la agenda necesita: duración,
-        pausas, nº de profesionales, familia y en qué canales se ofrece. El
-        precio y el IVA vienen de Holded y no se editan aquí.
+        pausas, nº de profesionales, familia y en qué canales se ofrece.{" "}
+        {conHolded
+          ? "El precio y el IVA vienen de Holded y no se editan aquí."
+          : "El precio y el IVA son los del catálogo y no se editan aquí."}
         {!canEdit && readonlyTip && " " + readonlyTip + "."}
       </p>
 
@@ -355,9 +369,10 @@ export function AgendaCatalogPage() {
           <CenteredLoader label="Cargando servicios…" />
         ) : services.length === 0 ? (
           <p className="text-[13.5px] text-slate-500">
-            No hay servicios en el catálogo. Los servicios se crean en Holded
-            (productos de tipo servicio); aquí sólo se les añade la duración y
-            los datos de agenda.
+            No hay servicios en el catálogo.{" "}
+            {conHolded
+              ? "Los servicios se crean en Holded (productos de tipo servicio); aquí sólo se les añade la duración y los datos de agenda."
+              : "Los servicios entran con el catálogo; aquí sólo se les añade la duración y los datos de agenda."}
           </p>
         ) : (
           <>
@@ -1138,8 +1153,8 @@ function TiposDeVisitaSection({
         (Quiropodia, Pie de riesgo, Cirugía, Biomecánica o General). Los
         servicios de esa categoría lo heredan: de ahí sale qué pantalla abre
         la sesión y de qué tipo se cobra cada línea. Una categoría sin tipo
-        es una categoría normal. El <em>slug</em> es la etiqueta tal y como
-        la usas en Holded, en minúsculas (<code>podologia</code>,{" "}
+        es una categoría normal. El <em>slug</em> es la etiqueta del
+        servicio en tu catálogo, en minúsculas (<code>podologia</code>,{" "}
         <code>cirugia</code>).
       </p>
 

@@ -905,6 +905,10 @@ async function executeShiftClose(args: {
           { role: { in: ["MANAGER", "OWNER"] } },
         ],
         pinHash: { not: null },
+        // clinica-9 (6) · ver el mismo filtro en `tables/routes.ts`: el
+        // actor de sistema no autoriza un cierre de caja, y no se confía
+        // en que el CHECK de la base sea lo único que lo impida.
+        isSystemActor: false,
       },
       select: { id: true, email: true, alias: true, role: true, pinHash: true },
     });

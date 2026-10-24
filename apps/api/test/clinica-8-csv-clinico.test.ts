@@ -82,8 +82,19 @@ describe("clinica-8 · el CSV real de Rosario, con las marcas de clínica", () =
     expect(primeras).toEqual(["POD-001"]);
   });
 
-  it("los tratamientos de la sesión son los 16 que no son la valoración", () => {
-    expect(r.buenas.filter((f) => f.clinica?.tratamientoSesion)).toHaveLength(16);
+  // clinica-9 (2) · SON LOS 17, Y LA VALORACIÓN ES UNO DE ELLOS.
+  //
+  // Hasta el 24-10 eran 16: «Consulta diagnóstico» entraba con
+  // `primera_valoracion=si` y `tratamiento_sesion=no`. Las dos columnas
+  // parecen la misma pregunta y no lo son — la primera dice con qué
+  // servicio se CITA la primera visita, la segunda qué botones salen
+  // DENTRO de la sesión— y con la segunda en «no», la primera visita de
+  // cada paciente nuevo cerraba a 0 €. La pasada en hierro lo firmó.
+  it("los tratamientos de la sesión son los 17: la valoración también se cobra", () => {
+    expect(r.buenas.filter((f) => f.clinica?.tratamientoSesion)).toHaveLength(17);
+    const valoracion = r.buenas.find((f) => f.fields.sku === "POD-001")!;
+    expect(valoracion.clinica?.primeraValoracion).toBe(true);
+    expect(valoracion.clinica?.tratamientoSesion).toBe(true);
   });
 });
 

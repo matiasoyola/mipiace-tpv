@@ -40,6 +40,8 @@ interface FakeUser {
   createdAt: Date;
   deletedAt: Date | null;
   isTestCashier: boolean;
+  /** clinica-9 (6) · «Paciente (por enlace)» (`clinica/actor-paciente.ts`). */
+  isSystemActor: boolean;
 }
 
 const users = new Map<string, FakeUser>();
@@ -54,6 +56,10 @@ function matchesWhere(u: FakeUser, where: any): boolean {
   if (where.role?.in && !where.role.in.includes(u.role)) return false;
   if (where.deletedAt === null && u.deletedAt !== null) return false;
   if (where.isTestCashier === false && u.isTestCashier) return false;
+  // clinica-9 (6) · el fake SÍ mira `isSystemActor`, por lo mismo que
+  // mira los otros dos: uno que lo ignorara saldría verde con el filtro
+  // quitado.
+  if (where.isSystemActor === false && u.isSystemActor) return false;
   if (where.email && typeof where.email === "string" && u.email !== where.email)
     return false;
   if (where.alias?.equals !== undefined) {
@@ -119,6 +125,7 @@ const fakePrisma = {
         createdAt: new Date(),
         deletedAt: null,
         isTestCashier: false,
+        isSystemActor: data.isSystemActor === true,
       };
       users.set(u.id, u);
       return u;
@@ -131,6 +138,14 @@ const fakePrisma = {
       clinicalRecordsEnabled: true,
     })),
   },
+  // clinica-9 (5) · renombrar escribe también el «Nombre en la agenda»
+  // de quien tenga perfil de profesional (`lib/un-solo-nombre.ts`).
+  staffProfile: {
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: any) => create),
+  },
+  // clinica-9 (5) · las dos columnas del nombre se escriben juntas.
+  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
 } as const;
 
 vi.mock("../src/context.js", () => ({
@@ -171,10 +186,27 @@ function seed(overrides: Partial<FakeUser> = {}): FakeUser {
     createdAt: new Date(),
     deletedAt: null,
     isTestCashier: false,
+    isSystemActor: false,
     ...overrides,
   };
   users.set(u.id, u);
   return u;
+}
+
+/**
+ * clinica-9 (6) · EL ACTOR DE SISTEMA, tal cual lo crea
+ * `resolverActorPaciente`: alias «Paciente (por enlace)», email técnico
+ * `@enlace.local`, rol `CASHIER` y SIN credenciales (el CHECK
+ * `users_system_actor_no_credentials` no le deja tenerlas).
+ */
+function actorPaciente(): FakeUser {
+  return seed({
+    email: `paciente-${TENANT}@enlace.local`,
+    alias: "Paciente (por enlace)",
+    pinHash: null,
+    role: "CASHIER",
+    isSystemActor: true,
+  });
 }
 
 /** El cajero técnico de «Probar TPV», tal cual lo crea el super-admin. */
@@ -315,5 +347,86 @@ describe("clinica-8 · y las rutas que ESCRIBEN tampoco los alcanzan", () => {
     expect(del.statusCode).toBe(200);
     // Y tras revocarlo, desaparece de la lista con su centinela.
     expect(await listar()).toEqual([]);
+  });
+});
+
+// ── clinica-9 (6) · «PACIENTE (POR ENLACE)» NO ES PERSONAL ──────────
+//
+// `clinica/actor-paciente.ts` lo dejó escrito en clinica-2: «No sale en
+// `GET /cashiers`, ni en `GET /staff`, ni entre los candidatos a PIN de
+// encargado, ni cuenta para la colisión de alias. Esas cuatro listas
+// filtran por `isSystemActor: false`».
+//
+// **No lo filtraba ninguna.** La pasada en hierro del 24-10 lo encontró
+// en Cajeros con sus tres botones, y «Cambiar PIN» contestaba «error
+// inesperado»: el 500 del CHECK `users_system_actor_no_credentials`, que
+// es lo único que impedía que esa fila acabara con acceso a la caja.
+//
+// Sabotaje: quita `isSystemActor: false` de `PERSONAL_DE_LA_CAJA` y caen
+// los cuatro primeros; quítalo de `findAliasCollision` y cae el último.
+describe("clinica-9 · el actor de sistema no sale en Cajeros", () => {
+  it("la lista no lo enseña", async () => {
+    const marta = seed({ alias: "Marta" });
+    actorPaciente();
+    const lista = await listar();
+    expect(lista.map((c) => c.id)).toEqual([marta.id]);
+    expect(JSON.stringify(lista)).not.toContain("Paciente (por enlace)");
+    expect(JSON.stringify(lista)).not.toContain("@enlace.local");
+  });
+
+  it("cambiarle el PIN da 404 LIMPIO, no el 500 del CHECK", async () => {
+    const actor = actorPaciente();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/cashiers/${actor.id}/pin`,
+      headers: { authorization: `Bearer ${ownerToken()}` },
+      payload: { pin: "4321" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("CASHIER_NOT_FOUND");
+    // Y sigue sin credenciales, que es la invariante de clinica-2.
+    expect(users.get(actor.id)!.pinHash).toBeNull();
+  });
+
+  it("ni se le puede renombrar", async () => {
+    const actor = actorPaciente();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/cashiers/${actor.id}`,
+      headers: { authorization: `Bearer ${ownerToken()}` },
+      payload: { alias: "Fantasma" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(users.get(actor.id)!.alias).toBe("Paciente (por enlace)");
+  });
+
+  it("ni revocarlo", async () => {
+    const actor = actorPaciente();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/cashiers/${actor.id}`,
+      headers: { authorization: `Bearer ${ownerToken()}` },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(users.get(actor.id)!.email).toContain("@enlace.local");
+  });
+
+  it("y su nombre NO bloquea el de una persona", async () => {
+    // Un centro que quiera llamar «Paciente (por enlace)» a alguien hace
+    // algo raro, pero el bloqueo no lo tiene que poner una fila de
+    // sistema: la colisión es entre personas.
+    actorPaciente();
+    const marta = seed({ alias: "Marta" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/cashiers/${marta.id}`,
+      headers: { authorization: `Bearer ${ownerToken()}` },
+      payload: { alias: "Paciente (por enlace)" },
+    });
+    expect(res.statusCode).toBe(200);
   });
 });
