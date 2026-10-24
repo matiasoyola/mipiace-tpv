@@ -92,7 +92,18 @@ export async function otroConEseNombre(
 }
 
 /**
- * Escribe el nombre en las DOS columnas.
+ * Escribe el nombre en las DOS columnas, **en una transacción**.
+ *
+ * Lo de la transacción no es ceremonia: el punto entero de esta función es
+ * que las dos columnas digan lo mismo. Escribirlas sueltas deja una ventana
+ * en la que un fallo de la segunda deja el `alias` nuevo y el «Nombre en la
+ * agenda» viejo — que es exactamente el estado que este fichero existe para
+ * cerrar, y además el más confuso de todos: la dueña vería su nombre en el
+ * TPV y el anterior en la agenda, y no tendría forma de saber cuál manda.
+ *
+ * Es la forma de ARRAY (`$transaction([...])`) y no la de callback: aquí no
+ * hay nada que decidir entre las dos escrituras, y la de array no pide un
+ * cliente interactivo.
  *
  * `crearPerfil: false` (el caso de Cajeros) sólo actualiza el perfil de
  * agenda si ya existe: un cajero de barra no tiene por qué aparecer como
@@ -114,35 +125,36 @@ export async function escribirElNombre(
   },
 ): Promise<{ id: string; email: string; alias: string | null; role: string }> {
   const p = prisma as PrismaClient;
-  const usuario = await p.user.update({
+  const elUsuario = p.user.update({
     where: { id: input.userId },
     data: { alias: input.nombre },
     select: { id: true, email: true, alias: true, role: true },
   });
-  if (input.crearPerfil) {
-    await p.staffProfile.upsert({
-      where: { userId: input.userId },
-      create: {
-        userId: input.userId,
-        tenantId: input.tenantId,
-        displayName: input.nombre,
-        color: input.perfil?.color ?? null,
-        active: input.perfil?.active ?? true,
-      },
-      update: {
-        displayName: input.nombre,
-        color: input.perfil?.color ?? null,
-        ...(input.perfil?.active !== undefined
-          ? { active: input.perfil.active }
-          : {}),
-      },
-    });
-    return usuario;
-  }
-  // Desde Cajeros: sólo si ya tiene perfil de agenda.
-  await p.staffProfile.updateMany({
-    where: { userId: input.userId },
-    data: { displayName: input.nombre },
-  });
+  const elPerfil = input.crearPerfil
+    ? p.staffProfile.upsert({
+        where: { userId: input.userId },
+        create: {
+          userId: input.userId,
+          tenantId: input.tenantId,
+          displayName: input.nombre,
+          color: input.perfil?.color ?? null,
+          active: input.perfil?.active ?? true,
+        },
+        update: {
+          displayName: input.nombre,
+          color: input.perfil?.color ?? null,
+          ...(input.perfil?.active !== undefined
+            ? { active: input.perfil.active }
+            : {}),
+        },
+      })
+    : // Desde Cajeros: sólo si YA tiene perfil de agenda. `updateMany` y no
+      // `update` porque sin perfil `update` lanzaría, y no tener perfil de
+      // agenda es lo normal en un cajero de barra.
+      p.staffProfile.updateMany({
+        where: { userId: input.userId },
+        data: { displayName: input.nombre },
+      });
+  const [usuario] = await p.$transaction([elUsuario, elPerfil]);
   return usuario;
 }

@@ -104,6 +104,9 @@ const fakePrisma = {
   staffProfile: {
     updateMany: vi.fn(async () => ({ count: 0 })),
   },
+  // clinica-9 (5) · el nombre se escribe en las dos columnas dentro de una
+  // transacción (`lib/un-solo-nombre.ts`), de la forma de array.
+  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
 } as const;
 
 vi.mock("../src/context.js", () => ({

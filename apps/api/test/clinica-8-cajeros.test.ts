@@ -144,6 +144,8 @@ const fakePrisma = {
     updateMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(async ({ create }: any) => create),
   },
+  // clinica-9 (5) · las dos columnas del nombre se escriben juntas.
+  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
 } as const;
 
 vi.mock("../src/context.js", () => ({

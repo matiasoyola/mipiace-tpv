@@ -73,9 +73,18 @@ describe("clinica-9 · guardar el nombre escribe las DOS columnas", () => {
       upsert: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
     };
-    return { user, staffProfile } as never as Parameters<
+    // Las dos escrituras van en UNA transacción (ver `escribirElNombre`):
+    // el fake la cumple de la forma de array, que es la que usa el código.
+    const $transaction = vi.fn(async (ops: Promise<unknown>[]) =>
+      Promise.all(ops),
+    );
+    return { user, staffProfile, $transaction } as never as Parameters<
       typeof escribirElNombre
-    >[0] & { user: typeof user; staffProfile: typeof staffProfile };
+    >[0] & {
+      user: typeof user;
+      staffProfile: typeof staffProfile;
+      $transaction: typeof $transaction;
+    };
   }
 
   it("desde Personal: alias + «Nombre en la agenda», y crea el perfil", async () => {
@@ -107,6 +116,8 @@ describe("clinica-9 · guardar el nombre escribe las DOS columnas", () => {
       crearPerfil: false,
     });
     expect(p.user.update).toHaveBeenCalledTimes(1);
+    // Y las dos, juntas: una sola transacción.
+    expect(p.$transaction).toHaveBeenCalledTimes(1);
     // `updateMany` no crea nada: un cajero de barra no se convierte en
     // profesional de la agenda por renombrarse.
     expect(p.staffProfile.upsert).not.toHaveBeenCalled();
