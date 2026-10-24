@@ -579,6 +579,20 @@ reescritura de sesiones, ningún borrado de la fila del actor de sistema.
 ## 8 · Verde
 
 - **Suite completa en local**: `463 ficheros · 6689 tests · 10 saltados`, verde.
+- **e2e completo contra Postgres real** (`pnpm test:e2e`, base propia del
+  worktree `mipiacetpv_clinica9_e2e`): `50 ficheros · 1141 tests`, verde.
+  Incluye `clinica-sesion-cobro.e2e.ts`, que este bloque amplió para citar
+  HOY y no en septiembre.
+  - **OJO con la hora.** La CI de este mismo commit (`08bf518`) corrió a las
+    01:08 UTC y dio `e2e` rojo con tres fallos —`residencia-3` (el
+    `porTurno` del residente vuelve vacío), `residencia-4` (la pasada de
+    ausencias D-20) y `residencia-5` (`REGISTRO_EN_EL_FUTURO`: 409 donde
+    espera 200)—. Ninguno es de este bloque: la rama no toca esos tres
+    ficheros (último cambio, `bcc63d2`, de clinica-8). Son los falsos rojos
+    por día de pared ya conocidos, los mismos que el §6 evita pidiendo que
+    la pasada en hierro no se haga de madrugada. A las 09:08 UTC, en verde.
+    Lo que esto deja pendiente para otro bloque: la CI corre a la hora que
+    le toca, y esos tres ficheros no pueden depender de ella.
 - **Typecheck paquete a paquete** (`tsc --noEmit`): `apps/api`, `apps/tpv-web`,
   `apps/admin`, `packages/ticket-model`, `packages/clinica-sesion` — limpio.
 - **22 sabotajes**, todos rojos (§4), cada uno contra el fichero que de verdad
