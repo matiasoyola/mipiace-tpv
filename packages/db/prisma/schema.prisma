@@ -5666,6 +5666,26 @@ model ClinicalProcessorAgreement {
   // La fila que esta revoca. Con esto puesto, la fila NO ACEPTA NADA.
   revokesAgreementId String? @map("revokes_agreement_id") @db.Uuid
 
+  // contrato-lectura-completa · CUÁNDO EL FINAL DEL TEXTO LLEGÓ A LA
+  // PANTALLA, antes de aceptar. Con esto puesto, la fila dice que el texto
+  // completo se mostró y se recorrió hasta el final — que es lo que
+  // contesta a «yo eso no lo leí».
+  //
+  // UNA columna y no dos (un booleano y un instante): son el MISMO hecho.
+  // `IS NOT NULL` es el booleano, y dos columnas que siempre van juntas
+  // son dos columnas que un día se contradicen.
+  //
+  // `null` en tres casos, y los tres son verdad:
+  //
+  //   · en una REVOCACIÓN, que no acepta nada;
+  //   · en las aceptaciones ANTERIORES a esta regla, donde nadie midió
+  //     nada (y un `false` ahí sería afirmar que no lo leyó, que no se
+  //     sabe);
+  //   · nunca más en una aceptación nueva: la API las rechaza con 400.
+  //
+  // El CHECK de la migración cierra las combinaciones imposibles.
+  textoRecorridoEn DateTime? @map("texto_recorrido_en") @db.Timestamptz()
+
   tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   user        User                         @relation("ClinicalProcessorAgreementUser", fields: [userId], references: [id], onDelete: Restrict)
   device      Device?                      @relation("ClinicalProcessorAgreementDevice", fields: [deviceId], references: [id], onDelete: Restrict)

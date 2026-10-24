@@ -286,7 +286,18 @@ export async function registerContratoRoutes(
         body: {
           type: "object",
           additionalProperties: false,
-          properties: { version: { type: "integer", minimum: 1 } },
+          // contrato-lectura-completa · los dos campos nuevos van
+          // DECLARADOS, y hace falta decirlo: con
+          // `additionalProperties: false` Fastify no da 400 por un campo
+          // que no conoce — lo BORRA, y el handler recibe un cuerpo sin
+          // `textoMostradoCompleto`. O sea: olvidarse de declararlos aquí
+          // habría dado un 400 «baja hasta el final» a una pantalla que
+          // sí lo manda, para siempre.
+          properties: {
+            version: { type: "integer", minimum: 1 },
+            textoMostradoCompleto: { type: "boolean" },
+            finalDelTextoEn: { type: "string", format: "date-time" },
+          },
         },
       },
     },
@@ -306,7 +317,17 @@ export async function registerContratoRoutes(
       const bloqueo = await cuentaBloqueada(tenantId);
       if (bloqueo) return respondeCuentaBloqueada(reply, bloqueo);
 
-      const body = (request.body ?? {}) as { version?: number };
+      const body = (request.body ?? {}) as {
+        version?: number;
+        textoMostradoCompleto?: boolean;
+        finalDelTextoEn?: string;
+      };
+      // Una fecha que no se puede leer se trata como «no la dijo» y vale
+      // la hora del servidor: `instanteDelFinal` lo resuelve. No se
+      // rechaza por eso — lo que decide el 400 es haber recorrido el
+      // texto, no saber estampar un ISO.
+      const finalDelTextoEn =
+        body.finalDelTextoEn == null ? null : new Date(body.finalDelTextoEn);
 
       const r = await aceptarContrato(getPrisma(), {
         tenantId,
@@ -317,11 +338,19 @@ export async function registerContratoRoutes(
         ip: ipDe(request),
         userAgent: userAgentDe(request),
         version: body.version,
+        textoMostradoCompleto: body.textoMostradoCompleto,
+        finalDelTextoEn,
       });
       if (!r.ok) {
-        // 403 para «no eres la dueña» y 409 para los otros dos: el primero
-        // es de permisos y los otros dos son de estado.
-        const status = r.motivo === "SOLO_LA_DUENA" ? 403 : 409;
+        // 403 «no eres la dueña» (permisos), 400 «no has recorrido el
+        // texto» (la petición no trae lo que hace falta) y 409 los otros
+        // dos (estado).
+        const status =
+          r.motivo === "SOLO_LA_DUENA"
+            ? 403
+            : r.motivo === "TEXTO_NO_RECORRIDO"
+              ? 400
+              : 409;
         return reply
           .code(status)
           .send({ error: r.motivo, code: r.motivo, message: r.mensaje });
