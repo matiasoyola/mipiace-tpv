@@ -173,6 +173,20 @@ function token(userId: string, role: FakeUser["role"]) {
 const comoDuena = token(DUENA, "OWNER");
 const comoSanitaria = token(SANITARIA, "CLINICIAN");
 
+/**
+ * contrato-lectura-completa · el cuerpo de una aceptación NORMAL.
+ *
+ * Desde ese bloque la API da 400 a una aceptación que no diga que el texto
+ * completo se recorrió, así que todas las aceptaciones de este fichero lo
+ * mandan: lo que cada test de aquí prueba es su propia razón (el rol, el
+ * estado, la impersonación), y un 400 por el campo que falta las habría
+ * puesto en verde por el motivo equivocado.
+ *
+ * La regla nueva tiene su propio banco en
+ * `contrato-lectura-completa.test.ts`.
+ */
+const ACEPTACION = { textoMostradoCompleto: true };
+
 /** El token que firma `POST /super-admin/tenants/:id/impersonate`: lleva el
  *  id REAL de la dueña y `role: OWNER`. Es lo que hace que la decisión 24
  *  tuviera que ser código y no una afirmación. */
@@ -349,7 +363,7 @@ describe("clinica-7 · con el contrato revocado, SOLO LECTURA", () => {
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: comoDuena,
-      payload: {},
+      payload: ACEPTACION,
     });
     expect(acepta.statusCode).toBe(201);
     // UNA FILA MÁS, y ninguna editada.
@@ -378,7 +392,7 @@ describe("clinica-7 · el contrato lo acepta la dueña y nadie más", () => {
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: comoSanitaria,
-      payload: {},
+      payload: ACEPTACION,
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().code).toBe("SOLO_LA_DUENA");
@@ -398,7 +412,7 @@ describe("clinica-7 · el contrato lo acepta la dueña y nadie más", () => {
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: comoDuena,
-      payload: {},
+      payload: ACEPTACION,
     });
     expect(res.statusCode).toBe(403);
     expect(contrato.filas).toHaveLength(0);
@@ -413,7 +427,7 @@ describe("clinica-7 · el contrato lo acepta la dueña y nadie más", () => {
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: { ...comoDuena, "user-agent": "TPV/1.0 (tablet)" },
-      payload: {},
+      payload: ACEPTACION,
     });
     expect(res.statusCode).toBe(201);
     const fila = contrato.filas[0]!;
@@ -433,7 +447,7 @@ describe("clinica-7 · el contrato lo acepta la dueña y nadie más", () => {
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: comoDuena,
-      payload: {},
+      payload: ACEPTACION,
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("YA_ESTABA_ACEPTADA");
@@ -606,7 +620,7 @@ describe("clinica-7 · el superadmin no abre historias, por ningún camino", () 
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: comoMiPiace,
-      payload: {},
+      payload: ACEPTACION,
     });
     expect(res.statusCode).toBe(404);
     expect(contrato.filas).toHaveLength(0);

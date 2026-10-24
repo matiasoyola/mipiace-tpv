@@ -146,11 +146,40 @@ export async function puedeEscribirClinico(
 export type MotivoDeNoAceptar =
   | "SOLO_LA_DUENA"
   | "VERSION_DESCONOCIDA"
-  | "YA_ESTABA_ACEPTADA";
+  | "YA_ESTABA_ACEPTADA"
+  // contrato-lectura-completa · la pantalla no dice que el texto completo
+  // se recorriera hasta el final. Ver `aceptarContrato`.
+  | "TEXTO_NO_RECORRIDO";
 
 export type ResultadoDeAceptar =
   | { ok: true; aceptacionId: string; version: number; aceptadoEn: string }
   | { ok: false; motivo: MotivoDeNoAceptar; mensaje: string };
+
+/**
+ * contrato-lectura-completa · el instante en que el final del texto llegó
+ * a la pantalla, **saneado**.
+ *
+ * Lo mide la pantalla (es la única que sabe cuándo se vio el centinela) y
+ * viaja en el cuerpo de la petición, así que el reloj que lo estampa es el
+ * del aparato — y el reloj de una tablet miente. Un instante del futuro, o
+ * de hace más de un día, no es «cuándo bajó hasta el final»: es un reloj
+ * mal puesto, y en una prueba jurídica eso se cambia por la hora del
+ * servidor en vez de guardarse tal cual.
+ *
+ * No se RECHAZA por eso: el reloj de su tablet no es motivo para no poder
+ * aceptar un contrato (misma dirección que el user-agent largo, que se
+ * recorta en vez de rechazarse). Lo que se pierde al sanearlo son los
+ * segundos entre llegar al final y marcar la casilla, y eso no es lo que
+ * la fila demuestra.
+ */
+function instanteDelFinal(reportado: Date | null, ahora: Date): Date {
+  if (reportado == null) return ahora;
+  const t = reportado.getTime();
+  if (!Number.isFinite(t)) return ahora;
+  const DIA_MS = 24 * 60 * 60 * 1000;
+  if (t > ahora.getTime() || t < ahora.getTime() - DIA_MS) return ahora;
+  return reportado;
+}
 
 /**
  * La dueña acepta el contrato. **Una fila nueva, nunca un UPDATE.**
@@ -171,6 +200,14 @@ export async function aceptarContrato(
     ip: string | null;
     userAgent: string | null;
     version?: number;
+    /** contrato-lectura-completa · lo que la pantalla afirma: el texto
+     *  completo se mostró y se recorrió hasta el final. Sin esto no se
+     *  acepta. */
+    textoMostradoCompleto?: boolean;
+    /** Cuándo llegó el final a la pantalla, según el aparato. `null` =
+     *  no lo dijo, y entonces vale la hora del servidor. */
+    finalDelTextoEn?: Date | null;
+    ahora?: Date;
   },
 ): Promise<ResultadoDeAceptar> {
   if (!input.esDuena) {
@@ -179,6 +216,26 @@ export async function aceptarContrato(
       motivo: "SOLO_LA_DUENA",
       mensaje:
         "El contrato de tratamiento de datos lo acepta la dueña del centro, no el personal.",
+    };
+  }
+  // contrato-lectura-completa · **no se acepta sin haber pasado por todo
+  // el texto**, y la negativa vive AQUÍ y no sólo en la pantalla.
+  //
+  // La pantalla desactiva la casilla y el botón hasta que el final del
+  // texto ha llegado a la vista. Eso es la mitad que se ve; esta es la que
+  // vale. Lo que la fila tiene que poder decir el día que alguien diga «yo
+  // eso no lo leí» es que el texto completo se mostró y se recorrió, y una
+  // regla que sólo vive en el navegador no lo puede decir: un `curl` con el
+  // token de la dueña escribiría la misma fila sin haber pintado una letra.
+  //
+  // Mismo reparto que `esDuena` dos líneas arriba, y que `hayConsentimiento`
+  // en `guardarFoto`.
+  if (input.textoMostradoCompleto !== true) {
+    return {
+      ok: false,
+      motivo: "TEXTO_NO_RECORRIDO",
+      mensaje:
+        "Baja hasta el final del contrato antes de aceptarlo: la aceptación guarda que el texto completo se mostró entero.",
     };
   }
   const version = input.version ?? VERSION_VIGENTE;
@@ -221,6 +278,12 @@ export async function aceptarContrato(
       // user-agent largo no es motivo para no poder aceptar un contrato.
       ip: input.ip?.slice(0, 45) ?? null,
       userAgent: input.userAgent?.slice(0, 300) ?? null,
+      // contrato-lectura-completa · la prueba de que el texto pasó entero
+      // por la pantalla. Ver `instanteDelFinal` sobre el reloj del aparato.
+      textoRecorridoEn: instanteDelFinal(
+        input.finalDelTextoEn ?? null,
+        input.ahora ?? new Date(),
+      ),
     },
     select: { id: true, at: true },
   });
@@ -339,6 +402,11 @@ export interface AceptacionEnPantalla {
    *  `false`, la pantalla enseña la huella y la fecha —que es verdad— y no
    *  ofrece el PDF. */
   textoDisponible: boolean;
+  /** contrato-lectura-completa · cuándo llegó el final del texto a la
+   *  pantalla, antes de aceptar. `null` en las aceptaciones anteriores a la
+   *  regla: entonces NO SE MIDIÓ, y la pantalla no afirma nada sobre
+   *  ellas. */
+  textoRecorridoEn: string | null;
 }
 
 export interface VistaDelContrato {
@@ -380,6 +448,7 @@ export async function vistaDelContrato(
         textSha256: true,
         at: true,
         revokesAgreementId: true,
+        textoRecorridoEn: true,
         user: { select: { alias: true, email: true } },
         device: { select: { name: true } },
       },
@@ -413,6 +482,7 @@ export async function vistaDelContrato(
           revocadoEn: rev?.at.toISOString() ?? null,
           revocadoPor: rev ? nombreDe(rev.user) : null,
           textoDisponible: contratoDe(f.version) != null,
+          textoRecorridoEn: f.textoRecorridoEn?.toISOString() ?? null,
         };
       }),
   };
