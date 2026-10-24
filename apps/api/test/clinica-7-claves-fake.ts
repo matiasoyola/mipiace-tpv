@@ -288,16 +288,29 @@ export function contratoFake(
           ? null
           : { ...f, user: { alias: null, email: "d@d.es" } };
       },
+      // `select` se RESPETA, y hace falta que se respete: devolviendo la
+      // fila entera, un `select` al que se le olvida una columna sale en
+      // verde aquí y en producción deja `undefined` — que es el fallo que
+      // contrato-lectura-completa encontró al sabotear el suyo (la vista
+      // dejaba de devolver `textoRecorridoEn` y el banco no se enteraba).
       findMany: async ({ where, select, orderBy }: any) => {
         let xs = filas.filter((f) => f.tenantId === where.tenantId);
         if (orderBy?.at === "desc") {
           xs = xs.slice().sort((a, b) => +b.at - +a.at);
         }
-        return xs.map((f) => ({
-          ...f,
-          ...(select?.user ? { user: { alias: null, email: "d@d.es" } } : {}),
-          ...(select?.device ? { device: null } : {}),
-        }));
+        return xs.map((f) => {
+          const escalares: Record<string, unknown> =
+            select == null
+              ? { ...f }
+              : Object.fromEntries(
+                  Object.entries(f).filter(([k]) => select[k] === true),
+                );
+          return {
+            ...escalares,
+            ...(select?.user ? { user: { alias: null, email: "d@d.es" } } : {}),
+            ...(select?.device ? { device: null } : {}),
+          };
+        });
       },
       create: async ({ data }: any) => {
         const fila: FilaDeContrato = {
