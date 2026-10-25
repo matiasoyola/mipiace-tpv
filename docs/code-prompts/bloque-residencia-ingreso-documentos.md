@@ -5,9 +5,12 @@ Rama `residencia-ingreso-documentos`, worktree
 Escrito el 25-10-2026 desde el proyecto de Jardín de Gredos. Matías, al ver la pestaña «Ingreso y
 documentos» de la ficha completa: «tiene mucha chicha; me gustaría que estuviera muy guionizada la
 documentación a recoger, y que lo que sean contratos se creen y se firmen desde el mismo sistema, sin
-tener que imprimir y escanear». **Mockup: `docs/mockups/residencia-ingreso-documentos.html`**
-(seis pantallas: el guion, preparar un documento, firma aquí, firma a distancia, el PDF firmado y las
-plantillas del centro). Planteamiento validado por Matías el 25-10-2026; el mockup, pendiente.
+tener que imprimir y escanear». Y después: «no sólo quiero el listado, sino la recogida de datos:
+quiero que sea un **ingreso guiado**, **casi automático**». **Mockup:
+`docs/mockups/residencia-ingreso-documentos.html`** (ocho pantallas: el asistente de ingreso, el
+preingreso en el móvil de la familia, cómo va el ingreso en su ficha, un documento, firma aquí, firma a
+distancia, el PDF firmado y las plantillas del centro). Planteamiento validado por Matías el
+25-10-2026; el mockup, pendiente.
 
 **Ábrelo cuando estén en `master` `historia-1`, `residencia-ficha-completa` y
 `residencia-plaza-y-pago`** (el guion vive en la pestaña de la ficha, y el contrato y el mandato SEPA
@@ -38,9 +41,67 @@ a paso y en orden; ningún documento se teclea dos veces, porque sale relleno de
 firma desde su móvil si no puede venir; y el expediente está completo y enseñable en un clic, sin
 una sola hoja escaneada.
 
+## El ingreso es un asistente, y casi automático
+
+Esto manda sobre todo lo demás del bloque. No es una lista que manda a otras pantallas: **es un
+asistente paso a paso con los campos dentro de cada paso**, y llega casi lleno porque lo rellenan la
+familia y la lectura de documentos, no la dirección.
+
+A. **«Nuevo ingreso» abre el asistente** (sustituye a la ventana de alta de alta-minima para los
+   ingresos de verdad; «Añadir varios» se queda para cargar residentes que ya viven en el centro).
+   Lo primero son 30 segundos: nombre de la residente, fecha prevista, y nombre y móvil de un
+   familiar. Con eso existe un residente **en preingreso** (no sale en la puerta ni en el parte).
+B. **El preingreso lo hace la familia desde su móvil**: el programa le manda un enlace (SMS y
+   email, mismas reglas de seguridad que la firma a distancia) a una página sin cuenta, con sus
+   pasos: datos del residente, su familia, **fotos de los documentos**, cómo pagará (IBAN), lo que
+   necesita (ayudas, costumbres) y las primeras firmas. Sólo se le piden los documentos que su caso
+   necesita; puede dejarlo a medias y volver; lo que no tenga, lo trae el día del ingreso.
+C. **El programa lee las fotos y rellena los campos**: DNI (nombre, apellidos, número, nacimiento,
+   sexo, domicilio), tarjeta sanitaria (NSS / CIP), resolución de la Junta (número, fecha, grado,
+   régimen, copago), recibo del banco (IBAN), informe médico y hoja de tratamiento (alergias,
+   diagnósticos, dieta y textura, medicación, centro de salud). A la familia se le enseña lo leído
+   **administrativo** para que diga «está bien»; **lo clínico no se le enseña para corregir**: lo
+   confirma la DUE.
+D. **Cada campo dice de dónde salió**: «Del DNI», «De la resolución», «Lo puso Antonio», «Del
+   informe · confirma la DUE». Lo leído con poca seguridad o lo clínico se pinta en ámbar y **no
+   cuenta como dato hasta que alguien lo confirma**; lo confirmado guarda quién y cuándo.
+   **Nada clínico entra en la ficha clínica ni en la puerta sin la confirmación de un sanitario**
+   (`is_clinician`), campo a campo.
+E. **Los pasos del asistente** (mockup, pantalla 1), agrupados en «Antes del ingreso» y «El día del
+   ingreso»: Así empieza (estado del preingreso) · ¿Quién ingresa? · Su familia · ¿Quién firma por
+   ella? · Su plaza · Lo que paga y cómo · Su salud al entrar (DUE) · Su habitación (el programa
+   **propone** una cama libre, revisada y adecuada a su dependencia) · Sus pertenencias (en la
+   habitación, con la tablet) · Las firmas (los documentos ya preparados: firmar aquí uno tras otro o
+   mandar los que falten juntos) · Confirmar el ingreso. Cada paso tiene su responsable (Carmen, DUE,
+   administración, auxiliar, familia) y le sale en su panel si le toca.
+F. **Se guarda solo, se deja a medias y se salta**: «Lo completo después» en todos los pasos salvo
+   el nombre; «Seguir en otro momento» vuelve a la lista con el ingreso en curso marcado. Los pasos
+   se pueden hacer en cualquier orden (columna de la izquierda), y el resumen final dice lo hecho, lo
+   pendiente con quién y hasta cuándo, y las tareas de los primeros 30 días.
+G. **Confirmar el ingreso** es lo que hace entrar al residente: aparece en la puerta de su planta, en
+   el parte y en el panel, y se le carga el plan de cuidados de su nivel. Lo pendiente no lo frena
+   (alta-minima: nada administrativo bloquea la atención).
+H. **Después**, la pestaña «Ingreso y documentos» de la ficha enseña cómo fue y lo que queda (la
+   vista «Cómo va», pantalla 3), con los mismos pasos.
+
+### La lectura de documentos: cómo y con qué cuidado
+
+- Con el modelo de visión de Claude por la API de Anthropic (Mi Piace ya trabaja con Claude), con
+  salida estructurada por tipo de documento y **un nivel de confianza por campo**. Si no se lee bien,
+  el campo queda vacío, no inventado.
+- **Es un tratamiento de datos de salud y de identidad por un tercero**: Anthropic entra como
+  **subencargado** de Mi Piace. Antes de encenderlo en producción hay que (1) revisar el contrato de
+  encargado que aceptó el centro y añadir el subencargado (probablemente una versión nueva del
+  contrato, que la propietaria acepta como la v2), (2) usar la API sin retención para entrenamiento,
+  y (3) dejarlo en el registro de actividades. **El done lo dice como condición, no lo da por hecho.**
+- **Interruptor por centro, apagado por defecto**: con la lectura apagada, el asistente funciona
+  igual y los campos se teclean. Las fotos se guardan siempre (cifradas), se lean o no.
+- Nada de lo leído va a logs. Las fotos se mandan a leer y no se guardan fuera del volumen del centro.
+
 ## Decisiones de producto ya tomadas — no se re-debaten
 
-1. **El guion ES el ingreso guiado de historia-1, ampliado** (no una lista nueva al lado). Cada paso
+1. **Los pasos del asistente son el ingreso guiado de historia-1, ampliado** (no una lista nueva al
+   lado). Cada paso
    tiene: **momento** (Antes del ingreso · El día del ingreso · Primeros 30 días), **clase**
    (**Dato**: se comprueba solo con la ficha · **Recoger**: un documento que trae alguien · **Firmar**:
    un documento que genera el programa), **quién lo hace** (rol), **por qué hace falta** (una frase),
@@ -134,13 +195,16 @@ una sola hoja escaneada.
 
 ## Fuera de alcance (declarado)
 
-Firma cualificada y sello de tiempo cualificado · un editor tipo Word · el formulario del inventario de
+Firma cualificada y sello de tiempo cualificado · leer documentos de otros países o idiomas · un editor tipo Word · el formulario del inventario de
 pertenencias y el PAI (sus bloques) · contratos de personal · enviar nada a la Junta · la carga de los
 Word del centro (la hace Mi Piace con la herramienta de plantillas cuando esté).
 
 ## Cómo se cierra
 
-- Tests: el guion de una concertada con recibo y guardador de hecho tiene exactamente sus pasos y no
+- Tests: el preingreso de la familia rellena los campos y cada uno guarda su origen; lo leído no
+  cuenta como dato hasta confirmarlo y lo clínico sólo lo confirma un sanitario; con la lectura
+  apagada el asistente funciona igual; un residente en preingreso no sale en la puerta y confirmar
+  el ingreso lo hace entrar; el guion de una concertada con recibo y guardador de hecho tiene exactamente sus pasos y no
   los que no aplican; cambiar la forma de pago a transferencia quita el mandato SEPA; sin un dato no
   se genera el documento; no se firma sin llegar al final ni sin trazo; un contrato con una sola de
   dos firmas no cuenta como firmado; el enlace caduca, es de un solo uso y bloquea al quinto código
@@ -148,7 +212,7 @@ Word del centro (la hace Mi Piace con la herramienta de plantillas cuando esté)
   toca lo ya firmado; nada de salud en SMS, emails ni logs.
 - Tabla de sabotajes como la de clinica-4 (borrar un PDF firmado, editar la plantilla de un firmado,
   reutilizar un enlace, firmar por otro…).
-- Bucle visual: capturas de las seis pantallas del mockup (1366 y 390) en `docs/qa/`; la firma a
+- Bucle visual: capturas de las ocho pantallas del mockup (1366 y 390) en `docs/qa/`; la firma a
   distancia, también en un móvil de verdad.
 - CI verde (`ci`, `smoke`, `e2e`).
 - `docs/blocks/residencia-ingreso-documentos-done.md` con la estructura de la metodología. Dice si la
