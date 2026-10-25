@@ -303,6 +303,72 @@ a 1440 px y a 390 px.
 
 ---
 
+## 8b · Dónde vive calidad tras `residencia-cuadro-de-control`
+
+Ese bloque dejó el menú de una residencia en **cinco entradas del día a
+día más «Configuración»**, y midió el panel contra **1366×768 sin
+scroll**. calidad-1 se coloca dentro de esa forma, no al lado.
+
+### El mapa y las NC están en «Configuración», no en el menú
+
+Y **no hace falta marcarlas**: `residencia-cuadro-de-control` descartó a
+propósito una bandera `enConfiguracion` porque la primera entrada a la
+que se le olvidara se quedaba sin forma de llegar, en verde y sin que
+nadie lo notara (lo encontró su banco con «Bonos»). Lo que enseña
+«Configuración» es **todo lo que pasa el filtro y no es una de las
+cinco**, así que estas dos caen ahí por estar en `NAV_ITEMS` y no en
+`MENU_DE_RESIDENCIA`.
+
+Es además lo correcto: el mapa se ajusta una vez al año y las no
+conformidades se trabajan por semanas. Van pegadas a «Indicadores» en el
+orden de la página —el mapa es de dónde cuelgan, las NC es a dónde van
+los que se salen del umbral dos meses— y el banco de este bloque lo fija
+en los dos sentidos: que **no** están en el menú y que **sí** están en
+Configuración, en ese orden.
+
+### Y el panel: 217 px que había que devolver
+
+Medido con la stack de verdad a 1366×768, con el centro del sembrador:
+
+| | alto del panel |
+| --- | --- |
+| calidad-1 tal y como venía | **1 124 px** |
+| …sin su banda de calidad | 1 047 px |
+| …y con la fila de indicadores a seis | 907 px |
+| **después de este arreglo** | **964 px** |
+
+Dos cosas eran de este bloque y las dos se devuelven:
+
+1. **140 px de la fila de indicadores.** calidad-1 los subió de 6 a 13 y
+   la fila de `lg:grid-cols-6` pasó de uno a tres renglones. Es
+   exactamente lo que la regla de ese bloque prohíbe: «lo que pasa de
+   cuatro o cinco elementos se ve con *Ver…*, porque una sección que
+   crece con el centro deja de caber». Ahora la fila son **seis**, con
+   **los que piden algo primero** (fuera de umbral, después dentro, y al
+   final los que no tienen dato) y el enlace diciendo cuántos hay. El
+   recuento del encabezado sigue siendo sobre los trece, así que la
+   cifra no miente aunque la fila esté recortada. Y el catálogo seguirá
+   creciendo —quedan trece nombrados sin dato—, así que la fila no podía
+   depender de él.
+2. **La sección de calidad pasa a ser una banda**, la misma forma que
+   `LoQueHayQueArreglar`: `null` cuando no hay nada y dos renglones como
+   mucho cuando lo hay. De 77 px a **46**.
+
+**Con el centro al día la banda no se pinta y el panel mide exactamente
+lo que medía sin este bloque.**
+
+### Lo que sobra y NO es de aquí
+
+Quedan **139 px** de scroll, y son del panel de master con este centro
+sembrado: **sin la banda y con la fila a seis, mide 907**. El sembrador
+es ruidoso a propósito (cinco obligaciones vencidas, doce incidencias
+abiertas, cuatro relevos sin confirmar) y el bloque que lo midió dice
+«cabe en 1366×768 **con datos normales**». Queda anotado aquí porque
+alguien tendrá que decidir si un centro así es «datos normales»; lo que
+este bloque podía devolver, lo ha devuelto.
+
+---
+
 ## 9 · La tabla de sabotajes
 
 Todo contra Postgres, en `apps/api/test-e2e/calidad-1.e2e.ts`.
