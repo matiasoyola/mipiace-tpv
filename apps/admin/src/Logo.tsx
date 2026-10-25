@@ -3,7 +3,13 @@
 
 export function Logo({ size = 28 }: { size?: number }) {
   return (
-    <div className="flex items-center gap-2.5">
+    // cuadro-de-control · el `data-test` existe para poder afirmar que la
+    // marca NO está: en una residencia, arriba de la barra va el nombre
+    // del centro (decisión 3). Por texto no se puede —el pie imprime
+    // «mipiacetpv v1.0», que es la versión y sí se queda— y buscar el
+    // wordmark a trozos es justo el canario por subcadena que siempre
+    // acaba casando con otra cosa.
+    <div data-test="marca-tpv" className="flex items-center gap-2.5">
       <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
         <path
           d="M5.2 4.4c-.85 0-1.55.65-1.55 1.5 0 .65 1.55 1.95 1.55 1.95s1.55-1.3 1.55-1.95c0-.85-.7-1.5-1.55-1.5z"

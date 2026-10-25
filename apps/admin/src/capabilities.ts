@@ -94,6 +94,23 @@ export interface TenantCapabilities {
   // pintarla en un ensayo se arregla al recargar (y el servidor no emite nada
   // igual).
   enEnsayo: boolean;
+  /**
+   * cuadro-de-control · **EL NOMBRE DEL CENTRO.**
+   *
+   * No es una capability: es el rótulo que sustituye a la marca del TPV
+   * arriba de la barra lateral en una residencia (decisión 3). Vive aquí
+   * porque sale de la MISMA llamada que ya se hace (`/auth/me` →
+   * `tenant.name`) y porque lo consume el mismo sitio.
+   *
+   * Y no se espera al panel para pintarlo aunque el panel también lo
+   * traiga: las capacidades llegan antes —son las que deciden si hay
+   * residencia— y un rótulo que aparece medio segundo después del menú se
+   * ve como un salto. Las PLAZAS sí salen del panel: ésas no están en
+   * `/auth/me` y no vale la pena una columna para un subtítulo.
+   *
+   * `null` al fallar: sin nombre la barra pinta sólo «Residencia».
+   */
+  nombreDelCentro: string | null;
 }
 
 // El valor con el que se sigue adelante si alguna de las dos peticiones
@@ -125,6 +142,8 @@ const POR_DEFECTO: TenantCapabilities = {
   bonoEtiqueta: "bono",
   // puesta-en-marcha (ADR-021) · ver la nota del campo.
   enEnsayo: false,
+  // cuadro-de-control · sin nombre la barra pinta sólo «Residencia».
+  nombreDelCentro: null,
 };
 
 let cache: TenantCapabilities | null = null;
@@ -152,6 +171,7 @@ async function pedir(): Promise<void> {
       }>("/admin/tenant/settings"),
       api<{
         tenant: {
+          name?: string;
           hasHoldedKey?: boolean;
           holdedEnabled?: boolean;
           holdedDisconnectedAt?: string | null;
@@ -177,6 +197,8 @@ async function pedir(): Promise<void> {
       // despliegue) se lee como «no está en ensayo», que es lo que eran todas
       // las cuentas antes de este bloque.
       enEnsayo: me.tenant.facturaDesde === null,
+      // cuadro-de-control · el rótulo de la barra en una residencia.
+      nombreDelCentro: me.tenant.name ?? null,
     };
   } catch (err) {
     // clinica-8 (fase B, 18) · UN 401 NO ES «no se pudo leer»: es que no

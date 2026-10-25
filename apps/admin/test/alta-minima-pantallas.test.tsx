@@ -634,43 +634,69 @@ describe("alta-minima · «Añadir varios»", () => {
 //  5 · LA TARJETA DEL PANEL
 // ════════════════════════════════════════════════════════════════════
 
-describe("alta-minima · la tarjeta del panel de dirección", () => {
-  it("«12 fichas de residentes incompletas · 31 datos pendientes»", async () => {
+// ── cuadro-de-control · LA TARJETA ES AHORA UNA DE LAS CUATRO CIFRAS ──
+//
+// En alta-minima esto era una tarjeta grande arriba del panel con la
+// lista de nombres dentro. En cuadro-de-control el panel tiene que caber
+// en una pantalla de 1366×768, así que es **la cuarta cifra** de la fila
+// de arriba (decisión 4 del bloque: «fichas incompletas (de alta-minima,
+// con "Completar")»).
+//
+// Qué sobrevive, y es lo que este bloque de tests fija:
+//
+//   · la cifra, cuántos datos faltan y sobre cuántas fichas;
+//   · «Completar», que sigue abriendo la PRIMERA incompleta;
+//   · la CONSECUENCIA cuando hay imprescindibles («sin grado no se
+//     factura a la Junta»), que es el por qué de que se mire.
+//
+// Qué se va, y es a propósito: la lista de nombres. Con cinco nombres y
+// once datos cada uno la tarjeta medía quince renglones, y ya en
+// alta-minima el bucle visual la había recortado al número por esa misma
+// razón. Cada nombre sigue abriendo su ficha **desde Residentes**, que es
+// donde se hace la pasada — y el `?completar=` que manda el panel lo
+// prueba el `describe` de más abajo.
+describe("alta-minima · la cifra del panel de dirección", () => {
+  it("«12» fichas incompletas, de 43, y 31 datos pendientes", async () => {
     await pintar(PanelPage);
     const texto = container.textContent ?? "";
-    expect(texto).toContain("12 fichas de residentes incompletas");
-    expect(texto).toContain("31 datos pendientes");
-    expect(texto).toContain("9 les falta algo imprescindible");
-    // Y dice la consecuencia, que es lo que hace que se mire: en plaza
-    // concertada, sin grado no se factura.
+    expect(texto).toContain("Fichas incompletas");
+    expect(texto).toContain("12");
+    expect(texto).toContain("de 43");
+    expect(texto).toContain("faltan 31 datos");
+  });
+
+  it("y dice la consecuencia cuando falta algo imprescindible", async () => {
+    await pintar(PanelPage);
+    const texto = container.textContent ?? "";
+    // cuadro-de-control · la frase es corta porque son cuatro tarjetas en
+    // una fila y la fila mide lo que la más alta. Lo que no se puede
+    // perder son los dos datos: cuántas y por qué importa.
+    expect(texto).toContain("9 sin DNI, grado o familiar");
+    // Es lo que hace que se mire: en plaza concertada, sin grado no se
+    // factura.
     expect(texto).toContain("no se factura a la Junta");
   });
 
   it("«Completar» lleva a Residentes con la PRIMERA incompleta abierta", async () => {
     await pintar(PanelPage);
-    const completar = [...container.querySelectorAll("a")].find(
-      (a) => a.textContent?.trim() === "Completar",
+    const completar = [...container.querySelectorAll("a")].find((a) =>
+      a.getAttribute("data-test") === "cifra-fichas",
     )!;
     expect(completar).toBeDefined();
+    expect(completar.textContent).toContain("Completar");
     expect(completar.getAttribute("href")).toBe(
       `/admin/residencia/residentes?completar=${ABEL}`,
     );
   });
 
-  it("y cada nombre abre SU ficha, con lo que le falta al lado", async () => {
+  it("y la cifra NO lleva la lista de nombres: eso es la pasada, y se hace en Residentes", async () => {
     await pintar(PanelPage);
-    const abel = [...container.querySelectorAll("a")].find(
-      (a) => a.textContent?.trim() === "Abel Ramos Doblado",
-    )!;
-    expect(abel.getAttribute("href")).toBe(
-      `/admin/residencia/residentes?completar=${ABEL}`,
-    );
-    // El NÚMERO, no la lista entera: con once datos por residente la
-    // tarjeta sería un muro de texto. El detalle está en su ficha.
-    expect(container.textContent).toContain("faltan 11 datos");
-    expect(container.textContent).toContain("alguno imprescindible");
-    expect(container.textContent).toContain("habitación 112");
-    expect(container.textContent).not.toContain("nº de la Seguridad Social");
+    const texto = container.textContent ?? "";
+    // Canarios que no existen en ninguna otra parte de la pantalla (ver
+    // «afirmar ausencia con canarios»): el nombre completo y la
+    // habitación que la tarjeta vieja pintaba al lado.
+    expect(texto).not.toContain("Abel Ramos Doblado");
+    expect(texto).not.toContain("habitación 112");
   });
 
   it("sin ninguna incompleta, la tarjeta NO EXISTE", async () => {
@@ -690,7 +716,11 @@ describe("alta-minima · la tarjeta del panel de dirección", () => {
       return {};
     });
     await pintar(PanelPage);
-    expect(container.textContent).not.toContain("fichas de residentes incompletas");
+    const texto = container.textContent ?? "";
+    // cuadro-de-control · con todo a cero el panel enseña el estado
+    // tranquilo, así que lo que no está es la cifra entera.
+    expect(texto).not.toContain("Fichas incompletas");
+    expect(texto).not.toContain("datos pendientes");
   });
 
   it("y un panel de una API vieja no la tumba", async () => {
@@ -704,7 +734,15 @@ describe("alta-minima · la tarjeta del panel de dirección", () => {
       return {};
     });
     await pintar(PanelPage);
-    expect(container.textContent).toContain("Qué hay abierto hoy");
+    // cuadro-de-control · el panel sigue en pie y sin la cifra de fichas.
+    // Este panel de prueba viene con todo a cero, así que lo que se ve es
+    // el estado tranquilo y sus tres secciones — no una pantalla en
+    // blanco, que es lo que este test existe para que no vuelva a pasar.
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Nada abierto. Todo al día.");
+    expect(texto).toContain("Ahora");
+    expect(texto).toContain("Hoy");
+    expect(texto).not.toContain("Fichas incompletas");
   });
 });
 

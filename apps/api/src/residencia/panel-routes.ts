@@ -172,6 +172,11 @@ export async function registerResidenciaPanelRoutes(
       const panel = await construirPanel(getPrisma(), {
         tenantId: auth.tenantId,
         ahora: new Date(),
+        // cuadro-de-control · quién mira, para el saludo de la cabecera
+        // («Buenos días, Carmen»). Es el usuario de la sesión, no un
+        // parámetro: el panel de dirección no se pide «de parte de»
+        // nadie.
+        userId: auth.userId,
       });
       return reply.code(200).send(panel);
     },

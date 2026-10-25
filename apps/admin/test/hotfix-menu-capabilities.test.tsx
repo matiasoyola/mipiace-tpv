@@ -86,6 +86,11 @@ vi.mock("../src/api.js", () => ({
         plantillas: [],
       };
     }
+    // cuadro-de-control · la barra lateral de una residencia pide el
+    // panel para sus contadores. Aquí contesta una respuesta QUE NO TIENE
+    // LA FORMA DEL PANEL, a propósito: es el caso del despliegue a medias
+    // y lo que tiene que pasar es que no haya contadores, no que la
+    // directora se quede sin barra lateral.
     // El badge de la bandeja de Holded y lo que pida cualquier entrada.
     return { count: 0, items: [], errors: [] };
   }),
@@ -104,7 +109,9 @@ vi.mock("react-router-dom", async (orig) => {
   return { ...real, useNavigate: () => navigate };
 });
 
-const { AdminShell, NAV_ITEMS } = await import("../src/AdminShell.js");
+const { AdminShell, NAV_ITEMS, entradasDelMenu, entradasDeConfiguracion } =
+  await import("../src/AdminShell.js");
+const { __resetPanelParaTests } = await import("../src/residencia-panel.js");
 const { BonosPage } = await import("../src/pages/BonosPage.js");
 const { CenteredLoader } = await import("../src/ui.js");
 const { refrescarCapacidades, __resetCapacidadesParaTests } = await import(
@@ -121,6 +128,10 @@ beforeEach(() => {
   capacidadesColgadas = false;
   navigate.mockClear();
   __resetCapacidadesParaTests();
+  // cuadro-de-control · el panel se cachea en un módulo, igual que las
+  // capacidades: sin esto el segundo test del fichero hereda el del
+  // primero.
+  __resetPanelParaTests();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -210,14 +221,50 @@ describe("hotfix-menu-capabilities · el filtro del menú", () => {
     expect(new Set(destinos).size).toBe(destinos.length);
   });
 
+  // cuadro-de-control · EL RECORRIDO SE HACE SOBRE `entradasDelMenu` Y NO
+  // SOBRE LO PINTADO, y es el único cambio que este bloque le hace a este
+  // test.
+  //
+  // La razón: en una residencia el menú ya no es «todas las entradas que
+  // pasan el filtro». Son cinco más «Configuración», y lo demás vive
+  // dentro de ella (decisiones 1 y 2). Si el recorrido siguiera mirando
+  // los `href` pintados, la fila de `residencia` saldría en rojo por un
+  // cambio de producto y no por un agujero en el filtro.
+  //
+  // Lo que este test fija sigue siendo exactamente lo de
+  // hotfix-menu-capabilities: **cada capability deja pasar sus entradas y
+  // sólo las suyas**. Que de ahí salga un menú de cinco o de dieciocho lo
+  // fija el banco del cuadro de control, que es su sitio.
   it.each(CAPABILIDADES_DEL_MENU)(
-    "con sólo «%s» encendida se ven SUS entradas y ninguna otra gateada",
+    "con sólo «%s» encendida pasan SUS entradas y ninguna otra gateada",
     async (capability) => {
       soloEncendida(capability);
       await pintar(shell);
-
+      const caps = {
+        agenda: capability === "agenda",
+        caja: capability === "caja",
+        fichaje: capability === "fichaje",
+        clinica: capability === "clinica",
+        residencia: capability === "residencia",
+        bonos: capability === "bonos",
+        holded: capability === "holded",
+        holdedEnabled: true,
+        holdedDejado: capability === "holdedDejado",
+        cocina: false,
+        businessType: capability === "hosteleria" ? "HOSPITALITY" : null,
+        bonoEtiqueta: "bono",
+        enEnsayo: false,
+        nombreDelCentro: null,
+      } as const;
+      // El menú y «Configuración» juntos: en una residencia el filtro
+      // reparte las entradas entre los dos, y lo que este test pregunta
+      // es si la entrada PASA, no en cuál de los dos acaba.
+      const pasan = new Set([
+        ...entradasDelMenu(caps, "OWNER", true).map((i) => i.to),
+        ...entradasDeConfiguracion(caps, "OWNER", true).map((i) => i.to),
+      ]);
       for (const item of NAV_ITEMS) {
-        const visible = enlace(item.to) != null;
+        const visible = pasan.has(item.to);
         if (item.capability == null) {
           expect(visible, `${item.label} (sin capability)`).toBe(true);
         } else if (item.capability === capability) {
@@ -241,12 +288,18 @@ describe("hotfix-menu-capabilities · el filtro del menú", () => {
   it("una cuenta sin bonos no ve «Bonos» (el fallo nº 1 de Jardín de Gredos)", async () => {
     // Todo lo demás encendido, bonos NO: antes de este hotfix «Bonos»
     // caía en el `return true` del filtro y se pintaba igual.
+    //
+    // cuadro-de-control · SIN `residenciaEnabled`, y es a propósito: en
+    // una residencia el menú pintado son cinco entradas y «Bonos» no
+    // estaría en él ni con el módulo encendido (vive dentro de
+    // «Configuración»). Este test mira el MENÚ PINTADO, que es donde se
+    // vio el fallo, así que se hace sobre un comercio — que es además la
+    // cuenta en la que se vio.
     settings = {
       cajaEnabled: true,
       agendaEnabled: true,
       fichajeEnabled: true,
       clinicalRecordsEnabled: true,
-      residenciaEnabled: true,
       bonosEnabled: false,
     };
     tenant = { hasHoldedKey: true };
@@ -273,10 +326,34 @@ describe("hotfix-menu-capabilities · el filtro del menú", () => {
     // Un tenant de residencia tiene además la clínica (lo dice
     // `capabilities.ts`), y el contrato de encargado es justo lo que ese
     // centro necesita aceptar.
+    //
+    // cuadro-de-control · y lo ve DENTRO DE «CONFIGURACIÓN», no en el
+    // menú: es lo que se acepta una vez. Lo que este test fija es que la
+    // capability lo deja pasar, que es de lo que iba el hotfix.
     settings = { cajaEnabled: true, residenciaEnabled: true, clinicalRecordsEnabled: true };
     tenant = { hasHoldedKey: false };
     await pintar(shell);
-    expect(enlace("/admin/contrato-tratamiento")).not.toBeNull();
+    const caps = {
+      agenda: false,
+      caja: true,
+      fichaje: false,
+      clinica: true,
+      residencia: true,
+      bonos: false,
+      holded: false,
+      holdedEnabled: true,
+      holdedDejado: false,
+      cocina: false,
+      businessType: null,
+      bonoEtiqueta: "bono",
+      enEnsayo: false,
+      nombreDelCentro: null,
+    } as const;
+    expect(
+      entradasDeConfiguracion(caps, "OWNER", true).map((i) => i.to),
+    ).toContain("/admin/contrato-tratamiento");
+    // Y el menú pintado son las cinco del día a día más «Configuración».
+    expect(enlace("/admin/residencia/configuracion")).not.toBeNull();
   });
 
   it("mientras las capacidades no llegan no se pinta nada gateado", async () => {

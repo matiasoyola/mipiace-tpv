@@ -434,7 +434,12 @@ describe("el panel de dirección el primer día", () => {
     panelCentroVacio = false;
     await render(<PanelPage />);
     expect(container.querySelector('[data-test="panel-centro-vacio"]')).toBeNull();
-    expect(texto()).toContain("Qué hay abierto hoy");
+    // cuadro-de-control · «el panel de siempre» es desde este bloque el
+    // cuadro de control: la cabecera con el saludo, «Ahora» y «Hoy». Lo
+    // que este test fija no es la maqueta, es que la tarjeta de centro
+    // vacío NO tapa el panel cuando hay residentes.
+    expect(texto()).toContain("Ahora");
+    expect(texto()).toContain("Hoy");
   });
 });
 
