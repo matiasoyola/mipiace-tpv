@@ -175,6 +175,11 @@ export interface FilaDeContrato {
   ip: string | null;
   userAgent: string | null;
   revokesAgreementId: string | null;
+  /** contrato-lectura-completa · cuándo llegó el final del texto a la
+   *  pantalla. `null` por defecto en las filas SEMBRADAS: representan las
+   *  aceptaciones de hoy, que son anteriores a la regla y donde nadie
+   *  midió nada. Las que escribe la ruta sí lo traen. */
+  textoRecorridoEn: Date | null;
 }
 
 export interface ContratoFake {
@@ -188,7 +193,11 @@ export interface ContratoFake {
   /** La huella del texto vigente, la de verdad. */
   huella: string;
   /** Lo deja aceptado (es el estado de partida del `reset`). */
-  aceptar: (opciones?: { version?: number; userId?: string }) => FilaDeContrato;
+  aceptar: (opciones?: {
+    version?: number;
+    userId?: string;
+    textoRecorridoEn?: Date | null;
+  }) => FilaDeContrato;
   /** Lo revoca: una fila nueva por cada aceptación viva. */
   revocar: () => void;
   /** Lo deja SIN aceptar nunca. */
@@ -206,7 +215,13 @@ export function contratoFake(
   let filas: FilaDeContrato[] = [];
   let n = 0;
 
-  const aceptar = (opciones: { version?: number; userId?: string } = {}) => {
+  const aceptar = (
+    opciones: {
+      version?: number;
+      userId?: string;
+      textoRecorridoEn?: Date | null;
+    } = {},
+  ) => {
     const fila: FilaDeContrato = {
       id: `acuerdo-${++n}`,
       tenantId,
@@ -218,6 +233,7 @@ export function contratoFake(
       ip: null,
       userAgent: null,
       revokesAgreementId: null,
+      textoRecorridoEn: opciones.textoRecorridoEn ?? null,
     };
     filas.push(fila);
     return fila;
@@ -235,6 +251,9 @@ export function contratoFake(
         id: `revoca-${++n}`,
         at: new Date("2026-10-14T09:00:00.000Z"),
         revokesAgreementId: viva.id,
+        // Una revocación no acepta nada: nunca trae el recorrido. Es lo
+        // que el CHECK de la migración exige.
+        textoRecorridoEn: null,
       });
     }
   };
@@ -269,16 +288,29 @@ export function contratoFake(
           ? null
           : { ...f, user: { alias: null, email: "d@d.es" } };
       },
+      // `select` se RESPETA, y hace falta que se respete: devolviendo la
+      // fila entera, un `select` al que se le olvida una columna sale en
+      // verde aquí y en producción deja `undefined` — que es el fallo que
+      // contrato-lectura-completa encontró al sabotear el suyo (la vista
+      // dejaba de devolver `textoRecorridoEn` y el banco no se enteraba).
       findMany: async ({ where, select, orderBy }: any) => {
         let xs = filas.filter((f) => f.tenantId === where.tenantId);
         if (orderBy?.at === "desc") {
           xs = xs.slice().sort((a, b) => +b.at - +a.at);
         }
-        return xs.map((f) => ({
-          ...f,
-          ...(select?.user ? { user: { alias: null, email: "d@d.es" } } : {}),
-          ...(select?.device ? { device: null } : {}),
-        }));
+        return xs.map((f) => {
+          const escalares: Record<string, unknown> =
+            select == null
+              ? { ...f }
+              : Object.fromEntries(
+                  Object.entries(f).filter(([k]) => select[k] === true),
+                );
+          return {
+            ...escalares,
+            ...(select?.user ? { user: { alias: null, email: "d@d.es" } } : {}),
+            ...(select?.device ? { device: null } : {}),
+          };
+        });
       },
       create: async ({ data }: any) => {
         const fila: FilaDeContrato = {
@@ -292,6 +324,7 @@ export function contratoFake(
           ip: data.ip ?? null,
           userAgent: data.userAgent ?? null,
           revokesAgreementId: data.revokesAgreementId ?? null,
+          textoRecorridoEn: data.textoRecorridoEn ?? null,
         };
         filas.push(fila);
         return fila;
@@ -309,6 +342,7 @@ export function contratoFake(
             ip: d.ip ?? null,
             userAgent: d.userAgent ?? null,
             revokesAgreementId: d.revokesAgreementId ?? null,
+            textoRecorridoEn: d.textoRecorridoEn ?? null,
           });
         }
         return { count: data.length };
