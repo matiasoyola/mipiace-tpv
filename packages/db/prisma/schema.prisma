@@ -1400,6 +1400,21 @@ model Tenant {
   // de `cajaEnabled`: sólo el valor explícito CONTRARIO al default cambia
   // el comportamiento de nadie.
   fichajeEnabled                 Boolean           @default(false) @map("fichaje_enabled")
+  // hotfix-fichaje-medianoche · CUÁNTAS HORAS puede llevar abierto un tramo
+  // antes de ser una «salida olvidada». NO es el calendario: un turno que
+  // empieza a las 22:00 y termina a las 08:00 se cierra con un toque normal
+  // como cualquier otro, aunque pase de medianoche.
+  //
+  // 16 de serie — cubre el turno de noche de una residencia, una jornada
+  // partida larga y el cierre de un bar, y deja fuera «entré ayer a las 9 y
+  // no salí». Hermana de `agendaSlotMinutes` en forma (entero por tenant
+  // con default que no cambia a nadie) y de `fichajeEnabled` en gobierno:
+  // la mueve SÓLO el super-admin, porque no hay pantalla para esto y
+  // tocarla es afinar un caso raro, no un ajuste del negocio.
+  //
+  // El rango 8–24 vive además en un CHECK de la base
+  // (`tenants_fichaje_max_open_hours_check`).
+  fichajeMaxOpenHours            Int               @default(16) @map("fichaje_max_open_hours")
   // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
   // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
   // que responde a otra pregunta: ¿lo tiene conectado YA?
@@ -5685,6 +5700,26 @@ model ClinicalProcessorAgreement {
   // La fila que esta revoca. Con esto puesto, la fila NO ACEPTA NADA.
   revokesAgreementId String? @map("revokes_agreement_id") @db.Uuid
 
+  // contrato-lectura-completa · CUÁNDO EL FINAL DEL TEXTO LLEGÓ A LA
+  // PANTALLA, antes de aceptar. Con esto puesto, la fila dice que el texto
+  // completo se mostró y se recorrió hasta el final — que es lo que
+  // contesta a «yo eso no lo leí».
+  //
+  // UNA columna y no dos (un booleano y un instante): son el MISMO hecho.
+  // `IS NOT NULL` es el booleano, y dos columnas que siempre van juntas
+  // son dos columnas que un día se contradicen.
+  //
+  // `null` en tres casos, y los tres son verdad:
+  //
+  //   · en una REVOCACIÓN, que no acepta nada;
+  //   · en las aceptaciones ANTERIORES a esta regla, donde nadie midió
+  //     nada (y un `false` ahí sería afirmar que no lo leyó, que no se
+  //     sabe);
+  //   · nunca más en una aceptación nueva: la API las rechaza con 400.
+  //
+  // El CHECK de la migración cierra las combinaciones imposibles.
+  textoRecorridoEn DateTime? @map("texto_recorrido_en") @db.Timestamptz()
+
   tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   user        User                         @relation("ClinicalProcessorAgreementUser", fields: [userId], references: [id], onDelete: Restrict)
   device      Device?                      @relation("ClinicalProcessorAgreementDevice", fields: [deviceId], references: [id], onDelete: Restrict)
@@ -6252,7 +6287,13 @@ model ResidentProfile {
 
   /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
   /// ingreso y pedirla sería un campo que se rellena mal.
-  admissionDate          DateTime  @map("admission_date") @db.Date
+  ///
+  /// alta-minima · **OPCIONAL desde el 23-10-2026.** El primer día de una
+  /// residencia real lo que hay es un listado de nombres: la señora ya
+  /// vive aquí y no saber su fecha de ingreso no hace que necesite menos
+  /// cuidados. Lo que falta lo enumera `datosQueFaltan` y el programa no
+  /// deja de recordarlo; lo que NO puede es dejarla fuera del programa.
+  admissionDate          DateTime? @map("admission_date") @db.Date
   /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
   /// aquí. El motivo es texto corto y libre a propósito: «se va con su
   /// hija», «traslado a hospital», «fallecimiento». Un enum habría
@@ -6269,11 +6310,24 @@ model ResidentProfile {
   /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
   /// la Ley de Dependencia (lo reconoce la administración, y puede no
   /// tenerlo). Son dos cosas distintas: ver los enums.
-  dependencyLevel DependencyLevel  @map("dependency_level")
+  ///
+  /// alta-minima · el NIVEL también es opcional, y arrastra una
+  /// consecuencia: **sin nivel no se precarga plan de cuidados** (no hay
+  /// plantilla que aplicar). El residente nace sin plan, el parte ya sabe
+  /// enseñarlo sin ruido (residencia-6 §4) y «como siempre» y «algo no va
+  /// bien» funcionan igual —las dimensiones OBS son del centro, no del
+  /// plan—. «Plan de cuidados» entra en `datosQueFaltan` como
+  /// imprescindible hasta que la dirección lo cargue.
+  dependencyLevel DependencyLevel? @map("dependency_level")
   dependencyGrade DependencyGrade? @map("dependency_grade")
   /// Privada, concertada o temporal. Los pagadores y la vigencia de la
   /// plaza son Fase 3.
-  placeType       PlaceType        @map("place_type")
+  ///
+  /// alta-minima · opcional, y es el único de los tres que el listado del
+  /// primer día suele traer (segunda columna del Excel). Si es
+  /// `CONCERTADA`, el grado reconocido pasa a imprescindible: sin grado no
+  /// se factura a la Junta.
+  placeType       PlaceType?       @map("place_type")
 
   /// El FAMILIAR RESPONSABLE del PAI: a quién se llama. Las tres columnas
   /// son opcionales porque hay residentes sin familia localizable, y un

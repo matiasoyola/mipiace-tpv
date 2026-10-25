@@ -504,7 +504,17 @@ export async function parteDeResidencia(
     ficheros,
     json: {
       ficha: {
-        ingreso: perfil.admissionDate.toISOString().slice(0, 10),
+        // alta-minima · `null` si todavía no se sabe, no una fecha
+        // inventada. Esto es la devolución de SUS datos al residente o a
+        // quien los pueda pedir (art. 28.3.g): si el centro no apuntó
+        // cuándo ingresó, lo que hay que devolver es que no está —poner
+        // «hoy» sería fabricar un dato en un documento que se entrega.
+        //
+        // La cota de abajo (`careDay: { gte: … }`) ya trataba el NULL:
+        // sin fecha de ingreso, el ZIP lleva los partes desde el
+        // principio, que es lo correcto cuando no se sabe desde cuándo
+        // vive aquí.
+        ingreso: perfil.admissionDate?.toISOString().slice(0, 10) ?? null,
         alta: perfil.dischargeDate?.toISOString().slice(0, 10) ?? null,
         motivoDelAlta: leerTexto(
           { cifrado: perfil.dischargeReasonCifrado, claro: perfil.dischargeReason },

@@ -55,6 +55,8 @@ import { ProcesosPage } from "./pages/residencia/ProcesosPage.js";
 import { ProcesoPage } from "./pages/residencia/ProcesoPage.js";
 import { NoConformidadesPage } from "./pages/residencia/NoConformidadesPage.js";
 import { NoConformidadPage } from "./pages/residencia/NoConformidadPage.js";
+// cuadro-de-control · el índice de todo lo que se configura una vez.
+import { ConfiguracionPage } from "./pages/residencia/ConfiguracionPage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -298,11 +300,22 @@ export function App() {
         <Route path="/admin/residencia/relevos/:id" element={<ResidenciaGate title="Relevo"><RelevoPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/obligaciones" element={<ResidenciaGate title="Obligaciones"><ObligacionesPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/indicadores" element={<ResidenciaGate title="Indicadores"><IndicadoresPage /></ResidenciaGate>} />
+        {/* cuadro-de-control (decisión 2) · el índice de «Configuración».
+            Con el mismo <ResidenciaGate> que sus hermanas: la página no
+            añade permisos, sólo enlaces a pantallas que ya tienen el suyo
+            —y cada una lo sigue comprobando por su cuenta, en el cliente y
+            en el servidor. */}
+        <Route path="/admin/residencia/configuracion" element={<ResidenciaGate title="Configuración"><ConfiguracionPage /></ResidenciaGate>} />
         {/* calidad-1 (D-70) · el mapa de procesos y lo que cuelga de él.
             Mismo gate que el resto: la puerta de verdad es la del
             servidor, que contesta 403 CALIDAD_ES_DE_DIRECCION a un
             encargado sin rol directivo ni rol de calidad. La ficha de un
-            proceso va debajo del mapa porque se llega desde él. */}
+            proceso va debajo del mapa porque se llega desde él.
+
+            Las dos entradas viven en «Configuración» y no en el menú
+            (cuadro-de-control, decisión 2): el mapa se ajusta una vez al
+            año y las no conformidades se trabajan por semanas, no es lo
+            del día. La RUTA no cambia, que es la promesa de ese bloque. */}
         <Route path="/admin/residencia/procesos" element={<ResidenciaGate title="Mapa de procesos"><ProcesosPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/procesos/:id" element={<ResidenciaGate title="Proceso"><ProcesoPage /></ResidenciaGate>} />
         {/* calidad-1 (D-73) · el registro de no conformidades y el

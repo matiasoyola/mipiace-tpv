@@ -269,6 +269,35 @@ interface ApiOptions {
   retryOnUnauthorized?: boolean;
 }
 
+/**
+ * clinica-8 (fase B, 18) · CON LA SESIÓN CAÍDA, AL LOGIN.
+ *
+ * Auditoría del 18-10, punto 20: «Panel con sesión caída: no manda al
+ * login, pinta un menú equivocado y "No se ha podido cargar el
+ * contrato"». Las tres cosas son la misma: al caducar el refresh, lo
+ * único que pasaba era `clearTokens()` y un error propagado a la
+ * pantalla. `RootRouter` sí manda al login, pero sólo decide en `/`;
+ * dentro de una pantalla nadie volvía a preguntar. Y las capacidades,
+ * que también fallaban con 401, caían a su valor por defecto —«asume
+ * caja y Holded»— y repintaban una barra lateral de otro comercio.
+ *
+ * Se va al login con una navegación DURA y no con el router: esto se
+ * llama desde `api()`, que no es un componente y no tiene `navigate`; y
+ * con la sesión muerta no hay nada en memoria que valga la pena
+ * conservar — al revés, lo que hay que tirar es precisamente eso.
+ *
+ * Idempotente: si ya se está en el login no se hace nada, para que un
+ * 401 del propio login no deje la página recargándose sola.
+ */
+export function alLogin(): void {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname.startsWith("/login")) return;
+  // La consola de super-admin tiene su propia sesión y su propio login:
+  // echarla a `/login` sería mandarla al panel del cliente.
+  if (window.location.pathname.startsWith("/superadmin")) return;
+  window.location.replace("/login");
+}
+
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const method = options.method ?? "GET";
   const tokens = readTokens();
@@ -296,6 +325,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
       return api<T>(path, { ...options, retryOnUnauthorized: false });
     }
     clearTokens();
+    alLogin();
   }
   if (res.status === 401 && impersonation) {
     // El JWT impersonation caducó (no hay refresh). Limpiamos para que

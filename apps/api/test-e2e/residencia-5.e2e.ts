@@ -37,6 +37,13 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+// clinica-8 (fase B) · la versión es la VIGENTE, no un `1` escrito a mano:
+// la v2 del contrato de encargado deja una aceptación de la versión vieja
+// en SOLO LECTURA (423) y este fichero entero se va a rojo. Es la
+// garantía de clinica-7 funcionando. Este banco nació en master DESPUÉS
+// de la fase A, así que no estaba entre los cuatro que ella arregló.
+import { VERSION_VIGENTE } from "@mipiacetpv/contrato-encargado";
+
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -247,7 +254,7 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, at)
-       VALUES ('${randomUUID()}', '${tenantId}', 1, '${"a".repeat(64)}', '${pilarId}', now())`,
+       VALUES ('${randomUUID()}', '${tenantId}', ${VERSION_VIGENTE}, '${"a".repeat(64)}', '${pilarId}', now())`,
     );
 
     // ── DOS plantas: es lo que hace que «cada zona con contenido
@@ -1663,6 +1670,74 @@ describe.skipIf(!e2eEnabled)("e2e · el relevo, el panel y las obligaciones", ()
       // 5 · los indicadores. Trece desde calidad-1 (D-72); los seis de
       // este bloque son los seis primeros y el test de arriba lo fija.
       expect(p.indicadores).toHaveLength(13);
+    });
+
+    // ── cuadro-de-control · LO QUE EL PANEL TRAJO DESPUÉS ──────────
+    //
+    // Cuatro cosas más, y todas en la MISMA llamada: la cabecera del
+    // cuadro de control (el centro, sus plazas, cuántos hay dentro y
+    // quién mira), las horas del turno en curso y «lo que no puede
+    // esperar».
+    //
+    // Van aquí, pegadas al test de las cinco preguntas, porque lo que
+    // tienen que seguir siendo es UNA petición: si alguien las saca a una
+    // ruta aparte, este test sigue en verde y el de arriba también, y lo
+    // que se rompe es el presupuesto de los 10 segundos. Eso lo fija el
+    // banco del admin, que cuenta las llamadas.
+    it("y además la cabecera del centro, el turno con sus horas y lo que no puede esperar", async () => {
+      const r = await app.inject({
+        method: "GET",
+        url: "/residencia/panel",
+        headers: comoPilar,
+      });
+      expect(r.statusCode, r.body).toBe(200);
+      const p = r.json();
+
+      // El centro: el nombre del tenant, las camas ACTIVAS como plazas y
+      // los residentes con cama vigente.
+      expect(p.centro.nombre).toBe("Jardín de Gredos");
+      expect(p.centro.plazas).toBeGreaterThanOrEqual(2);
+      expect(p.centro.dentro).toBeGreaterThanOrEqual(1);
+      expect(p.centro.dentro).toBeLessThanOrEqual(p.centro.plazas);
+      // Las ausencias NO existen todavía: `null` y no `0`, que afirmaría
+      // que no hay nadie fuera del centro.
+      expect(p.centro.fuera).toBeNull();
+
+      // Quién mira, para el saludo.
+      expect(typeof p.yo.nombre).toBe("string");
+      expect(p.yo.nombre.length).toBeGreaterThan(0);
+
+      // El turno en curso dice cuándo empieza y cuándo acaba: es «turno
+      // de mañana, hasta las 15:00» de la cabecera.
+      expect(p.turno.turno).not.toBeNull();
+      expect(p.turno.turno.empiezaEn).toMatch(/^\d{2}:\d{2}$/);
+      expect(p.turno.turno.terminaEn).toMatch(/^\d{2}:\d{2}$/);
+
+      // Lo que no puede esperar: las abiertas más graves, una fila cada
+      // una, acotadas a cinco y SIN la descripción (que es salud y vive
+      // cifrada — ver `cuerpo-clinico-cifrado`).
+      expect(Array.isArray(p.abierto.noPuedeEsperar)).toBe(true);
+      expect(p.abierto.noPuedeEsperar.length).toBeLessThanOrEqual(5);
+      expect(p.abierto.noPuedeEsperar.length).toBeGreaterThanOrEqual(1);
+      const fila = p.abierto.noPuedeEsperar[0];
+      expect(fila.nombreDelTipo).not.toBe(fila.tipo);
+      expect(Object.keys(fila)).not.toContain("descripcion");
+      // Y en el orden del libro: lo más grave primero.
+      const niveles = p.abierto.noPuedeEsperar.map(
+        (i: { nivel: string }) => i.nivel,
+      );
+      const peso = (n: string) => Number(n.slice(1));
+      for (let i = 1; i < niveles.length; i += 1) {
+        expect(peso(niveles[i - 1])).toBeGreaterThanOrEqual(peso(niveles[i]));
+      }
+      // La caída de Carmen es N3 y espera que la cierre otra persona
+      // (D-28), y eso se lee en SU fila sin abrirla.
+      const caida = p.abierto.noPuedeEsperar.find(
+        (i: { tipo: string }) => i.tipo === "CAIDA",
+      );
+      expect(caida, JSON.stringify(niveles)).toBeDefined();
+      expect(caida.esperaCierreDeOtro).toBe(true);
+      expect(caida.sinConstanciaDeFamilia).toBe(true);
     });
 
     it("y un ENCARGADO sin rol directivo no entra", async () => {

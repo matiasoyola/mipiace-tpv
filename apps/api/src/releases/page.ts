@@ -116,6 +116,16 @@ const CSS = `
     font-size: 15px;
     font-weight: 600;
   }
+  .aviso {
+    margin: 0 0 16px 0;
+    padding: 12px 14px;
+    background: #FEF6E7;
+    border-left: 4px solid #B45309;
+    border-radius: 6px;
+    color: #7C4A09;
+    font-size: 14px;
+    line-height: 1.5;
+  }
   .meta {
     margin-top: 28px;
     padding-top: 16px;
@@ -132,6 +142,24 @@ const CSS = `
     word-break: break-all;
   }
 `;
+
+// clinica-8 (fase B, 20) · EL AVISO QUE FALTABA ANTES DE DESCARGAR.
+//
+// Auditoría del 18-10, punto 31: «/apk: "archivo dañino" sin aviso
+// previo». Quien instala la APK en la clínica es la dueña, sola, con un
+// código de seis dígitos que le ha dado el implantador por teléfono:
+// ver «este tipo de archivo puede dañar tu dispositivo» sin esperarlo es
+// donde se para y llama.
+//
+// Va ANTES del botón y no después —leerlo después de pulsar no sirve de
+// nada— y en ámbar y no en rojo: no es un error, es lo que va a pasar.
+// Su clase es `.aviso`, arriba.
+//
+// El razonamiento vive aquí y no dentro de la plantilla del CSS porque
+// ese literal VIAJA AL NAVEGADOR: un comentario de nueve líneas en
+// castellano dentro de la hoja de estilos es peso que la tablet
+// descarga, y además hacía que la página contuviera la frase del aviso
+// incluso cuando el aviso no se pinta.
 
 function metaBlock(
   meta: PublicReleaseMeta | null,
@@ -186,6 +214,17 @@ export function renderApkPage(params: {
           autofocus
           placeholder="000000"
         >
+        <p class="aviso">
+          Android va a avisar <b>dos veces</b>, y las dos son normales.
+          <br>1) Chrome dirá
+          <b>«este tipo de archivo puede dañar tu dispositivo»</b>:
+          toca <b>Descargar igualmente</b>.
+          <br>2) El sistema pedirá
+          <b>permiso para instalar apps de esta fuente</b>: dáselo.
+          <br>Pasa con cualquier app que no viene de Google Play. La
+          huella SHA-256 de abajo sirve para comprobar que el archivo
+          es el nuestro.
+        </p>
         <button type="submit">Descargar la app</button>
       </form>`;
 

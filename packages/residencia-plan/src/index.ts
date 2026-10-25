@@ -39,6 +39,15 @@
 //     convierte una constante o un evento en un nivel N0-N4. La ejecutan
 //     la tablet (al instante y sin red) y el servidor (que es el que
 //     manda), y un test de oro fija que dan lo mismo.
+//   · `datos-que-faltan.ts` — alta-minima: qué le falta a una ficha de
+//     residente que nació con sólo el nombre. La ejecutan la API (la
+//     etiqueta de la fila, la banda de la ficha, la tarjeta del panel) y
+//     el admin, y **historia-1 la absorbe** en su `AdmissionChecklist`
+//     (D-94): ver su cabecera.
+//   · `nombres.ts` — alta-minima: la clave de duplicado de un nombre, su
+//     formato para pintarlo y el parser del pegado de «Añadir varios».
+//     Puro para que la vista previa del admin y la idempotencia del
+//     servidor decidan lo mismo.
 
 export {
   CENTER_TZ,
@@ -175,3 +184,24 @@ export {
   problemaDelPinNuevo,
   type RolParaElPin,
 } from "./pin-por-alcance.js";
+
+export {
+  datosQueFaltan,
+  estadoDeLaFicha,
+  resumenDeFichas,
+  type CampoDeFicha,
+  type DatoQueFalta,
+  type EstadoDeLaFicha,
+  type FichaParaCompletar,
+  type PesoDelDato,
+  type ResumenDeFichas,
+} from "./datos-que-faltan.js";
+
+export {
+  claveDeNombre,
+  enFormatoDeNombre,
+  lineasPegadas,
+  type LineaPegada,
+  type LineaRota,
+  type NombresPegados,
+} from "./nombres.js";

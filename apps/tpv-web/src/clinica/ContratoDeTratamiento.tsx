@@ -27,6 +27,17 @@
 // no en el token) y viaja en la respuesta: así el botón y la ruta no
 // pueden discrepar sobre quién acepta.
 //
+// ── contrato-lectura-completa · NI AQUÍ SE ACEPTA SIN RECORRERLO ────
+//
+// La API da 400 a una aceptación que no traiga `textoMostradoCompleto`, y
+// esta pantalla es el OTRO sitio desde el que se acepta el contrato (el
+// TPV de una clínica: la dueña con la tablet en la mano). Así que lleva el
+// mismo centinela que el panel.
+//
+// Aquí el texto ya estaba desplegado y es la PÁGINA la que hace scroll —no
+// un recuadro—, así que el observador mira contra el viewport (`root:
+// null`) y no contra una caja. Es la única diferencia con el panel.
+//
 // ── El texto NO está en este fichero ────────────────────────────────
 //
 // Llega en la respuesta, desde el paquete versionado. Misma regla que la
@@ -66,6 +77,10 @@ export interface AceptacionEnPantalla {
   revocadoEn: string | null;
   revocadoPor: string | null;
   textoDisponible: boolean;
+  /** contrato-lectura-completa · cuándo llegó el final del texto a la
+   *  pantalla antes de aceptar. `null` en las aceptaciones anteriores a la
+   *  regla: no se midió. */
+  textoRecorridoEn: string | null;
 }
 
 export interface VistaDelContrato {
@@ -167,6 +182,47 @@ export function BandaDeSoloLectura({
   );
 }
 
+/**
+ * contrato-lectura-completa · ¿ha pasado el FINAL del texto por la
+ * pantalla? Y cuándo.
+ *
+ * Gemelo del `useFinalDelTexto` del panel
+ * (`apps/admin/src/pages/ContratoTratamientoPage.tsx`), con el `root` en
+ * el viewport porque aquí scrollea la página entera. Las dos apps no
+ * comparten paquete de UI, y un hook de cuarenta líneas no es razón para
+ * crear uno; lo que NO está duplicado es la regla, que vive en la API.
+ *
+ * Las dos decisiones de fondo están contadas allí: un centinela en vez de
+ * una cuenta de píxeles, y un navegador sin `IntersectionObserver` cuenta
+ * como visto (si no, nadie podría aceptar nunca el contrato).
+ */
+function useFinalDelTexto(): {
+  verCentinela: (el: HTMLElement | null) => void;
+  finalVisto: Date | null;
+} {
+  const [centinela, setCentinela] = useState<HTMLElement | null>(null);
+  const [finalVisto, setFinalVisto] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (finalVisto != null) return;
+    if (centinela == null) return;
+    if (typeof IntersectionObserver !== "function") {
+      setFinalVisto(new Date());
+      return;
+    }
+    const observador = new IntersectionObserver(
+      (entradas) => {
+        if (entradas.some((e) => e.isIntersecting)) setFinalVisto(new Date());
+      },
+      { threshold: 0 },
+    );
+    observador.observe(centinela);
+    return () => observador.disconnect();
+  }, [centinela, finalVisto]);
+
+  return { verCentinela: setCentinela, finalVisto };
+}
+
 // ── 2 · LA PANTALLA DE ACEPTACIÓN ───────────────────────────────────
 
 /**
@@ -190,6 +246,8 @@ export function PantallaDeAceptacion({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [leido, setLeido] = useState(false);
+  const { verCentinela, finalVisto } = useFinalDelTexto();
+  const recorrido = finalVisto != null;
 
   if (!vista.puedeAceptar) {
     return (
@@ -256,17 +314,37 @@ export function PantallaDeAceptacion({
           ))}
         </div>
 
+        {/* EL CENTINELA, justo después del texto y antes de la huella:
+            cuando entra en el viewport, el final se ha visto. Ver
+            `useFinalDelTexto`. */}
+        <div
+          ref={verCentinela}
+          data-test="contrato-final-del-texto"
+          aria-hidden
+          className="h-px"
+        />
+
         {/* La huella, debajo del texto: es lo que demuestra QUÉ se aceptó,
             y la fila que se escribe guarda ésta misma. */}
         <p className="text-[13px] text-mipiace-ink-soft break-all mt-4 mb-0">
           Huella del texto (SHA-256): {vista.huellaVigente}
         </p>
 
-        <label className="flex items-start gap-3 mt-7 text-[17px] text-mipiace-ink leading-snug cursor-pointer">
+        {/* La casilla y el botón, DESACTIVADOS hasta que el final del
+            texto ha pasado por la pantalla. */}
+        <label
+          className={`flex items-start gap-3 mt-7 text-[17px] leading-snug ${
+            recorrido
+              ? "text-mipiace-ink cursor-pointer"
+              : "text-mipiace-ink-soft cursor-not-allowed"
+          }`}
+        >
           <input
             type="checkbox"
             checked={leido}
+            disabled={!recorrido}
             onChange={(e) => setLeido(e.target.checked)}
+            data-test="contrato-casilla"
             // 24 px: se marca con el dedo en la tablet.
             className="w-6 h-6 mt-0.5 shrink-0 accent-mipiace-ink"
           />
@@ -283,7 +361,7 @@ export function PantallaDeAceptacion({
 
         <button
           type="button"
-          disabled={!leido || enviando}
+          disabled={!recorrido || !leido || enviando}
           onClick={() => {
             void (async () => {
               setEnviando(true);
@@ -291,7 +369,11 @@ export function PantallaDeAceptacion({
               try {
                 await apiWithCashier("/clinica/contrato/aceptar", {
                   method: "POST",
-                  body: {},
+                  // Lo que la pantalla afirma, y lo que la API exige.
+                  body: {
+                    textoMostradoCompleto: finalVisto != null,
+                    finalDelTextoEn: finalVisto?.toISOString(),
+                  },
                 });
                 onAceptado();
               } catch (err) {
@@ -315,9 +397,26 @@ export function PantallaDeAceptacion({
           Aceptar y activar la historia clínica
         </button>
 
+        {/* El aviso de debajo del botón Y el anuncio al lector de
+            pantalla, en un solo elemento montado desde el primer render
+            (ver la nota del panel sobre por qué no se monta al cambiar). */}
+        <p
+          role="status"
+          aria-live="polite"
+          data-test="contrato-aviso-recorrer"
+          className={`text-[16px] font-medium leading-snug mt-4 mb-0 ${
+            recorrido ? "text-emerald-700" : "text-amber-800"
+          }`}
+        >
+          {recorrido
+            ? "Has llegado al final del contrato: ya puedes aceptarlo."
+            : "Baja hasta el final del contrato para poder aceptarlo."}
+        </p>
+
         <p className="text-[15px] text-mipiace-ink-soft leading-snug mt-4 mb-0">
           Al aceptar queda registrado quién lo acepta, cuándo y desde qué
-          aparato. Esa anotación no se puede editar ni borrar.
+          aparato, y que el texto completo se mostró y se recorrió hasta el
+          final. Esa anotación no se puede editar ni borrar.
         </p>
       </div>
     </div>

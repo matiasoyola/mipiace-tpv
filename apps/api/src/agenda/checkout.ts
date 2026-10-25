@@ -50,7 +50,16 @@ import { computeTicket } from "../tickets/totals.js";
 import type { AgendaStore } from "./store.js";
 
 export type CheckoutResult =
-  | { ok: true; ticket: SerializedCheckoutTicket; alreadyLinked: boolean }
+  | {
+      ok: true;
+      ticket: SerializedCheckoutTicket;
+      alreadyLinked: boolean;
+      // clinica-8 · el borrador se abrió VACÍO porque la sesión cerrada de
+      // esta cita no dejó ni una línea cobrable. No es un error: es lo que
+      // pasó en la consulta, y quien cobra tiene que añadir el servicio.
+      // `false` (y ausente del JSON) en todo lo demás.
+      sesionSinCobro?: boolean;
+    }
   | {
       ok: false;
       status: number;
@@ -173,13 +182,21 @@ export async function checkoutAppointment(
     tenantId: ctx.tenantId,
     appointmentId,
   });
+  // clinica-8 · UNA SOLA VERDAD. Con sesión cerrada manda la sesión, haya
+  // dejado líneas o no. Lo que ya no pasa es caer a los servicios
+  // RESERVADOS cuando la sesión no dejó nada: eso cobraba la previsión en
+  // vez del trabajo, con los importes cuadrando y nadie enterándose.
+  const sesionSinCobro = tratamientosDeLaSesion?.sinNadaQueCobrar === true;
   // `appt.items` conserva los DUPLICADOS a propósito: dos veces el mismo
   // servicio en una visita son dos líneas, y mapear por `serviceId` único
   // se habría comido una. Por eso la lista es de items y no un `Set`.
-  const itemsACobrar: Array<{ serviceId: string }> =
-    tratamientosDeLaSesion ?? appt.items;
+  const itemsACobrar: Array<{ serviceId: string }> = sesionSinCobro
+    ? []
+    : (tratamientosDeLaSesion?.lineas ?? appt.items);
 
-  if (itemsACobrar.length === 0) {
+  // Y el borrador VACÍO sólo es legítimo por ese camino. Una cita sin
+  // servicios y sin sesión sigue siendo lo que era: nada que cobrar.
+  if (itemsACobrar.length === 0 && !sesionSinCobro) {
     return {
       ok: false,
       status: 409,
@@ -382,7 +399,12 @@ export async function checkoutAppointment(
 
   const ticket = await loadTicket(prisma, ticketId);
   if (!ticket) throw new Error("ticket vanished after create");
-  return { ok: true, ticket, alreadyLinked: false };
+  return {
+    ok: true,
+    ticket,
+    alreadyLinked: false,
+    ...(sesionSinCobro ? { sesionSinCobro: true } : {}),
+  };
 }
 
 async function loadTicket(

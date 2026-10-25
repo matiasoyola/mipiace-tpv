@@ -50,6 +50,7 @@ import {
 } from "../enlaces/puerta.js";
 import { REGLAS_VALORACION } from "../enlaces/reglas.js";
 import { huellaDeToken } from "../enlaces/token.js";
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { asegurarDek, dekONada } from "./claves.js";
 import {
   cifrarCorreccion,
@@ -116,9 +117,9 @@ type FilaValoracion = Prisma.ClinicalAssessmentGetPayload<{
 
 /** El nombre visible de quien firma. Mismo criterio que `autorView` de
  *  `routes.ts`: alias primero (el email es credencial, no display). */
-function nombreDe(u: { alias: string | null; email: string }): string {
-  return u.alias?.trim() || u.email;
-}
+// clinica-8 (fase B, 11) · el nombre, no el email. Era una copia local
+// que caía al email entero; ahora es `lib/nombre-para-mostrar.ts`.
+const nombreDe = nombreParaMostrar;
 
 // ── Lecturas ──────────────────────────────────────────────────────────
 
@@ -237,6 +238,23 @@ export interface VistaValoracion {
     estado: EstadoValoracion;
     validadaEn: string | null;
   }>;
+  /**
+   * clinica-9 (7) · ¿ESTE PACIENTE TIENE EMAIL?
+   *
+   * La pasada en hierro del 24-10 (captura 14) abrió la valoración de una
+   * paciente SIN email y la pantalla decía «El enlace que se le mandó
+   * vale hasta el 22 de noviembre». No se le mandó nada: no hay a dónde.
+   * La sanitaria se queda esperando una respuesta que no puede llegar.
+   *
+   * Va en la vista y no se deduce de `canal`: una valoración creada al
+   * dar la cita nace con canal `EMAIL` aunque la ficha esté sin correo, y
+   * deducirlo de ahí es justo lo que escribió la frase falsa.
+   *
+   * **Sólo el booleano, nunca la dirección.** Lo que la pantalla necesita
+   * es saber si hay por dónde mandarlo; el email del paciente se lee en
+   * su ficha, no en una pantalla clínica.
+   */
+  paciente: { tieneEmail: boolean };
 }
 
 /**
@@ -251,10 +269,21 @@ export async function vistaDeLaValoracion(
   prisma: PrismaClient,
   input: { tenantId: string; clientId: string },
 ): Promise<VistaValoracion> {
-  const fila = await cargarValoracionDeLaPantalla(prisma, input);
+  const [fila, paciente] = await Promise.all([
+    cargarValoracionDeLaPantalla(prisma, input),
+    // clinica-9 (7) · sólo si hay email, nunca cuál.
+    prisma.client.findFirst({
+      where: { id: input.clientId, tenantId: input.tenantId },
+      select: { email: true },
+    }),
+  ]);
+  const conEmail = {
+    tieneEmail: (paciente?.email ?? "").trim().length > 0,
+  };
 
   if (!fila) {
     return {
+      paciente: conEmail,
       valoracion: null,
       cuestionario: cuestionarioDeVersion(VERSION_VIGENTE),
       respuestasPaciente: {},
@@ -313,6 +342,7 @@ export async function vistaDeLaValoracion(
     : { alertas: [], sinResolver: [], detalles: {} };
 
   return {
+    paciente: conEmail,
     valoracion: {
       id: fila.id,
       estado: fila.status as EstadoValoracion,

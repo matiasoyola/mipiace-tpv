@@ -46,6 +46,9 @@ vi.mock("../src/lib/catalog.js", () => ({
     return cacheMock.servicios;
   },
   productImageUrl: () => null,
+  // clinica-8 · el TPV abre en la agenda cuando el centro tiene historia
+  // clínica. Esta peluquería no la tiene, así que abre donde abría ayer.
+  getCachedClinicaEnabled: () => false,
 }));
 
 const clientesMock = vi.hoisted(() => ({ elegido: null as unknown }));

@@ -48,6 +48,33 @@
 // valor que nace en `false`: ningún tenant de hoy cambia de
 // comportamiento.
 //
+// ── clinica-9 (6) · ESTO ERA MENTIRA HASTA ESTE BLOQUE ────────────────
+//
+// Lo de arriba quedó escrito en clinica-2 y **no lo filtraba ninguna de
+// las cuatro**. La pasada en hierro del 24-10 encontró «Paciente (por
+// enlace)» en Cajeros con sus botones de Editar, Cambiar PIN y Revocar, y
+// en la pantalla de Personal. «Cambiar PIN» contestaba «error
+// inesperado»: el 500 del CHECK de aquí arriba, que era lo único que
+// impedía que esa fila acabara con acceso a la caja.
+//
+// Un comentario que describe un filtro que no existe es peor que no tener
+// comentario: el siguiente bloque lo lee y lo da por hecho. Los cuatro
+// filtros están puestos ahora, cada uno con su línea y su test:
+//
+//   · `cashiers/routes.ts` · `PERSONAL_DE_LA_CAJA` (las CUATRO rutas:
+//     listar, renombrar, cambiar el PIN y revocar) y `findAliasCollision`.
+//     Cambiarle el PIN da 404 limpio.
+//   · `staff/routes.ts` · el `where` de `GET /staff`.
+//   · `tables/routes.ts` y `shift/routes.ts` · los candidatos a PIN de
+//     encargado. Ahí el CHECK ya lo dejaba fuera (`pinHash: { not: null }`
+//     sobre una fila que no puede tener `pin_hash`), y el filtro va igual:
+//     la garantía no puede depender de que nadie relaje el CHECK.
+//   · `lib/un-solo-nombre.ts` · `otroConEseNombre`, la colisión de nombre
+//     de la pantalla de Personal.
+//
+// Bancos: `clinica-8-cajeros.test.ts` y `staff-route.test.ts`, los dos con
+// sabotaje.
+//
 // ── Se crea perezosamente, dentro de la transacción ───────────────────
 //
 // No se siembra en la migración: hoy no hay ningún tenant con la clínica

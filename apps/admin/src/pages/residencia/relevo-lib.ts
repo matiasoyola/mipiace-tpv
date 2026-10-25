@@ -4,6 +4,10 @@
 // (residencia-4): cuatro pantallas comparten estos tipos y estas frases, y
 // cuatro copias de «Sigue abierta de antes» se separan a la cuarta.
 
+// alta-minima · lo que le falta a una ficha de residente. El tipo es el
+// del paquete puro: ver la cabecera de `lib.ts`.
+import type { DatoQueFalta } from "@mipiacetpv/residencia-plan";
+
 export interface LineaDelParte {
   clase: string;
   texto: string;
@@ -248,13 +252,43 @@ export function umbralEnPalabras(v: ValorDeIndicador): string {
 
 // ── El panel ─────────────────────────────────────────────────────────
 
+/** cuadro-de-control · una fila de «lo que no puede esperar». */
+export interface IncidenciaQueNoEspera {
+  id: string;
+  nivel: string;
+  tipo: string;
+  nombreDelTipo: string;
+  sujeto: string;
+  residente: string | null;
+  habitacion: string | null;
+  abiertaEn: string;
+  sinConstanciaDeFamilia: boolean;
+  esperaCierreDeOtro: boolean;
+  avisosSinAcuse: string[];
+}
+
 export interface Panel {
+  /** cuadro-de-control · el centro y quién mira, para la cabecera y para
+   *  el nombre de la barra lateral. Opcional porque el panel de una API
+   *  anterior a este bloque no lo trae: durante los minutos de un
+   *  despliegue la pantalla pinta la cabecera sin nombre, no un error. */
+  centro?: {
+    nombre: string;
+    plazas: number;
+    dentro: number;
+    /** `null` mientras no existan las ausencias (decisión 4). */
+    fuera: number | null;
+  };
+  yo?: { nombre: string };
   abierto: {
     porNivel: Array<{ nivel: string; cuantas: number }>;
     avisosSinAcuse: number;
     sinConstanciaDeFamilia: number;
     esperandoCierreDeOtro: number;
     total: number;
+    /** cuadro-de-control · las cinco abiertas más graves. Opcional por lo
+     *  mismo que `centro`. */
+    noPuedeEsperar?: IncidenciaQueNoEspera[];
   };
   relevos: {
     ultimo: {
@@ -288,7 +322,16 @@ export interface Panel {
     proximas: OcurrenciaPintada[];
   };
   turno: {
-    turno: { id: string; code: string; name: string } | null;
+    /** cuadro-de-control · `empiezaEn` y `terminaEn` son «HH:MM» y son
+     *  opcionales por lo mismo que `centro`: sin ellas la cabecera dice
+     *  «turno de mañana» y se calla la hora de fin. */
+    turno: {
+      id: string;
+      code: string;
+      name: string;
+      empiezaEn?: string;
+      terminaEn?: string;
+    } | null;
     careDay: string;
     plantas: Array<{
       floorId: string | null;
@@ -312,6 +355,22 @@ export interface Panel {
       clientId: string;
       nombre: string;
       habitacion: string | null;
+    }>;
+  };
+  /** alta-minima · las fichas de residente a las que les falta algo.
+   *  Opcional por lo mismo que `porArreglar`: un panel de una API
+   *  anterior a este bloque no lo trae, y la pantalla no puede caerse
+   *  por eso durante los minutos de un despliegue. */
+  fichasIncompletas?: {
+    total: number;
+    incompletas: number;
+    datosPendientes: number;
+    conImprescindibles: number;
+    primeras: Array<{
+      clientId: string;
+      nombre: string;
+      habitacion: string | null;
+      faltan: DatoQueFalta[];
     }>;
   };
   indicadores: ValorDeIndicador[];

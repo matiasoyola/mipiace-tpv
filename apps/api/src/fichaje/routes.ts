@@ -39,7 +39,14 @@ import {
   type CorrectableField,
   type CorrectionReason,
 } from "./corrections.js";
-import { FICHAJE_TZ, localDate, monthRange, suggestedExitAt } from "./time.js";
+import { maxOpenHoursFor } from "./max-open.js";
+import {
+  esSalidaOlvidada,
+  FICHAJE_TZ,
+  localDate,
+  monthRange,
+  suggestedExitAt,
+} from "./time.js";
 import { groupByDay, toEntryView, totalMinutes, type TimeEntryRow } from "./view.js";
 
 /** Cuántos días atrás puede corregir el PROPIO empleado. Más allá, sólo la
@@ -237,7 +244,7 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
       const now = new Date();
       const hoy = localDate(now);
 
-      const [employee, tenant, open] = await Promise.all([
+      const [employee, tenant, maxHoras, open] = await Promise.all([
         prisma.employee.findUniqueOrThrow({
           where: { id: ctx.employeeId },
           select: { id: true, name: true },
@@ -246,6 +253,7 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
           where: { id: ctx.tenantId },
           select: { id: true, name: true },
         }),
+        maxOpenHoursFor(ctx.tenantId),
         prisma.timeEntry.findFirst({
           where: { employeeId: ctx.employeeId, endedAt: null },
           select: ENTRY_SELECT,
@@ -257,16 +265,20 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
         data: { lastSeenAt: now },
       });
 
-      // LA SALIDA OLVIDADA. Un tramo abierto de un día local ANTERIOR es
-      // lo primero que ve el empleado, antes que su botón. Nunca se cierra
-      // solo: se pregunta.
+      // LA SALIDA OLVIDADA. Un tramo que lleva abierto más del máximo del
+      // tenant es lo primero que ve el empleado, antes que su botón. Nunca
+      // se cierra solo: se pregunta.
+      //
+      // Por DURACIÓN y no por calendario (hotfix-fichaje-medianoche): a las
+      // 01:00, el turno que empezó a las 20:00 no es un olvido, es la
+      // jornada de quien está a punto de irse a casa. Ver `esSalidaOlvidada`.
       let pendingExit: {
         entryId: string;
         startedAt: string;
         date: string;
         suggestedEndAt: string | null;
       } | null = null;
-      if (open && localDate(open.startedAt) !== hoy) {
+      if (open && esSalidaOlvidada(open, now, maxHoras)) {
         const desde = new Date(now.getTime() - EXIT_HISTORY_DAYS * 86_400_000);
         const historial = await prisma.timeEntry.findMany({
           where: {
@@ -450,10 +462,13 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
           .send({ duplicate: true, entry: toEntryView(yaEsta as TimeEntryRow, 0) });
       }
 
-      const entry = await prisma.timeEntry.findFirst({
-        where: { id, employeeId: ctx.employeeId },
-        select: ENTRY_SELECT,
-      });
+      const [entry, maxHoras] = await Promise.all([
+        prisma.timeEntry.findFirst({
+          where: { id, employeeId: ctx.employeeId },
+          select: ENTRY_SELECT,
+        }),
+        maxOpenHoursFor(ctx.tenantId),
+      ]);
       // 404 y no 403: un 403 confirmaría que ese fichaje existe.
       if (!entry) {
         return reply
@@ -466,15 +481,20 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
           .send({ duplicate: true, entry: toEntryView(entry as TimeEntryRow, 0) });
       }
 
-      // La salida OLVIDADA no se cierra por aquí. Cerrar un tramo de ayer
-      // con el toque de hoy dejaría en el registro una jornada de veinte
-      // horas sin que nadie diga por qué. Va por la vía de corrección, con
-      // motivo — y la pantalla ya se lo ha preguntado.
-      if (localDate(entry.startedAt) !== localDate(now)) {
+      // La salida OLVIDADA no se cierra por aquí. Cerrar con el toque de
+      // hoy un tramo que lleva dos días abierto dejaría en el registro una
+      // jornada de cuarenta horas sin que nadie diga por qué. Va por la vía
+      // de corrección, con motivo — y la pantalla ya se lo ha preguntado.
+      //
+      // Lo decide la DURACIÓN (hotfix-fichaje-medianoche). Antes lo decidía
+      // el calendario, y por eso quien entraba a las 20:00 y salía a la
+      // 01:00 no podía fichar su salida: un turno de noche entero tratado
+      // como un olvido. Pasar de medianoche no es olvidarse.
+      if (esSalidaOlvidada(entry, now, maxHoras)) {
         return reply.code(409).send({
           error: "PENDING_EXIT_REQUIRES_REASON",
           message:
-            "Este fichaje es de otro día. Dinos a qué hora saliste y queda corregido.",
+            "Este fichaje lleva demasiado tiempo abierto. Dinos a qué hora saliste y queda corregido.",
           entryId: entry.id,
         });
       }

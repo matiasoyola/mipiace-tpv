@@ -1,0 +1,16 @@
+- entre «Entrar» y el contrato NO hay pantalla de PIN de respaldo
+- escritorio al cargar: «Acepto» desactivado=true, casilla desactivada=true
+- escritorio · el aviso dice: «Baja hasta el final del contrato para poder aceptarlo.»
+- escritorio · el recuadro mide 398 px y el texto 2204 px: scrollea
+- escritorio · recuadro y «Acepto» a la vez: SÍ — hacen falta 600 px de los 800 del alto
+- 390 al cargar: «Acepto» desactivado=true, casilla desactivada=true
+- 390 · el aviso dice: «Baja hasta el final del contrato para poder aceptarlo.»
+- 390 · el recuadro mide 386 px y el texto 3866 px: scrollea
+- 390 · recuadro y «Acepto» a la vez: SÍ — hacen falta 627 px de los 844 del alto
+- escritorio al final: casilla desactivada=false, «Acepto» desactivado=true (sigue cerrado hasta marcarla)
+- escritorio · y marcada la casilla: «Acepto» desactivado=false
+- 390 al final: casilla desactivada=false, «Acepto» desactivado=true (sigue cerrado hasta marcarla)
+- 390 · y marcada la casilla: «Acepto» desactivado=false
+- la prosa de la pantalla: «residentes»=true, «paciente»=false
+- el texto legal del recuadro (versionado, NO se toca aquí) dice «paciente» 10 veces
+- y después de aceptar, el historial dice «el texto completo se mostró y se recorrió hasta el final»

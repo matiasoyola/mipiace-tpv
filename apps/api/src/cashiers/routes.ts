@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import type { UserRole } from "@mipiacetpv/db";
 
 import { getPrisma } from "../context.js";
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { hashPassword } from "../auth/passwords.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { escribirElNombre } from "../lib/un-solo-nombre.js";
 
 // CRUD mínimo de cajeros/encargados (B3 §1.4 ampliado). Sólo el OWNER
 // crea o revoca cajeros (§15 nucleus). El alta exige un PIN inicial —
@@ -36,6 +38,54 @@ import { ensureCajaEnabled } from "../lib/caja-gate.js";
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 const pinFormat = "^[0-9]{4,8}$";
 
+// ── clinica-8 · QUIÉN ES PERSONAL DE LA CAJA DE ESTE COMERCIO ────────
+//
+// Las cuatro operaciones de esta pantalla (listar, renombrar, cambiar el
+// PIN y revocar) compartían el mismo `where` escrito cuatro veces, y a las
+// cuatro les faltaba lo mismo: **tres clases de usuario que no son
+// personal del cliente y que salían igual en la lista, con sus botones.**
+//
+//   · el CAJERO TÉCNICO de «Probar TPV» (`isTestCashier`). Es un usuario
+//     interno de Mi Piace, con email `mipiacetpv-test-…@internal…`. La
+//     auditoría del 18-10 se lo encontró en Cajeros y le cambió el PIN
+//     desde el panel de la dueña;
+//   · el REVOCADO, que se queda como `revoked-1792…@revoked.local` (la
+//     revocación es un soft-delete: hay FK en turnos y tickets). Salía con
+//     ese email de centinela y con sus tres botones;
+//   · el BORRADO, `deleted_at` puesto — que es justo lo que la activación
+//     le hace al cajero técnico (`purgeTestData`).
+//
+// Y no es cosmética: la revocación deja `pin_hash = NULL`, así que el
+// cajero no entra. Pero «Cambiar PIN» le pone uno nuevo. O sea que desde
+// esta pantalla se podía **resucitar a un cajero revocado y al cajero
+// técnico de Mi Piace**, que es un acceso a la caja que nadie concedió.
+// Por eso el filtro va en las CUATRO y no sólo en la lista: esconder el
+// botón no cierra la ruta.
+//
+// clinica-9 (6) · Y LA CUARTA CLASE: EL ACTOR DE SISTEMA.
+//
+// `clinica/actor-paciente.ts` dice, desde clinica-2: «No sale en
+// `GET /cashiers`, ni en `GET /staff`, ni entre los candidatos a PIN de
+// encargado, ni cuenta para la colisión de alias. Esas cuatro listas
+// filtran por `isSystemActor: false`».
+//
+// **No lo filtraba ninguna.** La pasada en hierro del 24-10 encontró
+// «Paciente (por enlace)» en Cajeros, con sus botones de Editar, Cambiar
+// PIN y Revocar, y en Personal. No hay agujero —el CHECK
+// `users_system_actor_no_credentials` prohíbe que tenga `pin_hash`, así
+// que «Cambiar PIN» reventaba contra la base con un 500 en vez de darle
+// acceso— pero es una fila de sistema ofrecida como si fuera una persona
+// a la que gestionar, con un botón que contesta «error inesperado».
+//
+// Lo que la frase prometía se cumple ahora de verdad, y en las cuatro.
+const PERSONAL_DE_LA_CAJA = {
+  role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] satisfies UserRole[] },
+  deletedAt: null,
+  isTestCashier: false,
+  isSystemActor: false,
+  NOT: { email: { endsWith: "@revoked.local" } },
+};
+
 // v1.7-alias-cajeros: unicidad del alias por tenant entre cajeros
 // activos (case-insensitive), validada aquí y no como constraint de
 // BD — "María" puede existir en dos tenants. Los revocados (email
@@ -50,6 +100,10 @@ async function findAliasCollision(
     where: {
       tenantId,
       role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
+      // clinica-9 (6) · el actor de sistema tampoco cuenta para la
+      // colisión: «Paciente (por enlace)» no es una persona, y que su
+      // nombre bloqueara el de alguien sería absurdo.
+      isSystemActor: false,
       alias: { equals: alias, mode: "insensitive" },
       NOT: [
         { email: { endsWith: "@revoked.local" } },
@@ -68,10 +122,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       const auth = request.auth!;
       const prisma = getPrisma();
       const users = await prisma.user.findMany({
-        where: {
-          tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
-        },
+        where: { tenantId: auth.tenantId, ...PERSONAL_DE_LA_CAJA },
         select: {
           id: true,
           email: true,
@@ -236,11 +287,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       }
       const prisma = getPrisma();
       const target = await prisma.user.findFirst({
-        where: {
-          id: cashierId,
-          tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
-        },
+        where: { id: cashierId, tenantId: auth.tenantId, ...PERSONAL_DE_LA_CAJA },
         select: { id: true },
       });
       if (!target) {
@@ -260,10 +307,17 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
           message: `Ya hay un cajero llamado ${trimmedAlias}`,
         });
       }
-      const updated = await prisma.user.update({
-        where: { id: target.id },
-        data: { alias: trimmedAlias },
-        select: { id: true, email: true, alias: true, role: true },
+      // clinica-9 (5) · Y EL MISMO NOMBRE EN LA AGENDA. Renombrar aquí
+      // dejaba a quien tuviera perfil de profesional con dos nombres
+      // distintos —uno en el TPV y otro en la agenda— y entonces «un
+      // solo nombre manda» deja de ser verdad según por dónde se entre.
+      // Sólo a quien YA tiene perfil: un cajero de barra no se convierte
+      // en profesional de la agenda por renombrarse.
+      const updated = await escribirElNombre(prisma, {
+        tenantId: auth.tenantId,
+        userId: target.id,
+        nombre: trimmedAlias,
+        crearPerfil: false,
       });
       return reply.code(200).send({
         cashier: {
@@ -300,11 +354,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       const { pin } = request.body as { pin: string };
       const prisma = getPrisma();
       const target = await prisma.user.findFirst({
-        where: {
-          id: cashierId,
-          tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
-        },
+        where: { id: cashierId, tenantId: auth.tenantId, ...PERSONAL_DE_LA_CAJA },
         select: { id: true },
       });
       if (!target) {
@@ -337,11 +387,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       const { cashierId } = request.params as { cashierId: string };
       const prisma = getPrisma();
       const target = await prisma.user.findFirst({
-        where: {
-          id: cashierId,
-          tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
-        },
+        where: { id: cashierId, tenantId: auth.tenantId, ...PERSONAL_DE_LA_CAJA },
         select: { id: true, _count: { select: { shifts: true, tickets: true } } },
       });
       if (!target) {

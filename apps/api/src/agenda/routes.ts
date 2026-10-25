@@ -60,11 +60,13 @@ import {
   type Consecuencia,
   type PoliticaNoShow,
 } from "../vouchers/cita.js";
+import { marcaSanitariaDe } from "../clinica/marca-sanitaria.js";
 import { valoracionesPendientesDe } from "../clinica/valoracion-en-agenda.js";
 import {
   cobrosPendientesDe,
   sesionesPorCobrarDe,
 } from "../clinica/cobros-pendientes.js";
+import { proximasCitasPropuestasDe } from "../clinica/proxima-cita.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import { checkoutAppointment } from "./checkout.js";
 import {
@@ -258,6 +260,19 @@ export async function registerAgendaRoutes(
         desde: from,
         hasta: to,
       });
+      // clinica-9 (9) · y las PRÓXIMAS CITAS PROPUESTAS de las sesiones ya
+      // cobradas. La pantalla de cierre le promete a la sanitaria que «la
+      // recepción elige el hueco con el paciente al cobrar», y hasta este
+      // bloque no se lo decía nadie: la propuesta se quedaba dentro de la
+      // historia clínica, que es el único sitio donde la recepción no
+      // mira. Ver `clinica/proxima-cita.ts` — ni un dato de salud, y la
+      // capability lo primero.
+      const proximasCitas = await proximasCitasPropuestasDe(prismaFor(), {
+        tenantId: auth.tenantId,
+        desde: from,
+        hasta: to,
+        tz: CENTER_TZ,
+      });
       // B-reservas-7a · la rejilla deja de ser ciega. Los cuatro campos de
       // antes siguen ahí y con el mismo nombre: quien no lea los nuevos no
       // se entera de que existen. Todo esto viaja a la caché offline del
@@ -273,6 +288,15 @@ export async function registerAgendaRoutes(
         CENTER_TZ,
         (d) => wallTimeToUtc(d, "00:00"),
       );
+      // clinica-8 · LA MARCA SANITARIA DE QUIEN MIRA, AL DÍA. El TPV la
+      // lee en el login del cajero y la sesión dura el turno entero, así
+      // que marcar a alguien sanitario no le llegaba hasta re-entrar. La
+      // agenda se refresca cada vez que se abre: es el sitio natural.
+      // `null` —y clave ausente— en los catorce tenants sin clínica.
+      const esSanitario = await marcaSanitariaDe(
+        auth.tenantId,
+        request.cashier?.sub ?? auth.userId,
+      );
       return {
         from: fromDate,
         to: toDate,
@@ -282,6 +306,8 @@ export async function registerAgendaRoutes(
         days,
         valoracionesPendientes,
         sesionesPorCobrar,
+        proximasCitas,
+        ...(esSanitario === null ? {} : { esSanitario }),
       };
     },
   );
@@ -802,9 +828,15 @@ export async function registerAgendaRoutes(
           ...(result.ticketId ? { ticketId: result.ticketId } : {}),
         });
       }
-      return reply
-        .code(result.alreadyLinked ? 200 : 201)
-        .send({ ticket: result.ticket });
+      return reply.code(result.alreadyLinked ? 200 : 201).send({
+        ticket: result.ticket,
+        // clinica-8 · el borrador salió VACÍO porque la sesión cerrada no
+        // dejó nada que cobrar. Viaja sólo cuando es verdad: una clave que
+        // aparece y desaparece obliga a la pantalla a distinguir «no» de
+        // «no me lo han dicho», y aquí el «no» es el caso de todos los
+        // días — toda cita sin sesión y los catorce tenants sin clínica.
+        ...(result.sesionSinCobro ? { sesionSinCobro: true } : {}),
+      });
     },
   );
 

@@ -45,6 +45,14 @@ import {
   useTenantCapabilities,
   type TenantCapabilities,
 } from "./capabilities.js";
+// cuadro-de-control · el panel, compartido con `PanelPage`: de ahí salen
+// los contadores del menú. Una sola petición para los dos.
+import {
+  contadorDelMenu,
+  usePanelDeResidencia,
+  type ClaveDeContador,
+} from "./residencia-panel.js";
+import type { Panel } from "./pages/residencia/relevo-lib.js";
 
 import { ImpersonationBanner } from "./components/ImpersonationBanner.js";
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
@@ -101,11 +109,36 @@ interface NavItem {
     // clinica-7 · la sección del contrato de encargado. La capability ya
     // existía (`clinica-1` la trajo para la sección clínica de Personal);
     // lo que es nuevo es que una entrada del menú la use.
-    | "clinica";
+    | "clinica"
+    // clinica-8 (fase B, 18) · no es una capability del tenant: es su
+    // VERTICAL. Lo usa «Comanderas», que sólo existe en hostelería.
+    | "hosteleria";
   // F1 · el activo se calcula por prefijo, y "Control horario"
   // (`/admin/fichaje`) es prefijo de sus dos hermanas. Sin esto, las tres
   // entradas se pintarían activas a la vez en cualquiera de ellas.
   exact?: boolean;
+  // ── cuadro-de-control · LOS DOS CAMPOS DEL MENÚ DE UNA RESIDENCIA ──
+  //
+  // «Hay demasiadas opciones, no parece un cuadro de control» (Matías,
+  // 23-10, mirando el panel de Carmen). Una peluquería entra en el panel
+  // una vez al mes; la dirección de una residencia vive en él, y veía
+  // unas dieciocho entradas de las que quince se configuran una vez.
+  //
+  // **En una residencia el menú es otro**, y no se construye con una
+  // segunda lista: se construye proyectando ESTA. Que `NAV_ITEMS` siga
+  // siendo el único registro es lo que mantiene la garantía de
+  // hotfix-menu-capabilities (una entrada gateada no se puede colar) y lo
+  // que hace que las rutas no cambien — «Configuración» es otra forma de
+  // llegar a las mismas pantallas.
+  //
+  // `etiquetaEnResidencia` · el mismo destino con otro nombre. Hoy sólo
+  // «Tiendas» → «Centro»: una residencia tiene UN centro, y «Tiendas» en
+  // plural delante de quien dirige uno es una palabra de otro negocio.
+  etiquetaEnResidencia?: string;
+  // `contador` · de qué cifra del panel sale el número de la entrada. El
+  // mismo número y de la misma petición (decisión 1): ver
+  // `contadorDelMenu` en `residencia-panel.ts`.
+  contador?: ClaveDeContador;
 }
 
 /** Las capabilities que gatean una entrada del menú. Sale del tipo de
@@ -155,6 +188,21 @@ function capabilidadActiva(
       return caps?.bonos === true;
     case "clinica":
       return caps?.clinica === true;
+    // clinica-8 (fase B, 18) · NO es una capability del tenant: es su
+    // VERTICAL. La usa «Comanderas», que reparte las etiquetas del
+    // catálogo entre las impresoras de barra y de cocina — en una
+    // clínica no hay barra, no hay cocina y no hay comanda.
+    //
+    // `=== "HOSPITALITY"` y no `!== null`: mientras no se sabe el
+    // vertical no se pinta, que es la salida segura de este dato.
+    //
+    // Y mira SÓLO el vertical, aunque una comandera se imprima desde el
+    // TPV: una capability de este `switch` es UN flag —lo recorre el
+    // banco de hotfix-menu-capabilities encendiéndolas de una en una— y
+    // la caja ya la exige la PÁGINA, que vive dentro de un `CajaGate`.
+    // La frontera está en la ruta; esto decide qué se ofrece.
+    case "hosteleria":
+      return caps?.businessType === "HOSPITALITY";
     default: {
       // Si esto no compila, falta un `case` para la capability que acabas
       // de añadir al tipo de `NavItem`. Añádelo: no hay default silencioso.
@@ -179,7 +227,15 @@ export const NAV_ITEMS: NavItem[] = [
   // local (razón social, dirección) vale para cualquier empresa. Lo que
   // cuelga de la caja dentro de la tienda —cajas registradoras, mesas,
   // entrega de ticket— se esconde dentro de la propia pantalla.
-  { to: "/admin/stores", label: "Tiendas", icon: Building2 },
+  // cuadro-de-control · en una residencia se llama «Centro» y vive en
+  // «Configuración»: la ficha fiscal del local se toca el día del alta y
+  // el día que cambia el IBAN.
+  {
+    to: "/admin/stores",
+    label: "Tiendas",
+    icon: Building2,
+    etiquetaEnResidencia: "Centro",
+  },
   // v1.3-piloto-feedback · Lote 1: Dispositivos era visible sólo a
   // super-admin por un error histórico — el backend del endpoint de
   // pairing codes ya acepta OWNER/MANAGER. Lo abrimos al OWNER y al
@@ -302,6 +358,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Residentes",
     icon: Users,
     capability: "residencia",
+    contador: "fichas",
   },
   {
     to: "/admin/residencia/edificio",
@@ -341,6 +398,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Incidencias",
     icon: AlertTriangle,
     capability: "residencia",
+    contador: "incidencias",
   },
   {
     to: "/admin/residencia/guardia",
@@ -358,12 +416,14 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Relevos",
     icon: ClipboardCheck,
     capability: "residencia",
+    contador: "relevos",
   },
   {
     to: "/admin/residencia/obligaciones",
     label: "Obligaciones",
     icon: CalendarCheck,
     capability: "residencia",
+    contador: "obligaciones",
   },
   {
     to: "/admin/residencia/indicadores",
@@ -371,11 +431,23 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Gauge,
     capability: "residencia",
   },
-  // calidad-1 (D-70, D-73) · el mapa y las no conformidades. Van DETRÁS
-  // de los indicadores y no antes: el mapa se toca una vez al año y las
-  // NC se trabajan por semanas, mientras que lo de arriba es lo del día.
-  // Y el mapa va antes que las NC porque una NC cuelga de un proceso:
-  // sin mapa, la pantalla de no conformidades no deja hacer nada.
+  // calidad-1 (D-70, D-73) · el mapa y las no conformidades.
+  //
+  // **No están en el menú de una residencia: viven en «Configuración»**
+  // (cuadro-de-control, decisión 2). Y no hace falta marcarlas: ese
+  // bloque descartó a propósito una bandera `enConfiguracion` porque la
+  // primera entrada a la que se le olvidara se quedaba sin forma de
+  // llegar. Lo que enseña «Configuración» es **todo lo que pasa el
+  // filtro y no es una de las cinco del día a día**, así que estas dos
+  // caen ahí solas por estar aquí y no en `MENU_DE_RESIDENCIA`.
+  //
+  // Que es además lo correcto: el mapa se ajusta una vez al año y las no
+  // conformidades se trabajan por semanas. Lo urgente de calidad —una
+  // acción vencida, una revisión pasada de fecha, una propuesta— sí sale
+  // en el panel, y sale como una banda (`CalidadQueNoEspera`).
+  //
+  // El mapa va antes que las NC porque una NC cuelga de un proceso: sin
+  // mapa, la pantalla de no conformidades no deja hacer nada.
   {
     to: "/admin/residencia/procesos",
     label: "Procesos",
@@ -401,7 +473,20 @@ export const NAV_ITEMS: NavItem[] = [
   // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
   // Sólo lo usan los tenants HOSPITALITY; en otros verticales queda
   // visible pero vacío sin perjudicar la operativa.
-  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "caja" },
+  // clinica-8 (fase B, 18) · la capability pasa de `caja` a
+  // `hosteleria`, y es la misma corrección que el addendum 3 le hizo a
+  // «Sync Holded»: una sección cuyo contenido no existe en este negocio.
+  //
+  // «Comanderas» reparte las etiquetas del catálogo entre las impresoras
+  // de barra y de cocina. En una clínica no hay barra, no hay cocina y
+  // no hay comanda; lo que hay es una podóloga mirando una entrada del
+  // menú que no sabe qué es (auditoría del 18-10, en los menores:
+  // «"Comanderas" en el menú de una clínica»).
+  //
+  // El comentario de arriba decía «en otros verticales queda visible
+  // pero vacío sin perjudicar la operativa». Perjudica: una pantalla
+  // vacía que no se entiende es una llamada de teléfono.
+  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "hosteleria" },
   // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
   // con Holded sin pasar por super-admin.
   //
@@ -462,7 +547,206 @@ export const NAV_ITEMS: NavItem[] = [
   // misma escalera que impone el servidor. El super-admin impersonando
   // sigue viéndola igual.
   { to: "/admin/settings", label: "Ajustes", icon: Settings },
+  // ── cuadro-de-control · «CONFIGURACIÓN», LA ÚLTIMA Y SÓLO AQUÍ ──────
+  //
+  // Una sola entrada, abajo del todo, que abre un índice con todo lo que
+  // se configura una vez (decisión 2). Lleva `capability: "residencia"`
+  // porque la página que abre es la de un centro: en un comercio ese
+  // índice no existe y su menú es exactamente el de antes de este bloque.
+  //
+  // Va en `NAV_ITEMS` y no suelta en el pie por lo mismo que las demás:
+  // aquí pasa por el filtro de capabilities y por el test que recorre la
+  // lista entera.
+  {
+    to: "/admin/residencia/configuracion",
+    label: "Configuración",
+    icon: Settings,
+    capability: "residencia",
+  },
 ];
+
+// ── cuadro-de-control · LAS CINCO DEL DÍA A DÍA, EN ESTE ORDEN ───────
+//
+// El orden es el de la mañana de la directora, no el del modelo: el panel
+// primero (qué hay), después quién vive aquí, y luego las tres cosas que
+// se cierran —lo que ha pasado, la firma que falta y el papel que vence—.
+// Lo escribe aquí y no se deduce de `NAV_ITEMS` porque es una decisión de
+// producto y tiene que leerse como una lista de cinco cosas.
+const MENU_DE_RESIDENCIA = [
+  "/admin/residencia/panel",
+  "/admin/residencia/residentes",
+  "/admin/residencia/incidencias",
+  "/admin/residencia/relevos",
+  "/admin/residencia/obligaciones",
+] as const;
+
+/** La entrada que cierra el menú de una residencia. */
+const CONFIGURACION = "/admin/residencia/configuracion";
+
+/**
+ * cuadro-de-control · **EL ORDEN DE «CONFIGURACIÓN»** (decisión 2).
+ *
+ * Primero el centro y su edificio, después cómo se trabaja en él, después
+ * quién trabaja y qué se le mide, y al final lo legal y lo de la persona.
+ *
+ * Lo que pase el filtro y no esté en esta lista se añade al final en el
+ * orden de `NAV_ITEMS`: así una residencia que además tenga caja no
+ * pierde «Dispositivos» ni «Impresoras» porque este bloque no los nombró.
+ * Perderlas sería dejar una pantalla sin forma de llegar, y lo que este
+ * bloque mueve es por dónde se llega, no qué existe.
+ */
+const ORDEN_EN_CONFIGURACION = [
+  "/admin/stores",
+  "/admin/residencia/edificio",
+  "/admin/residencia/turnos",
+  "/admin/residencia/controles",
+  "/admin/residencia/plantillas",
+  "/admin/residencia/guardia",
+  "/admin/staff",
+  "/admin/residencia/indicadores",
+  // calidad-1 · pegadas a los indicadores: el mapa es de dónde cuelgan y
+  // las NC es a dónde van los que se salen del umbral dos meses.
+  "/admin/residencia/procesos",
+  "/admin/residencia/no-conformidades",
+  "/admin/contrato-tratamiento",
+  "/admin/account",
+  "/admin/security",
+  "/admin/settings",
+] as const;
+
+/**
+ * cuadro-de-control · **LO QUE NO SE VE EN UNA RESIDENCIA, NI EN EL MENÚ
+ * NI EN «CONFIGURACIÓN»** (decisión 3).
+ *
+ * Las dos pantallas de agenda. La capability `agenda` sigue ENCENDIDA en
+ * un centro de residencia —la exige la clínica, y de ella cuelga
+ * «Personal», que sí está en Configuración— pero el catálogo de citas y
+ * el horario de atención son de un centro que da citas, y una residencia
+ * no da citas: tiene residentes que viven dentro.
+ *
+ * Esconder no es gatear: las rutas siguen existiendo y el servidor
+ * contesta lo de siempre. Lo que se quita es la oferta.
+ *
+ * ── Y ES LA ÚNICA FORMA DE DESAPARECER ─────────────────────────────
+ *
+ * Lo que hay dentro de «Configuración» NO se marca entrada por entrada:
+ * es **todo lo que pasa el filtro y no es una de las cinco del menú**.
+ * Al revés —una bandera `enConfiguracion` en cada línea— se probó y se
+ * descartó en este mismo bloque: la primera sección a la que se le
+ * olvidara la bandera se quedaba sin forma de llegar, en verde y sin que
+ * nadie lo notara. Lo encontró el banco con «Bonos», que es justo una
+ * entrada que nadie pensaría en marcar.
+ *
+ * Así que esconder una sección en una residencia cuesta escribirla aquí,
+ * en una lista de dos elementos que se lee de un golpe. Y el banco
+ * comprueba que ninguna entrada se cae por el hueco: toda la que pase el
+ * filtro está en el menú, en «Configuración», o nombrada aquí.
+ */
+export const FUERA_EN_RESIDENCIA: readonly string[] = [
+  "/admin/agenda-catalog",
+  "/admin/agenda-hours",
+];
+
+/** El rótulo de una entrada, que en una residencia puede ser otro. */
+export function etiquetaDeLaEntrada(item: NavItem, esResidencia: boolean): string {
+  return esResidencia ? (item.etiquetaEnResidencia ?? item.label) : item.label;
+}
+
+/**
+ * Las entradas que pasan rol, impersonación y capabilities.
+ *
+ * Es el filtro de hotfix-menu-capabilities, movido fuera de `NavList`
+ * para que lo use también la página de «Configuración» — y para que el
+ * banco pueda preguntarle sin pintar.
+ */
+function entradasPermitidas(
+  caps: TenantCapabilities | null,
+  role: string | null,
+  impersonating: boolean,
+): NavItem[] {
+  return NAV_ITEMS.filter((item) => {
+    if (item.superAdminOnly && !impersonating) return false;
+    if (item.ownerOnly && role !== "OWNER") return false;
+    // H1 · las capabilities se evalúan DESPUÉS de rol e impersonación, y
+    // se combinan en vez de excluirse: la bandeja "Holded" es a la vez
+    // `superAdminOnly` y de caja, y antes el primer `return` se comía la
+    // segunda condición.
+    //
+    // hotfix-menu-capabilities · una sola rama, y la decisión en
+    // `capabilidadActiva`. El `return true` de aquí es ahora SÓLO para las
+    // entradas sin capability (Resumen, Tiendas, Mi cuenta…): una entrada
+    // gateada no puede caerse por este agujero sin que el compilador lo
+    // diga.
+    if (item.capability != null) {
+      return capabilidadActiva(item.capability, caps);
+    }
+    return true;
+  });
+}
+
+/**
+ * cuadro-de-control · **LAS ENTRADAS DEL MENÚ.**
+ *
+ * En un comercio, en un bar, en una clínica o en un colegio: las de
+ * siempre, el filtro de hotfix-menu-capabilities y nada más. Este bloque
+ * no les cambia una línea.
+ *
+ * En una residencia: las CINCO del día a día en su orden, y
+ * «Configuración» al final. Se proyecta sobre lo que el filtro ya dejó
+ * pasar, así que una entrada que su cuenta no debería ver no entra por
+ * aquí; y si alguna de las cinco no pasara el filtro, simplemente no está
+ * (no se inventa un enlace a una pantalla que el servidor va a negar).
+ */
+export function entradasDelMenu(
+  caps: TenantCapabilities | null,
+  role: string | null,
+  impersonating: boolean,
+): NavItem[] {
+  const permitidas = entradasPermitidas(caps, role, impersonating);
+  if (caps?.residencia !== true) return permitidas;
+  const porDestino = new Map(permitidas.map((i) => [i.to, i]));
+  return [...MENU_DE_RESIDENCIA, CONFIGURACION]
+    .map((to) => porDestino.get(to))
+    .filter((i): i is NavItem => i != null);
+}
+
+/**
+ * cuadro-de-control · **LO QUE ENSEÑA «CONFIGURACIÓN»** (decisión 2).
+ *
+ * Todo lo que su cuenta puede ver y no es una de las cinco del menú,
+ * menos ella misma y menos lo nombrado en `FUERA_EN_RESIDENCIA`. En el
+ * orden de `ORDEN_EN_CONFIGURACION`; lo que no esté nombrado allí, al
+ * final y en el orden de `NAV_ITEMS`.
+ *
+ * Ese «todo» es la decisión: una residencia que además tenga caja sigue
+ * llegando a «Dispositivos», a «Impresoras» y a «Tickets regalo» sin que
+ * este bloque las haya nombrado una por una. Lo que este bloque cambia es
+ * por dónde se llega, no qué existe.
+ */
+export function entradasDeConfiguracion(
+  caps: TenantCapabilities | null,
+  role: string | null,
+  impersonating: boolean,
+): NavItem[] {
+  const fuera = new Set<string>([
+    ...MENU_DE_RESIDENCIA,
+    CONFIGURACION,
+    ...FUERA_EN_RESIDENCIA,
+  ]);
+  const dentro = entradasPermitidas(caps, role, impersonating).filter(
+    (i) => !fuera.has(i.to),
+  );
+  const orden = new Map<string, number>(
+    ORDEN_EN_CONFIGURACION.map((to, i) => [to, i]),
+  );
+  // Las nombradas en su orden; las demás detrás, en el de `NAV_ITEMS`.
+  return [
+    ...dentro
+      .filter((i) => orden.has(i.to))
+      .sort((a, b) => orden.get(a.to)! - orden.get(b.to)!),
+    ...dentro.filter((i) => !orden.has(i.to)),
+  ];
+}
 
 // v1.5-consistencia-B §3.b: salud de la integración Holded para el
 // banner grande del admin. Pollea /catalog/sync-status cada 60s; sólo
@@ -623,10 +907,24 @@ export function AdminShell({
   title,
   children,
   initials,
+  ancho = "normal",
 }: {
   title: string;
   children: React.ReactNode;
   initials?: string;
+  /**
+   * cuadro-de-control · **el ancho del contenido** (decisión 4).
+   *
+   * `"normal"` es la columna de siempre (`max-w-3xl`), que es la correcta
+   * para un formulario: una línea de texto de 1200 px no se lee.
+   *
+   * `"completo"` lo pide hoy sólo el panel de la residencia, y es lo que
+   * hace que quepa en una pantalla de 1366×768 sin scroll: en la columna
+   * estrecha, las cuatro cifras, «Ahora», «Hoy» y el mes son siete
+   * bloques uno debajo de otro y hay que bajar tres veces para ver si hay
+   * algo que atender.
+   */
+  ancho?: "normal" | "completo";
 }) {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -667,9 +965,17 @@ export function AdminShell({
           describe un producto que no ha comprado, el día que entra.
           Mismo gate y misma razón que el banner de Holded de aquí al lado
           (H1): lo que no puede pasar en esa cuenta no se avisa. */}
-      {shellCaps?.enEnsayo === true && shellCaps?.caja === true && (
-        <EnsayoAvisoBanner />
-      )}
+      {/* cuadro-de-control (decisión 3) · Y NO EN UNA RESIDENCIA, aunque
+          tenga caja. La banda habla de vender, cobrar, devolver, arquear y
+          cerrar, y de que los tickets no cuentan para Hacienda: ni una de
+          esas seis palabras es del trabajo de quien dirige un centro. El
+          gate de caja de primer-acceso tapa a Jardín de Gredos, que no la
+          tiene; esto tapa también a la residencia que sí la tenga (una
+          cafetería para visitas no convierte el panel de dirección en el
+          panel de un bar). */}
+      {shellCaps?.enEnsayo === true &&
+        shellCaps?.caja === true &&
+        shellCaps?.residencia !== true && <EnsayoAvisoBanner />}
       <HoldedHealthBanner
         cajaEnabled={shellCaps?.caja === true}
         holdedEnabled={shellCaps?.holdedEnabled !== false}
@@ -711,7 +1017,15 @@ export function AdminShell({
             </span>
           </div>
         </header>
-        <div className="p-5 md:p-8 max-w-3xl">{children}</div>
+        <div
+          className={
+            ancho === "completo"
+              ? "p-3.5 md:p-4 max-w-[1280px]"
+              : "p-5 md:p-8 max-w-3xl"
+          }
+        >
+          {children}
+        </div>
       </main>
 
       <LogoutEverywhereModal
@@ -727,19 +1041,117 @@ function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
   const location = useLocation();
   return (
     <aside className="hidden md:flex w-[240px] shrink-0 border-r border-slate-200 bg-white flex-col overflow-y-auto px-5 py-6">
+      <CabeceraDeLaBarra />
+      <NavList currentPath={location.pathname} />
+      <PieDeLaBarra
+        currentPath={location.pathname}
+        onAskLogoutAll={onAskLogoutAll}
+      />
+    </aside>
+  );
+}
+
+/**
+ * cuadro-de-control (decisión 3) · **ARRIBA DE LA BARRA, EL CENTRO.**
+ *
+ * En un comercio, la marca del TPV, igual que siempre.
+ *
+ * En una residencia, el nombre del centro y «Residencia · N plazas». La
+ * razón no es de marca: quien dirige un centro no necesita que le
+ * recuerden de quién es el software veinte veces al día, y sí necesita
+ * saber en qué centro está — el día que una gestora lleve dos, el rótulo
+ * es lo único que los distingue.
+ *
+ * El nombre sale de las capacidades (`/auth/me`), que llegan antes que el
+ * panel. Las plazas salen del panel, así que aparecen un instante
+ * después: mientras no están, el subtítulo dice «Residencia» y nada más.
+ * Al revés —esperar al panel para pintar el nombre— se vería como un
+ * salto en la primera pantalla.
+ */
+function CabeceraDeLaBarra() {
+  const caps = useTenantCapabilities();
+  const { panel } = usePanelDeResidencia(caps?.residencia === true);
+  if (caps?.residencia !== true) {
+    return (
       <div className="mb-8">
         <Logo />
       </div>
-      <NavList currentPath={location.pathname} />
+    );
+  }
+  const plazas = panel?.centro?.plazas ?? null;
+  return (
+    <div className="mb-7 px-4">
+      <p className="text-[15.5px] font-semibold tracking-tight text-mipiace-ink">
+        {panel?.centro?.nombre ?? caps.nombreDelCentro ?? "Tu centro"}
+      </p>
+      <p className="text-[12px] text-slate-500 tabular-nums">
+        {plazas == null
+          ? "Residencia"
+          : `Residencia · ${plazas} ${plazas === 1 ? "plaza" : "plazas"}`}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * El pie de la barra: «Configuración» (sólo en una residencia), cerrar
+ * sesión en todos los dispositivos, la declaración responsable y la
+ * versión.
+ *
+ * `mt-auto` va aquí, en el grupo, y no en cada hijo: con dos `mt-auto`
+ * hermanos el hueco libre se reparte entre los dos y el pie se queda a
+ * media altura.
+ */
+function PieDeLaBarra({
+  currentPath,
+  onAskLogoutAll,
+  onNavigate,
+}: {
+  currentPath: string;
+  onAskLogoutAll: () => void;
+  onNavigate?: () => void;
+}) {
+  const caps = useTenantCapabilities();
+  const role = readCurrentRole();
+  const impersonating = readImpersonationState() != null;
+  const esResidencia = caps?.residencia === true;
+  // cuadro-de-control · «Configuración» es la última entrada del menú de
+  // una residencia (decisión 2), y se pinta aquí abajo —separada por una
+  // línea— porque no es una sección del día a día: es la puerta a lo que
+  // se configura una vez.
+  const configuracion = esResidencia
+    ? entradasDelMenu(caps, role, impersonating).find((i) => i.to === CONFIGURACION)
+    : undefined;
+  return (
+    <div className="mt-auto pt-6">
+      {configuracion && (
+        <nav className="mb-2 border-t border-slate-200 pt-2.5">
+          <EntradaDelMenu
+            item={configuracion}
+            currentPath={currentPath}
+            esResidencia
+            onNavigate={onNavigate}
+          />
+        </nav>
+      )}
       <button
         onClick={onAskLogoutAll}
-        className="mt-auto text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left px-4 py-2"
+        className="text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left px-4 py-2"
       >
         Cerrar sesión en todos los dispositivos
       </button>
-      <DeclaracionFooterLink />
+      {/* cuadro-de-control (decisión 3) · FUERA EN UNA RESIDENCIA. La
+          declaración responsable es del art. 15 del reglamento de
+          Verifactu: habla del sistema que emite facturas. Un centro que no
+          factura no tiene nada que declarar, y la Orden pide que se llegue
+          «de forma rápida, fácil e intuitiva» desde cualquier pantalla DEL
+          SISTEMA DE FACTURACIÓN — no desde el panel de una residencia sin
+          caja. En la residencia que sí tenga caja vuelve a salir. */}
+      {!(esResidencia && caps?.caja !== true) && (
+        <DeclaracionFooterLink onNavigate={onNavigate} />
+      )}
       <VersionFooter />
-    </aside>
+    </div>
   );
 }
 
@@ -816,25 +1228,22 @@ function MobileDrawer({
           declaración responsable y la versión— quedaba fuera de la pantalla
           y SIN scroll: no se podía llegar, no es que costara. */}
       <aside className="absolute inset-y-0 left-0 w-[260px] bg-white border-r border-slate-200 flex flex-col overflow-y-auto px-5 py-6 shadow-xl animate-in slide-in-from-left">
-        <div className="flex items-center justify-between mb-8">
-          <Logo />
+        <div className="flex items-start justify-between mb-6 gap-2">
+          <CabeceraDeLaBarra />
           <button
             onClick={onClose}
-            className="h-9 w-9 rounded-xl hover:bg-slate-50 text-slate-500 flex items-center justify-center"
+            className="h-9 w-9 shrink-0 rounded-xl hover:bg-slate-50 text-slate-500 flex items-center justify-center"
             aria-label="Cerrar menú"
           >
             <X className="w-4 h-4" strokeWidth={2.25} />
           </button>
         </div>
         <NavList currentPath={location.pathname} onNavigate={onClose} />
-        <button
-          onClick={onAskLogoutAll}
-          className="mt-auto text-[12.5px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left px-4 py-2"
-        >
-          Cerrar sesión en todos los dispositivos
-        </button>
-        <DeclaracionFooterLink onNavigate={onClose} />
-        <VersionFooter />
+        <PieDeLaBarra
+          currentPath={location.pathname}
+          onAskLogoutAll={onAskLogoutAll}
+          onNavigate={onClose}
+        />
       </aside>
     </div>
   );
@@ -864,78 +1273,126 @@ function NavList({
   const syncErrorsCount = useSyncErrorsCount(caps?.caja === true);
   const role = readCurrentRole();
   const impersonating = readImpersonationState() != null;
-  const visibleItems = NAV_ITEMS.filter((item) => {
-    if (item.superAdminOnly && !impersonating) return false;
-    if (item.ownerOnly && role !== "OWNER") return false;
-    // H1 · las capabilities se evalúan DESPUÉS de rol e impersonación, y
-    // se combinan en vez de excluirse: la bandeja "Holded" es a la vez
-    // `superAdminOnly` y de caja, y antes el primer `return` se comía la
-    // segunda condición.
-    //
-    // hotfix-menu-capabilities · una sola rama, y la decisión en
-    // `capabilidadActiva`. El `return true` de aquí es ahora SÓLO para las
-    // entradas sin capability (Resumen, Tiendas, Mi cuenta…): una entrada
-    // gateada no puede caerse por este agujero sin que el compilador lo
-    // diga.
-    if (item.capability != null) {
-      return capabilidadActiva(item.capability, caps);
-    }
-    return true;
-  });
+  const esResidencia = caps?.residencia === true;
+  // cuadro-de-control · los contadores del menú salen del panel, y el
+  // panel se pide una sola vez para la barra y para la pantalla (ver
+  // `residencia-panel.ts`). Mismo criterio que las capacidades para el
+  // `activo`: sin residencia no se pide nada.
+  const { panel } = usePanelDeResidencia(esResidencia);
+  // cuadro-de-control · «Configuración» la pinta el PIE de la barra, no
+  // esta lista: va abajo del todo y separada por una línea.
+  const visibleItems = entradasDelMenu(caps, role, impersonating).filter(
+    (item) => item.to !== CONFIGURACION,
+  );
   return (
     <nav className="space-y-1.5">
-      {visibleItems.map((item) => {
-        const Icon = item.icon;
-        const active = item.exact
-          ? currentPath === item.to
-          : currentPath.startsWith(item.to);
-        const base =
-          "w-full h-11 flex items-center gap-3 px-4 rounded-xl text-[14px] font-medium transition-colors";
-        if (item.disabled) {
-          return (
-            <button
-              key={item.label}
-              disabled
-              title="Disponible en bloques posteriores"
-              className={`${base} text-slate-300 cursor-not-allowed`}
-            >
-              <Icon className="w-[17px] h-[17px] text-slate-300" strokeWidth={2.1} />
-              <span>{item.label}</span>
-            </button>
-          );
-        }
-        const badgeCount = item.badge === "syncErrors" ? syncErrorsCount : 0;
-        return (
-          <Link
-            key={item.label}
-            to={item.to}
-            onClick={onNavigate}
-            className={
-              active
-                ? `${base} bg-mipiace-coral-soft text-mipiace-coral-dark`
-                : `${base} text-slate-600 hover:bg-slate-50 hover:text-mipiace-ink`
-            }
-          >
-            <Icon
-              className={
-                active
-                  ? "w-[17px] h-[17px] text-mipiace-coral"
-                  : "w-[17px] h-[17px] text-slate-500"
-              }
-              strokeWidth={2.1}
-            />
-            <span>{item.label}</span>
-            {badgeCount > 0 && (
-              <span
-                aria-label={`${badgeCount} pendiente${badgeCount === 1 ? "" : "s"}`}
-                className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-medium tabular-nums"
-              >
-                {badgeCount > 99 ? "99+" : badgeCount}
-              </span>
-            )}
-          </Link>
-        );
-      })}
+      {visibleItems.map((item) => (
+        <EntradaDelMenu
+          key={item.label}
+          item={item}
+          currentPath={currentPath}
+          esResidencia={esResidencia}
+          onNavigate={onNavigate}
+          syncErrorsCount={syncErrorsCount}
+          panel={panel}
+        />
+      ))}
     </nav>
+  );
+}
+
+/**
+ * Una entrada del menú.
+ *
+ * Sale de dentro de `NavList` en cuadro-de-control porque ahora se pinta
+ * desde dos sitios: la lista de secciones y el pie de la barra, que es
+ * donde vive «Configuración» en una residencia.
+ */
+function EntradaDelMenu({
+  item,
+  currentPath,
+  esResidencia,
+  onNavigate,
+  syncErrorsCount = 0,
+  panel = null,
+}: {
+  item: NavItem;
+  currentPath: string;
+  esResidencia: boolean;
+  onNavigate?: () => void;
+  syncErrorsCount?: number;
+  panel?: Panel | null;
+}) {
+  const Icon = item.icon;
+  const active = item.exact
+    ? currentPath === item.to
+    : currentPath.startsWith(item.to);
+  const base =
+    "w-full h-11 flex items-center gap-3 px-4 rounded-xl text-[14px] font-medium transition-colors";
+  const etiqueta = etiquetaDeLaEntrada(item, esResidencia);
+  if (item.disabled) {
+    return (
+      <button
+        disabled
+        title="Disponible en bloques posteriores"
+        className={`${base} text-slate-300 cursor-not-allowed`}
+      >
+        <Icon className="w-[17px] h-[17px] text-slate-300" strokeWidth={2.1} />
+        <span>{etiqueta}</span>
+      </button>
+    );
+  }
+  const badgeCount = item.badge === "syncErrors" ? syncErrorsCount : 0;
+  // cuadro-de-control · el contador de la entrada, cuando la tiene y
+  // cuando hay algo que contar. `null` = sin contador: ver la nota de
+  // `contadorDelMenu`.
+  const contador =
+    item.contador != null && esResidencia
+      ? contadorDelMenu(item.contador, panel)
+      : null;
+  return (
+    <Link
+      to={item.to}
+      onClick={onNavigate}
+      className={
+        active
+          ? `${base} bg-mipiace-coral-soft text-mipiace-coral-dark`
+          : `${base} text-slate-600 hover:bg-slate-50 hover:text-mipiace-ink`
+      }
+    >
+      <Icon
+        className={
+          active
+            ? "w-[17px] h-[17px] text-mipiace-coral"
+            : "w-[17px] h-[17px] text-slate-500"
+        }
+        strokeWidth={2.1}
+      />
+      <span>{etiqueta}</span>
+      {contador && (
+        <span
+          /* El número solo no se lee: «4» no dice de qué. El texto
+             completo va en el `aria-label` y el dígito queda
+             `aria-hidden` para que el lector no lo diga dos veces. */
+          aria-label={contador.texto}
+          data-test={`contador-${item.contador}`}
+          className={`ml-auto inline-flex items-center justify-center min-w-[24px] h-[20px] px-1.5 rounded-[9px] text-[11.5px] font-medium tabular-nums ${
+            contador.grave
+              ? "bg-red-50 text-red-700"
+              : "bg-amber-50 text-amber-700"
+          }`}
+        >
+          <span aria-hidden>{contador.n > 99 ? "99+" : contador.n}</span>
+        </span>
+      )}
+      {badgeCount > 0 && (
+        <span
+          aria-label={`${badgeCount} pendiente${badgeCount === 1 ? "" : "s"}`}
+          className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-medium tabular-nums"
+        >
+          {badgeCount > 99 ? "99+" : badgeCount}
+        </span>
+      )}
+    </Link>
   );
 }

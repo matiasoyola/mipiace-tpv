@@ -43,6 +43,10 @@ import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import {
+  NOMBRE_DE_ESPECIALIDAD,
+  type Especialidad,
+} from "@mipiacetpv/clinica-sesion";
+import {
   preguntasEnJuego,
   type CanalValoracion,
   type Cuestionario,
@@ -62,9 +66,42 @@ export interface TestPacienteProps {
   nombrePila: string;
   cuestionario: Cuestionario;
   canal: CanalValoracion;
+  /** clinica-8 (fase B, 14) · la especialidad del centro, de sus tipos
+   *  de visita declarados. `null` = el centro no ha declarado ninguno. */
+  especialidad?: Especialidad | null;
   /** Manda las respuestas. Resuelve con `null` si todo fue bien, o con un
    *  mensaje para la persona si no se pudieron guardar. */
   onEnviar: (r: RespuestasDelTest) => Promise<string | null>;
+  /** clinica-8 (fase B, 14) · devolver la tablet al centro: sale del
+   *  modo paciente y deja el TPV pidiendo el PIN. Sólo en la tablet. */
+  onDevolverLaTablet?: () => void;
+}
+
+/**
+ * clinica-8 (fase B, 14) · DE QUÉ ES LA VISITA, EN LA VOZ DEL PACIENTE.
+ *
+ * «la podóloga» estaba escrito cuatro veces a pelo en esta pantalla
+ * (auditoría del 18-10, punto 18: «"la podóloga" fijo»). Dos problemas,
+ * y los dos se arreglan aquí:
+ *
+ *   1. **La especialidad.** Un centro de fisioterapia le decía a su
+ *      paciente que la podóloga iba a revisar sus respuestas.
+ *   2. **El género.** «La podóloga» da por hecho que quien atiende es
+ *      una mujer. En Rosario lo es; en el siguiente centro, quién sabe.
+ *      Y esto lo lee la paciente, sobre una persona de verdad.
+ *
+ * Así que la especialidad se nombra donde cae natural —«su primera
+ * visita de podología»— y la profesional deja de nombrarse: el sujeto
+ * pasa a ser la clínica («necesitamos saber», «lo revisaremos con
+ * usted»), que es además quien manda el test.
+ *
+ * Sin especialidad declarada, la frase se queda sin complemento y sigue
+ * siendo correcta. Es lo que hace que esto sea una función y no una
+ * interpolación suelta.
+ */
+export function deLaEspecialidad(e: Especialidad | null | undefined): string {
+  if (!e) return "";
+  return ` de ${NOMBRE_DE_ESPECIALIDAD[e].toLowerCase()}`;
 }
 
 /** Los pasos, en el orden en que se ven.
@@ -98,6 +135,9 @@ export function TestPaciente(props: TestPacienteProps) {
   const [paso, setPaso] = useState<Paso>({ tipo: "bienvenida" });
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** clinica-8 (fase B, 14) · ¿se está preguntando si devolver la
+   *  tablet? Ver `DevolverLaTablet`. */
+  const [devolviendo, setDevolviendo] = useState(false);
 
   // Las preguntas que están EN JUEGO con lo contestado hasta ahora. Se
   // recalcula en cada respuesta porque el seguimiento de la insulina
@@ -262,9 +302,9 @@ export function TestPaciente(props: TestPacienteProps) {
               Hola, {props.nombrePila}.
             </h1>
             <p className="text-[17px] md:text-[20px] text-mipiace-ink-soft leading-snug m-0 mb-8">
-              Antes de su primera visita, la podóloga necesita saber unas cosas
-              de su salud. Son {total} preguntas y se contestan con «Sí» o
-              «No».
+              Antes de su primera visita{deLaEspecialidad(props.especialidad)}{" "}
+              necesitamos saber unas cosas de su salud. Son {total} preguntas
+              y se contestan con «Sí» o «No».
             </p>
             <div className="flex items-center justify-between mt-6">
               <span />
@@ -281,7 +321,7 @@ export function TestPaciente(props: TestPacienteProps) {
               ¿Quién está respondiendo?
             </h1>
             <p className="text-[17px] md:text-[20px] text-mipiace-ink-soft leading-snug m-0 mb-8">
-              Así la podóloga sabe quién ha contestado.
+              Así queda apuntado quién ha contestado.
             </p>
             <div className="grid gap-3.5">
               {(
@@ -293,7 +333,21 @@ export function TestPaciente(props: TestPacienteProps) {
                 <button
                   key={valor}
                   type="button"
-                  onClick={() => setRespondioPor(valor)}
+                  // clinica-8 (fase B, 14) · AVANZA SOLO. Era la única
+                  // pantalla del test con dos toques —elegir y luego
+                  // «Seguir»— y la auditoría lo anotó como «doble
+                  // toque» (punto 18). Las preguntas avanzan solas al
+                  // contestar desde clinica-2 («al tocar Sí se avanza
+                  // solo»); ésta se había quedado fuera, y por eso se
+                  // nota: la persona toca, no pasa nada, y espera.
+                  // El valor se guarda Y se avanza en el mismo gesto. No
+                  // se usa el `respondioPor` del estado para arrancar
+                  // porque `setState` no ha corrido todavía: es la misma
+                  // trampa que `contestar` documenta en la sesión.
+                  onClick={() => {
+                    setRespondioPor(valor);
+                    irA(0);
+                  }}
                   aria-pressed={respondioPor === valor}
                   className={`w-full text-left min-h-[76px] px-[22px] rounded-[18px] text-[20px] md:text-[22px] font-medium border-2 transition-colors ${
                     respondioPor === valor
@@ -305,11 +359,13 @@ export function TestPaciente(props: TestPacienteProps) {
                 </button>
               ))}
             </div>
+            {/* Sin «Seguir»: ya no hay nada que esperar. «Atrás» se
+                queda, por lo mismo que en las preguntas — avanzar solo
+                es rápido, y el precio es que un dedo que resbala pasa de
+                pantalla. */}
             <div className="flex items-center justify-between mt-6">
               <Atras onClick={atras} />
-              <Siguiente disabled={!respondioPor} onClick={() => irA(0)}>
-                Seguir
-              </Siguiente>
+              <span />
             </div>
           </>
         )}
@@ -351,8 +407,8 @@ export function TestPaciente(props: TestPacienteProps) {
               ¿A qué es alérgico?
             </h1>
             <p className="text-[17px] md:text-[20px] text-mipiace-ink-soft leading-snug m-0 mb-8">
-              Toque todas las que sean. Si no lo sabe, siga: la podóloga lo
-              mirará con usted.
+              Toque todas las que sean. Si no lo sabe, siga: lo miramos con
+              usted en la consulta.
             </p>
             <div className="flex flex-wrap gap-3 mt-2">
               {(paso.pregunta.opciones ?? []).map((opcion) => {
@@ -456,7 +512,7 @@ export function TestPaciente(props: TestPacienteProps) {
               Gracias, {props.nombrePila}. Ya está.
             </h1>
             <p className="text-[17px] md:text-[20px] text-mipiace-ink-soft leading-snug m-0">
-              La podóloga lo revisará con usted al empezar la visita.
+              Lo revisaremos con usted al empezar la visita.
               {sinSaber > 0 && (
                 <>
                   {" "}
@@ -475,6 +531,87 @@ export function TestPaciente(props: TestPacienteProps) {
           </>
         )}
       </div>
+
+      {/* clinica-8 (fase B, 14) · LA SALIDA DE LA TABLET.
+          «Sin botón para que la sanitaria recupere la tablet»
+          (auditoría del 18-10, punto 18). El modo paciente no tiene
+          puerta de vuelta por diseño —`main.tsx` monta SÓLO el test,
+          para que detrás del paciente no esté la sesión de la podóloga—
+          y la vuelta documentada era «se recarga la raíz y se teclea el
+          PIN». En la tablet no hay barra de direcciones que recargar.
+          Así que la puerta se pinta, y es exactamente esa: lleva a la
+          raíz, y la raíz pide el PIN. Nadie ve nada de nadie sin
+          teclearlo; esto no abre una puerta, enseña dónde está.
+          Va abajo, pequeña y en gris: tiene que encontrarla quien la
+          busca —la profesional— sin competir con «Sí» y «No» para quien
+          está contestando. */}
+      {/* clinica-9 (8) · UN BOTÓN DE VERDAD, Y GRANDE.
+          Era un enlace subrayado en gris claro al pie de una pantalla
+          hecha a 20 px para una señora de 78 años (pasada del 24-10,
+          captura 15). Quien tiene la tablet en la mano es la paciente, y
+          lo que hace cuando termina —o cuando no quiere seguir— es
+          devolverla: es la segunda acción de esta pantalla, no una nota
+          al pie.
+          Sigue siendo la acción SECUNDARIA —blanca con borde, no coral—
+          porque la primera es contestar; lo que cambia es que ahora se
+          ve y se puede tocar sin apuntar. */}
+      {props.onDevolverLaTablet && (
+        <div className="mt-8 flex justify-center">
+          <button
+            type="button"
+            data-test="devolver-la-tablet"
+            onClick={() => {
+              // Terminado el test ya está todo guardado: no hay nada
+              // que perder y no se pregunta. A medias, sí: las
+              // respuestas sólo se mandan al final (ver la nota de
+              // `Paso`), así que salir aquí las tira.
+              if (paso.tipo === "gracias") props.onDevolverLaTablet!();
+              else setDevolviendo(true);
+            }}
+            className="min-h-[72px] w-full max-w-[520px] px-6 rounded-[20px] bg-white border-2 border-slate-300 text-mipiace-ink text-[20px] font-semibold"
+          >
+            Devolver la tablet al centro
+          </button>
+        </div>
+      )}
+
+      {devolviendo && props.onDevolverLaTablet && (
+        <div
+          className="fixed inset-0 z-50 bg-[rgba(17,24,39,.5)] flex items-center justify-center px-5"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Devolver la tablet al centro"
+          data-test="confirmar-devolver"
+        >
+          <div className="bg-white rounded-3xl px-6 py-6 max-w-[520px] w-full">
+            <h2 className="text-[22px] md:text-[26px] font-semibold m-0 mb-3">
+              ¿Devolver la tablet al centro?
+            </h2>
+            <p className="text-[17px] md:text-[19px] text-mipiace-ink-soft leading-snug m-0 mb-6">
+              El test se queda a medias y habrá que empezarlo otra vez. Lo
+              contestado hasta ahora no se guarda.
+            </p>
+            <div className="grid gap-3">
+              <button
+                type="button"
+                data-test="seguir-contestando"
+                onClick={() => setDevolviendo(false)}
+                className="min-h-[72px] px-6 rounded-[20px] bg-mipiace-coral text-white text-[20px] font-semibold"
+              >
+                Seguir contestando
+              </button>
+              <button
+                type="button"
+                data-test="devolver-sin-terminar"
+                onClick={props.onDevolverLaTablet}
+                className="min-h-[72px] px-6 rounded-[20px] bg-white border-2 border-slate-200 text-mipiace-ink text-[20px] font-medium"
+              >
+                Sí, devolverla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -489,16 +626,25 @@ function Respuestas(props: {
     "min-h-tap-valoracion-sm md:min-h-tap-valoracion rounded-[24px] text-[26px] md:text-[30px] font-semibold border-2 transition-[background-color,border-color] duration-150 active:scale-[0.97] motion-reduce:active:scale-100 motion-reduce:transition-none";
   return (
     <>
+      {/* clinica-8 (fase B, 14) · NADA RESALTADO ANTES DE CONTESTAR.
+          El «Sí» llevaba borde coral de serie. En el mockup eso era
+          «marca de antemano el que tiene consecuencias»; en la tablet,
+          con una persona de 78 años delante, lo que marca es LA
+          RESPUESTA QUE SE ESPERA. La auditoría del 18-10 lo anotó así:
+          «"Sí" resaltado antes de contestar» (punto 18).
+          Un cuestionario de salud que sugiere una respuesta la consigue:
+          quien duda toca la que parece la buena. Y de estas diez
+          preguntas salen las alertas con las que se coge el bisturí.
+          Los dos botones salen iguales. El coral sigue estando, pero
+          sólo DESPUÉS: marca lo contestado, no lo esperado. */}
       <button
         type="button"
         onClick={() => props.onElegir("SI")}
         aria-pressed={props.valor === "SI"}
-        // El borde coral del «Sí» está en el mockup y no es decorativo:
-        // marca de antemano el que tiene consecuencias.
         className={`${base} ${
           props.valor === "SI"
             ? "bg-mipiace-coral border-mipiace-coral text-white"
-            : "bg-white border-mipiace-coral text-mipiace-ink"
+            : "bg-white border-slate-200 text-mipiace-ink"
         }`}
       >
         Sí

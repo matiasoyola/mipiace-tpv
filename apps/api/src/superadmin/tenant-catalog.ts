@@ -138,7 +138,20 @@ interface ImportResult {
      *  pantalla: es la misma que sale en el chip del catálogo y en la
      *  leyenda del papel (`PRESENTACION` de `@mipiacetpv/ticket-model`). */
     exencionEtiqueta: string | null;
+    // clinica-8 · las marcas de clínica de la fila. Viajan SIEMPRE, como
+    // sus vecinas: `null` en el fichero de un bar y en toda fila que no
+    // las traiga. Es lo que la dueña repasa con el implantador delante —
+    // «¿la quiropodia completa es el nivel 2?»— antes de confirmar.
+    tipoVisita: string | null;
+    primeraValoracion: boolean | null;
+    tratamientoSesion: boolean | null;
+    nivelQuiropodia: number | null;
   }>;
+  /**
+   * clinica-8 · el mapa `categoría → tipo de visita` que se va a escribir.
+   * Vacío en todo fichero sin `tipo_visita`.
+   */
+  tiposDeVisita: Array<{ slug: string; visitType: string }>;
   saltadas: FilaMala[];
   /** Cuántos productos locales tenía el tenant antes de esta carga. La
    *  pantalla lo usa para decir "tenía 0" vs "tenía 128". */
@@ -299,6 +312,27 @@ export async function registerSuperAdminTenantCatalogRoutes(
           });
           continue;
         }
+        // clinica-8 · LAS MARCAS DE CLÍNICA, SÓLO EN UNA CLÍNICA.
+        //
+        // Misma puerta y mismo porqué que la exención: la capability es
+        // del comercio y el parser no habla con la base. Y la fila se
+        // SALTA con su motivo en vez de entrar sin las marcas — un
+        // servicio que el fichero declara «tratamiento de la sesión» y
+        // que entra sin serlo es un botón que no sale y nadie sabe por
+        // qué. Además la base lo rechazaría: `tag_visit_types` y el nivel
+        // son de clinica-5, que sólo tiene sentido con el módulo puesto.
+        if (fila.clinica !== null && tenant.clinicalRecordsEnabled !== true) {
+          saltadas.push({
+            linea: fila.linea,
+            sku: fila.fields.sku,
+            nombre: fila.fields.name,
+            motivo:
+              "Este comercio no tiene la historia clínica encendida, así que no puede " +
+              "tener tipos de visita ni niveles de quiropodia. Enciéndela primero o " +
+              "quita las columnas de clínica.",
+          });
+          continue;
+        }
         aCrear.push(fila);
         entran.push({
           linea: fila.linea,
@@ -315,6 +349,17 @@ export async function registerSuperAdminTenantCatalogRoutes(
             fila.fields.exemptionCause === null
               ? null
               : PRESENTACION[fila.fields.exemptionCause].etiqueta,
+          // clinica-8 · el tipo de visita se LEE del mapa de categorías,
+          // no de la fila: es de la categoría, y una fila sin la columna
+          // puesta hereda igual el de su categoría si otra fila la
+          // declaró. Es la misma herencia que hace el panel.
+          tipoVisita:
+            parsed.tiposDeVisita.find((t) =>
+              fila.fields.tags.includes(t.slug),
+            )?.visitType ?? null,
+          primeraValoracion: fila.clinica?.primeraValoracion ?? null,
+          tratamientoSesion: fila.clinica?.tratamientoSesion ?? null,
+          nivelQuiropodia: fila.clinica?.nivelQuiropodia ?? null,
         });
       }
 
@@ -322,11 +367,23 @@ export async function registerSuperAdminTenantCatalogRoutes(
         where: { tenantId: id, source: "LOCAL" },
       });
 
+      // clinica-8 · los tipos de visita que de verdad se van a escribir:
+      // los de las categorías de las filas que ENTRAN. Una categoría cuyo
+      // única fila se saltó (SKU repetido, precio mal) no deja un tipo de
+      // visita colgando de una categoría que no existe.
+      const categoriasQueEntran = new Set(
+        aCrear.flatMap((f) => f.fields.tags),
+      );
+      const tiposDeVisita = parsed.tiposDeVisita.filter((t) =>
+        categoriasQueEntran.has(t.slug),
+      );
+
       const resultado: ImportResult = {
         escrito: false,
         entran,
         saltadas: saltadas.sort((a, b) => a.linea - b.linea),
         yaTenia,
+        tiposDeVisita,
       };
 
       // ── La vista previa acaba aquí ───────────────────────────────────
@@ -397,18 +454,76 @@ export async function registerSuperAdminTenantCatalogRoutes(
                     `No se encuentra el producto recién creado con SKU ${f.fields.sku}.`,
                   );
                 }
-                return buildSchedulingCreateData({
-                  tenantId: id,
-                  productId,
-                  durationMin: f.duracionMin!,
-                  // La PRIMERA categoría de la fila. Es lo único que el
-                  // fichero sabe del servicio que signifique «de qué
-                  // familia es», y es lo que la dueña ve agrupado en el
-                  // catálogo de agenda sin teclear nada.
-                  family: f.fields.tags[0] ?? null,
-                });
+                return {
+                  ...buildSchedulingCreateData({
+                    tenantId: id,
+                    productId,
+                    durationMin: f.duracionMin!,
+                    // La PRIMERA categoría de la fila. Es lo único que el
+                    // fichero sabe del servicio que signifique «de qué
+                    // familia es», y es lo que la dueña ve agrupado en el
+                    // catálogo de agenda sin teclear nada.
+                    family: f.fields.tags[0] ?? null,
+                  }),
+                  // clinica-8 · LAS MARCAS DE CLÍNICA, en la misma fila y
+                  // en la misma transacción. Sin ellas el catálogo entra
+                  // entero y la sesión sigue diciendo «sin servicio» a
+                  // 0,00 € — que es lo que la auditoría del 18-10 midió
+                  // con los 17 servicios de Rosario ya cargados.
+                  //
+                  // Sin la columna, el default de siempre: `false` y
+                  // `null`. Un fichero de ayer deja la fila de agenda
+                  // exactamente como la dejaba ayer.
+                  ...(f.clinica
+                    ? {
+                        primeraValoracion: f.clinica.primeraValoracion,
+                        tratamientoSesion: f.clinica.tratamientoSesion,
+                        nivelQuiropodia: f.clinica.nivelQuiropodia,
+                      }
+                    : {}),
+                };
               }),
             });
+          }
+
+          // ── clinica-8 · EL MAPA `categoría → tipo de visita` (S5) ──
+          //
+          // Dentro de la misma transacción y por la misma razón que la
+          // fila de agenda: un servicio de sesión SIN tipo no lo ofrece
+          // ninguna tarjeta, y en DRAFT no hay OWNER que lo arregle. O
+          // entra el catálogo configurado, o no entra.
+          //
+          // `upsert` y no `createMany`: la tabla es única por
+          // (tenant, slug) y una segunda carga del mismo fichero —que es
+          // lo normal cuando se añaden servicios— no puede reventar por
+          // una categoría que ya tiene su tipo. Lo que NO se hace es
+          // cambiarlo por las bravas: si ya hay un tipo distinto, se deja
+          // el que había (la dueña lo movió desde su panel y el fichero
+          // no manda sobre eso) y se cuenta en el log.
+          const tiposPisados: string[] = [];
+          for (const t of tiposDeVisita) {
+            const previo = await tx.tagVisitType.findUnique({
+              where: { tenantId_slug: { tenantId: id, slug: t.slug } },
+              select: { visitType: true },
+            });
+            if (previo && previo.visitType !== t.visitType) {
+              tiposPisados.push(t.slug);
+              continue;
+            }
+            if (previo) continue;
+            await tx.tagVisitType.create({
+              data: { tenantId: id, slug: t.slug, visitType: t.visitType },
+            });
+          }
+          if (tiposPisados.length > 0) {
+            request.log.warn(
+              {
+                event: "super_admin.catalog_import_tipo_visita_respetado",
+                tenantId: id,
+                categorias: tiposPisados,
+              },
+              "la categoría ya tenía otro tipo de visita: se respeta el del panel",
+            );
           }
 
           await writeAudit({
@@ -425,6 +540,9 @@ export async function registerSuperAdminTenantCatalogRoutes(
               // catalogo-servicios-csv · cuántos de los creados son
               // servicios con agenda. Sigue siendo «cuántas, no cuáles».
               serviciosCreados: aCrear.filter((f) => f.duracionMin !== null).length,
+              // clinica-8 · cuántas categorías quedan con tipo de visita.
+              // Cuántas, no cuáles, como el resto de esta foto.
+              tiposDeVisita: tiposDeVisita.length,
             },
           });
         });

@@ -330,13 +330,31 @@ describe.skipIf(!e2eEnabled)("e2e · el primer acceso de Carmen", () => {
     expect(res.json().code).toBe("CONTRATO_ENCARGADO_SIN_ACEPTAR");
   });
 
+  // contrato-lectura-completa · la aceptación lleva ahora
+  // `textoMostradoCompleto`: la pantalla desactiva el botón hasta que el
+  // final del texto ha pasado por la vista, y la API da 400 sin el campo.
+  it("sin decir que recorrió el texto NO acepta, y no escribe fila", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/clinica/contrato/aceptar",
+      headers: comoCarmen(),
+      payload: {},
+    });
+    expect(res.statusCode, res.body).toBe(400);
+    expect(res.json().code).toBe("TEXTO_NO_RECORRIDO");
+    const filas = await prisma.clinicalProcessorAgreement.findMany({
+      where: { tenantId },
+    });
+    expect(filas).toHaveLength(0);
+  });
+
   it("acepta, y la fila de la aceptación queda escrita con su nombre", async () => {
     pantallas.push("el contrato");
     const res = await app.inject({
       method: "POST",
       url: "/clinica/contrato/aceptar",
       headers: comoCarmen(),
-      payload: {},
+      payload: { textoMostradoCompleto: true },
     });
     expect(res.statusCode, res.body).toBe(201);
     const filas = await prisma.clinicalProcessorAgreement.findMany({
@@ -344,6 +362,9 @@ describe.skipIf(!e2eEnabled)("e2e · el primer acceso de Carmen", () => {
     });
     expect(filas).toHaveLength(1);
     expect(filas[0]!.userId).toBe(ownerId);
+    // Y la prueba lo guarda: contra Postgres de verdad, con su CHECK y su
+    // trigger de solo-inserción.
+    expect(filas[0]!.textoRecorridoEn).not.toBeNull();
 
     const me = await app.inject({
       method: "GET",

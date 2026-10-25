@@ -159,6 +159,40 @@ export interface AgendaDay {
   // dinero: un aviso viejo de «queda cobrar» sobre algo ya cobrado manda a
   // la recepción a cobrar dos veces. Que sin red no salga es lo seguro.
   sesionesPorCobrar?: string[];
+  /**
+   * clinica-9 (9) · LAS PRÓXIMAS CITAS PROPUESTAS de las sesiones de este
+   * día que ya están cobradas, y cuyo paciente NO tiene ninguna cita por
+   * delante.
+   *
+   * La pantalla de cierre le promete a la sanitaria que «la recepción
+   * elige el hueco con el paciente al cobrar»; esto es lo que hace que
+   * alguien se lo diga a la recepción. Ni un dato de salud: de quién,
+   * cuántas semanas y a partir de qué día (`clinica/proxima-cita.ts`).
+   *
+   * Fuera de la caché offline como sus dos vecinas, y por lo mismo: una
+   * propuesta vieja sobre un paciente que ya tiene cita manda a la
+   * recepción a dar una cita de más.
+   */
+  proximasCitas?: Array<{
+    appointmentId: string;
+    clientId: string;
+    /** `S2` / `S4` / `S8`. */
+    propuesta: string;
+    /** «YYYY-MM-DD» desde el que buscar hueco. */
+    desde: string;
+  }>;
+  // clinica-8 · LA MARCA SANITARIA DE QUIEN MIRA, al día. El TPV la lee en
+  // el login del cajero y esa sesión dura el turno entero, así que marcar a
+  // alguien sanitario desde el panel no le llegaba hasta re-entrar: la
+  // cita seguía sin enseñar nada clínico y no había forma de saber por qué.
+  //
+  // Ausente en los catorce tenants sin clínica y contra un servidor
+  // anterior a este bloque; ahí la pantalla se queda con lo del login, que
+  // es lo de siempre. Y NO entra en la caché offline, como sus dos
+  // vecinas: sin red no se puede saber si alguien acaba de quitarle la
+  // marca, y lo que decide de verdad quién ve una historia es la API en
+  // cada ruta, no esto.
+  esSanitario?: boolean;
 }
 
 /** La retícula del día, con el valor de B4 como último recurso: caché
@@ -260,6 +294,8 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       days?: AgendaDayInfo[];
       valoracionesPendientes?: string[];
       sesionesPorCobrar?: string[];
+      proximasCitas?: AgendaDay["proximasCitas"];
+      esSanitario?: boolean;
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
       date,
@@ -282,6 +318,12 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       appointments: await mergePendingLocal(day),
       valoracionesPendientes: res.valoracionesPendientes ?? [],
       sesionesPorCobrar: res.sesionesPorCobrar ?? [],
+      proximasCitas: res.proximasCitas ?? [],
+      // Fuera de la caché, igual que las dos de arriba: se añade DESPUÉS
+      // de `writeDay`.
+      ...(res.esSanitario === undefined
+        ? {}
+        : { esSanitario: res.esSanitario }),
     };
   } catch (err) {
     // Offline / 5xx: usa la caché del día si existe.
@@ -537,18 +579,28 @@ export interface CheckoutTicket {
 }
 
 // Cita → caja: abre el ticket pre-poblado por el camino de cobro existente.
+//
+// clinica-8 · y puede venir VACÍO a propósito. Si la cita tiene una sesión
+// cerrada que no dejó ni una línea cobrable, el servidor abre el borrador
+// sin líneas y lo dice con `sesionSinCobro`. Antes de este bloque caía a
+// los servicios RESERVADOS de la cita y cobraba la previsión en vez del
+// trabajo, con los importes cuadrando.
 export async function checkoutAppointmentTicket(
   id: string,
 ): Promise<
-  | { ok: true; ticket: CheckoutTicket }
+  | { ok: true; ticket: CheckoutTicket; sesionSinCobro: boolean }
   | { ok: false; error: string; message: string }
 > {
   try {
-    const res = await apiWithCashier<{ ticket: CheckoutTicket }>(
-      `/agenda/appointments/${id}/checkout`,
-      { method: "POST", body: {} },
-    );
-    return { ok: true, ticket: res.ticket };
+    const res = await apiWithCashier<{
+      ticket: CheckoutTicket;
+      sesionSinCobro?: boolean;
+    }>(`/agenda/appointments/${id}/checkout`, { method: "POST", body: {} });
+    return {
+      ok: true,
+      ticket: res.ticket,
+      sesionSinCobro: res.sesionSinCobro === true,
+    };
   } catch (err) {
     if (err instanceof ApiError) {
       return { ok: false, error: err.code ?? "ERROR", message: err.message };

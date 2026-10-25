@@ -37,6 +37,9 @@ import {
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const PANEL: Panel = {
+  // cuadro-de-control · la cabecera del panel y los contadores del menú.
+  centro: { nombre: "Jardín de Gredos", plazas: 49, dentro: 41, fuera: null },
+  yo: { nombre: "Carmen" },
   abierto: {
     porNivel: [
       { nivel: "N4", cuantas: 0 },
@@ -49,6 +52,49 @@ const PANEL: Panel = {
     sinConstanciaDeFamilia: 2,
     esperandoCierreDeOtro: 2,
     total: 10,
+    // cuadro-de-control · «lo que no puede esperar», ya ordenado por el
+    // servidor: la N3 primero y la N1 al final.
+    noPuedeEsperar: [
+      {
+        id: "i1",
+        nivel: "N3",
+        tipo: "CAIDA",
+        nombreDelTipo: "Caída",
+        sujeto: "RESIDENT",
+        residente: "Carmen del Río",
+        habitacion: "112",
+        abiertaEn: "2026-10-18T06:55:00.000Z",
+        sinConstanciaDeFamilia: false,
+        esperaCierreDeOtro: true,
+        avisosSinAcuse: ["ENFERMERIA"],
+      },
+      {
+        id: "i2",
+        nivel: "N2",
+        tipo: "NO_COME",
+        nombreDelTipo: "No ha comido",
+        sujeto: "RESIDENT",
+        residente: "Abel Ramos",
+        habitacion: "204",
+        abiertaEn: "2026-10-18T07:30:00.000Z",
+        sinConstanciaDeFamilia: true,
+        esperaCierreDeOtro: false,
+        avisosSinAcuse: [],
+      },
+      {
+        id: "i3",
+        nivel: "N1",
+        tipo: "AVERIA",
+        nombreDelTipo: "Persiana rota",
+        sujeto: "MAINTENANCE",
+        residente: null,
+        habitacion: "206",
+        abiertaEn: "2026-10-17T10:00:00.000Z",
+        sinConstanciaDeFamilia: false,
+        esperaCierreDeOtro: false,
+        avisosSinAcuse: [],
+      },
+    ],
   },
   relevos: {
     ultimo: {
@@ -132,7 +178,13 @@ const PANEL: Panel = {
     ],
   },
   turno: {
-    turno: { id: "t1", code: "T", name: "Tarde" },
+    turno: {
+      id: "t1",
+      code: "T",
+      name: "Tarde",
+      empiezaEn: "15:00",
+      terminaEn: "22:00",
+    },
     careDay: "2026-10-18",
     plantas: [
       { floorId: "p1", nombre: "Primera", tocan: 40, hechas: 18 },
@@ -404,40 +456,77 @@ function enlaces(): HTMLAnchorElement[] {
 // ══ 1 · EL PANEL ══════════════════════════════════════════════════
 
 describe("el panel de dirección", () => {
-  it("N4 y N3 van PRIMERO, y no en el orden del enum", async () => {
+  // cuadro-de-control · los niveles ya no son cinco tarjetas con su
+  // número: son el ORDEN de «lo que no puede esperar», que es donde la
+  // gravedad decide qué se lee primero. El recuento de graves sigue
+  // estando, dentro de la cifra de incidencias.
+  it("lo más grave va PRIMERO, y no en el orden del enum", async () => {
     api.fn.mockResolvedValue(PANEL);
     await pintar(<PanelPage />);
     const texto = container.textContent ?? "";
-    expect(texto.indexOf("N4")).toBeGreaterThanOrEqual(0);
-    expect(texto.indexOf("N4")).toBeLessThan(texto.indexOf("N1"));
+    expect(texto.indexOf("N3")).toBeGreaterThanOrEqual(0);
+    expect(texto.indexOf("N3")).toBeLessThan(texto.indexOf("N1"));
+    // Y la cifra dice cuántas de las diez son graves (las dos N3) y
+    // cuántas están sin comunicar a la familia.
+    expect(texto).toContain("2 graves");
+    expect(texto).toContain("2 sin comunicar a la familia");
   });
 
   it("**cada cifra se abre**: el presupuesto de lectura son 3 toques", async () => {
     api.fn.mockResolvedValue(PANEL);
     await pintar(<PanelPage />);
     const destinos = enlaces().map((a) => a.getAttribute("href") ?? "");
-    // El libro filtrado por nivel, el relevo, las obligaciones y los
-    // indicadores. Una cifra que no se abre obliga a preguntar, que es
-    // justo lo que este panel existe para quitar.
-    expect(destinos.some((d) => d.includes("/incidencias?abiertas=1&nivel=N3"))).toBe(true);
-    expect(destinos.some((d) => d.includes("/relevos/h1"))).toBe(true);
-    expect(destinos.some((d) => d.includes("/obligaciones?duty=d2"))).toBe(true);
+    // Las cuatro cifras de arriba: el libro, los relevos, las
+    // obligaciones y las fichas. Una cifra que no se abre obliga a
+    // preguntar, que es justo lo que este panel existe para quitar.
+    expect(destinos.some((d) => d.includes("/incidencias?abiertas=1"))).toBe(true);
+    expect(destinos.some((d) => d === "/admin/residencia/relevos")).toBe(true);
+    expect(destinos.some((d) => d === "/admin/residencia/obligaciones")).toBe(true);
     expect(destinos.some((d) => d.includes("/indicadores"))).toBe(true);
+    // Y las filas: la incidencia concreta (1 toque) y el relevo concreto.
+    expect(destinos.some((d) => d.includes("/incidencias/i1"))).toBe(true);
+    expect(destinos.some((d) => d.includes("/relevos/h2"))).toBe(true);
+    expect(destinos.some((d) => d.includes("/obligaciones?duty=d2"))).toBe(true);
   });
 
-  it("el relevo SIN CONFIRMAR se ve, y dice cuántas zonas faltan", async () => {
+  it("el estado de cada incidencia se lee en su fila, sin abrirla", async () => {
     api.fn.mockResolvedValue(PANEL);
     await pintar(<PanelPage />);
-    expect(container.textContent).toContain("sin confirmar");
-    expect(container.textContent).toContain("2 zona(s) sin recibir");
-    // Y quién lo ha recibido ya, con su capacidad.
-    expect(container.textContent).toContain("Ana (Auxiliar");
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Caída · hab. 112");
+    expect(texto).toContain("Pendiente de que la cierre otra persona");
+    expect(texto).toContain("Enfermería avisada, sin acuse");
+    expect(texto).toContain("Sin comunicar a la familia");
+  });
+
+  it("el relevo SIN CONFIRMAR se ve, con «Abrir», y dice cuántas zonas faltan", async () => {
+    api.fn.mockResolvedValue(PANEL);
+    await pintar(<PanelPage />);
+    const texto = container.textContent ?? "";
+    expect(texto).toContain("Relevos sin confirmar");
+    expect(texto).toContain("1 zona sin recibir");
+    expect(texto).toContain("Abrir");
+  });
+
+  it("y el último, si ya está firmado, dice QUIÉN lo recibió", async () => {
+    // residencia-5 · la línea tranquila del bloque. Con el parte sin
+    // confirmar no se pinta (lo que importa es que falta la firma); en
+    // cuanto está firmado, dice quién y a qué hora.
+    api.fn.mockResolvedValue({
+      ...PANEL,
+      relevos: {
+        ...PANEL.relevos,
+        ultimo: { ...PANEL.relevos.ultimo!, confirmado: true },
+      },
+    });
+    await pintar(<PanelPage />);
+    expect(container.textContent).toContain("Confirmado por Ana (Auxiliar)");
   });
 
   it("lo VENCIDO sale con los días de retraso y quién es responsable", async () => {
     api.fn.mockResolvedValue(PANEL);
     await pintar(<PanelPage />);
-    expect(container.textContent).toContain("30 día(s) de retraso");
+    expect(container.textContent).toContain("Venció el 18-09-2026 (30 días)");
     expect(container.textContent).toContain("Mantenimiento");
   });
 

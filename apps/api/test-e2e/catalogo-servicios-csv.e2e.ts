@@ -367,12 +367,63 @@ describe.skipIf(!e2eEnabled)("e2e · una clínica carga sus 17 servicios del fic
         agenda: true,
         online: false,
       });
-      // Y las marcas de clínica nacen apagadas: se ponen en el panel, con
-      // el catálogo delante («lo que NO entra» del bloque).
+      // clinica-8 · LAS MARCAS DE CLÍNICA YA ENTRAN POR EL FICHERO.
+      //
+      // Este bloque las dejó fuera a propósito («nacen en su default y se
+      // ponen en el panel»), y la auditoría del 18-10 midió lo que eso
+      // significa en el hierro: los 17 servicios cargados, el TPV
+      // enseñándolos, y la primera sesión cerrando a 0,00 € con «no hay
+      // servicio en su categoría». El catálogo estaba; la clínica no podía
+      // cobrar. El fichero de Rosario trae ya las cuatro columnas.
+      expect(s.tratamientoSesion).toBe(true);
+      expect(s.nivelQuiropodia).toBe(1);
+      // La primera valoración es la consulta de diagnóstico, no ésta.
       expect(s.primeraValoracion).toBe(false);
-      expect(s.tratamientoSesion).toBe(false);
-      expect(s.nivelQuiropodia).toBeNull();
+      // Los consentimientos SIGUEN fuera del fichero: se ponen en el panel
+      // (son ids de plantilla de clinica-4).
       expect(s.consentimientos).toEqual([]);
+    });
+
+    it("clinica-8 · y las cinco categorías quedan con su tipo de visita", async () => {
+      // Sin estas filas ningún servicio tiene tipo y la sesión no ofrece
+      // una sola tarjeta: la regla de S5 sobre un catálogo sin configurar.
+      const tipos = await prisma.tagVisitType.findMany({
+        where: { tenantId },
+        select: { slug: true, visitType: true },
+        orderBy: { slug: "asc" },
+      });
+      expect(new Map(tipos.map((t) => [t.slug, t.visitType]))).toEqual(
+        new Map([
+          ["biomecánica", "BIOMECANICA"],
+          ["cirugía", "CIRUGIA"],
+          ["consulta", "GENERAL"],
+          ["quiropodia", "QUIROPODIA"],
+          ["órtesis", "GENERAL"],
+        ]),
+      );
+    });
+
+    it("clinica-8 · los tres niveles de quiropodia, uno por servicio", async () => {
+      const niveles = await prisma.serviceScheduling.findMany({
+        where: { tenantId, nivelQuiropodia: { not: null } },
+        select: { nivelQuiropodia: true, product: { select: { sku: true } } },
+        orderBy: { nivelQuiropodia: "asc" },
+      });
+      expect(niveles.map((n) => [n.product.sku, n.nivelQuiropodia])).toEqual([
+        ["POD-002", 1],
+        ["POD-003", 2],
+        ["POD-004", 3],
+      ]);
+      // Y el índice único parcial de clinica-5 aguanta: no hay dos.
+      expect(niveles).toHaveLength(3);
+    });
+
+    it("clinica-8 · y una primera valoración, que es con la que se cita", async () => {
+      const primeras = await prisma.serviceScheduling.findMany({
+        where: { tenantId, primeraValoracion: true },
+        select: { product: { select: { sku: true } } },
+      });
+      expect(primeras.map((p) => p.product.sku)).toEqual(["POD-001"]);
     });
 
     it("las cirugías largas caben en la columna: 120 y 180 minutos", async () => {

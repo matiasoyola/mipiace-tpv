@@ -6,6 +6,7 @@ import { Prisma } from "@mipiacetpv/db";
 
 import { estadoDelContratoParaElPanel } from "../clinica/contrato.js";
 import { getPrisma } from "../context.js";
+import { CAJA_DISABLED_MESSAGE, cajaIsDisabled } from "../lib/caja-gate.js";
 import { decryptSecret, encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
@@ -225,8 +226,31 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       // SYNC_FAILED desde el TPV cuando no hay MANAGER. Se devuelve
       // una sola vez en este response — el front lo muestra en un
       // modal "Tu PIN de respaldo es 1234".
+      //
+      // ── contrato-lectura-completa (punto 6) · SIN CAJA NO HAY PIN ────
+      //
+      // Lo encontró el primer acceso real de una residencia el 24-10-2026:
+      // a la directora de Jardín de Gredos, nada más entrar, la primera
+      // pantalla del programa le dijo «te hemos asignado un PIN de respaldo
+      // de 4 dígitos… lo usarás desde el TPV», en una cuenta que no tiene
+      // TPV ni lo va a tener. Seis líneas sobre descuentos y cierres con
+      // incidencia, delante de quien va a registrar cuidados.
+      //
+      // El panel ya escondía la sección de «Mi cuenta» con `cajaEnabled`
+      // (H1) y `activate` ya no lo generaba: lo que quedaba suelto era el
+      // LOGIN, que es justo el camino por el que entra todo el mundo el
+      // primer día. Mismo gate que el resto de lo que es del TPV.
+      //
+      // `cajaIsDisabled` falla hacia ENCENDIDO si la lectura no se puede
+      // hacer, igual que en las 103 rutas que lo usan: con el gate caído,
+      // el comportamiento es el de master y no el de dejar sin PIN a una
+      // dueña que cobra.
       let ownerPinGenerated: string | null = null;
-      if (user.role === "OWNER" && !user.pinHash) {
+      if (
+        user.role === "OWNER" &&
+        !user.pinHash &&
+        !(await cajaIsDisabled(user.tenantId))
+      ) {
         ownerPinGenerated = generateOwnerPin();
         await prisma.user.update({
           where: { id: user.id },
@@ -973,11 +997,23 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   // B7 §9: el OWNER puede regenerar su PIN de respaldo desde "Mi
   // cuenta". Devuelve el nuevo PIN en plano una sola vez. El antiguo
   // queda invalidado.
+  //
+  // contrato-lectura-completa (punto 6) · y **también con el gate de la
+  // caja**. El panel ya escondía el botón sin caja desde H1, pero esconder
+  // no es gatear (la cabecera de `caja-gate.ts`, literal): sin esto, una
+  // cuenta sin TPV sigue teniendo una ruta que le genera un PIN de TPV.
   app.post(
     "/auth/me/regenerate-owner-pin",
     { preHandler: requireOwner },
-    async (request) => {
+    async (request, reply) => {
       const auth = request.auth!;
+      if (await cajaIsDisabled(auth.tenantId)) {
+        return reply.code(403).send({
+          error: "CAJA_DISABLED",
+          code: "CAJA_DISABLED",
+          message: CAJA_DISABLED_MESSAGE,
+        });
+      }
       const prisma = getPrisma();
       const pin = generateOwnerPin();
       await prisma.user.update({

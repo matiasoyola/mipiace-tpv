@@ -47,7 +47,7 @@
 // «la que tiene compilada» podría ofrecer un acto que el servidor va a
 // tirar.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
 import {
@@ -187,6 +187,14 @@ export interface VistaDeLaSesion {
     puede: boolean;
     faltan: Array<{ id: string; titulo: string }>;
     mensaje: string;
+  };
+  /** clinica-9 (4) · el día de la cita. Lo decide el servidor con la
+   *  misma función que rechaza el cierre: ver `sePuedeCerrarLaSesion`. */
+  dia?: {
+    delaCita: string;
+    esHoy: boolean;
+    sePuedeCerrar: boolean;
+    mensaje: string | null;
   };
   tratamientos: ServicioEnPantalla[];
   tiposSugeridos: TipoDeVisita[];
@@ -342,11 +350,56 @@ function SesionPodologiaDentro(props: {
   );
   /** La cola de preguntas del cierre. `null` = no se está cerrando. */
   const [cola, setCola] = useState<PendienteCreado[] | null>(null);
+  /** clinica-8 (fase B, 12) · la hoja de confirmación del cierre, con
+   *  los pendientes ya contestados dentro. `null` = no se está
+   *  preguntando nada. */
+  const [confirmar, setConfirmar] = useState<{
+    cerrados: Record<string, "MANO" | "PREGUNTA">;
+  } | null>(null);
 
   // ── Y el de la exploración, que SÍ parte de la última ─────────────
   const [exploracion, setExploracion] =
     useState<ExploracionEnPantalla | null>(null);
   const [avisoExploracion, setAvisoExploracion] = useState<string | null>(null);
+
+  /**
+   * clinica-9 (1) · LA SEMILLA SE SIEMBRA UNA VEZ, Y LA RECARGA NO LA
+   * VUELVE A SEMBRAR.
+   *
+   * Lo encontró la pasada en hierro del 24-10: una sesión con «General» y
+   * «Pie de riesgo» marcados, las cuatro comprobaciones del pie rellenas
+   * («riesgo muy bajo»), y la hoja de firmar diciendo «Tipo de visita:
+   * General». La exploración del pie de una paciente diabética no llegó a
+   * la historia.
+   *
+   * El camino era éste: para hacer una foto hay que firmar el
+   * consentimiento de fotos, firmarlo llama a `onFirmado`, `onFirmado`
+   * llama a `cargar()` — y `cargar()` volvía a SEMBRAR los tipos con los
+   * de los servicios de la cita. Lo que la sanitaria había marcado se
+   * perdía sin decir nada, y con el tipo se iba su bloque entero (los
+   * bloques se derivan de `tipos`).
+   *
+   * No es «un tipo sin servicio en su categoría se descarta al cerrar»,
+   * que era la sospecha: el servidor guarda un tipo marcado cobre o no
+   * (regla 11 de clinica-5, fijada en `normalizarSesionV2`). Lo que se
+   * perdía era anterior, y en la pantalla.
+   *
+   * Así que la semilla se siembra la PRIMERA vez y sólo esa. Una recarga
+   * refresca lo que es del servidor —la puerta, los consentimientos, la
+   * última exploración— y no toca nada de lo que hay a medio escribir. Es
+   * la misma regla que el resto del estado de esta pantalla ya cumplía
+   * (las marcas, el dolor y los consejos sobrevivían a la recarga; los
+   * tipos no).
+   *
+   * Guarda la CITA que sembró y no un `true` pelado: hoy esta pantalla se
+   * desmonta entre una cita y otra (la agenda la pinta dentro de un
+   * `{sesionDe && …}`), así que un booleano bastaría — pero el día que
+   * alguien la reutilice sin desmontarla, un `true` dejaría la segunda
+   * cita SIN sus tipos sugeridos, y eso es el mismo fallo con el signo
+   * cambiado. Con el id, la pregunta que se hace es la correcta: «¿ya
+   * sembré los de ESTA cita?».
+   */
+  const sembrado = useRef<string | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -361,13 +414,19 @@ function SesionPodologiaDentro(props: {
       // clinica-6 · salvo que se venga de la historia viva, que manda los
       // suyos: ahí la podóloga acaba de decir a qué viene hoy, y eso pesa
       // más que lo que diga el catálogo de los servicios de la cita.
-      setTipos(
-        (props.tiposIniciales && props.tiposIniciales.length > 0
-          ? props.tiposIniciales
-          : v.tiposSugeridos
-        ).filter((t) => TIPOS_DE_VISITA.includes(t)),
-      );
-      setExploracion(v.exploracion.departeDe);
+      if (sembrado.current !== props.appointmentId) {
+        sembrado.current = props.appointmentId;
+        setTipos(
+          (props.tiposIniciales && props.tiposIniciales.length > 0
+            ? props.tiposIniciales
+            : v.tiposSugeridos
+          ).filter((t) => TIPOS_DE_VISITA.includes(t)),
+        );
+        // Y la exploración por lo mismo: parte de la última, pero si la
+        // sanitaria lleva media exploración tecleada, una recarga no se
+        // la puede llevar.
+        setExploracion(v.exploracion.departeDe);
+      }
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "No se pudo abrir la sesión.",
@@ -667,7 +726,7 @@ function SesionPodologiaDentro(props: {
       setCola([...quePreguntar]);
       return;
     }
-    void cerrar(cerradosAMano);
+    pedirConfirmacion(cerradosAMano);
   }
 
   /**
@@ -690,7 +749,27 @@ function SesionPodologiaDentro(props: {
       return;
     }
     setCola(null);
-    void cerrar(siguiente);
+    pedirConfirmacion(siguiente);
+  }
+
+  /**
+   * clinica-8 (fase B, 12) · LA ÚLTIMA PUERTA ANTES DE FIRMAR.
+   *
+   * «Cerrar la sesión es irreversible y se hace con un toque, sin
+   * confirmar» (auditoría del 18-10, punto 13). Y es literalmente
+   * irreversible: lo que el POST escribe es una entrada firmada con el
+   * colegiado de la sanitaria, cifrada, y el bloque clinica-6 no tiene
+   * forma de editarla — una corrección se hace añadiendo, no borrando.
+   *
+   * Va DESPUÉS de las preguntas de los pendientes y no antes, porque lo
+   * que se enseña es el resumen de lo que SE VA A FIRMAR y esas
+   * respuestas también se firman. Un resumen anterior a las preguntas
+   * sería un resumen de otra cosa.
+   */
+  function pedirConfirmacion(
+    cerrados: Record<string, "MANO" | "PREGUNTA">,
+  ): void {
+    setConfirmar({ cerrados });
   }
 
   async function cerrar(
@@ -786,6 +865,22 @@ function SesionPodologiaDentro(props: {
           arreglarlo —«Firmar ahora», que lleva a su pestaña—, y no un
           error rojo: es la decisión 7 del prompt. El botón de cerrar sale
           desactivado abajo y el servidor se niega igual. */}
+      {/* clinica-9 (4) · LA CITA NO ES DE HOY.
+          La pasada del 24-10 abrió la cita del lunes 26 desde la agenda y
+          la pantalla la llamó «Cita de hoy»; al firmarla, la sesión quedó
+          con la fecha del sábado. Lo primero de la pantalla, encima de
+          todo, y con el día de la cita escrito: lo que hay que entender
+          es qué día es esta cita, no que algo ha fallado. */}
+      {vista.dia && !vista.dia.sePuedeCerrar && (
+        <div
+          data-test="cita-de-otro-dia"
+          className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-[14px] text-amber-900 leading-snug"
+        >
+          <b className="font-semibold">{vista.dia.mensaje}</b> Puedes mirar la
+          historia y la exploración; lo de hoy se anota en la cita de hoy.
+        </div>
+      )}
+
       {!vista.consentimientos.puede && (
         <FaltaConsentimiento
           mensaje={vista.consentimientos.mensaje}
@@ -802,6 +897,11 @@ function SesionPodologiaDentro(props: {
         onCambiar={(p) => {
           setPestana(p);
           setZonaAbierta(null);
+          // clinica-8 (fase B, 12) · y se suelta la hoja de confirmación
+          // si estaba abierta. La hoja se pinta al final del componente,
+          // fuera del `if` de la pestaña: sin esto, cambiar a «Fotos»
+          // con la hoja abierta la dejaba encima de la cámara.
+          setConfirmar(null);
         }}
       />
 
@@ -843,7 +943,17 @@ function SesionPodologiaDentro(props: {
 
       {pestana === "sesion" && (
         <>
-          <ChipsDeTipo tipos={tipos} onAlternar={alternarTipo} />
+          <ChipsDeTipo
+            tipos={tipos}
+            onAlternar={alternarTipo}
+            // clinica-8 (fase B, 13) · «con diabetes recomienda Pie de
+            // riesgo». La recomendación sale de la MISMA alerta que la
+            // franja roja de arriba (`alertaIds`, de la valoración
+            // validada o por validar) — no de un cálculo propio, que
+            // sería un segundo sitio desde el que la diabetes se puede
+            // decir distinta.
+            recomendarPieDeRiesgo={vista.cabecera.alertaIds.includes("diab")}
+          />
           <BandaDeHoyToca
             pendientes={pendientes}
             mapaVersion={vista.listas.mapa.version}
@@ -1222,7 +1332,11 @@ function SesionPodologiaDentro(props: {
               // clinica-4 · y sin los consentimientos que pide el
               // servicio tampoco se cierra (decisión 7). El motivo lo
               // dice la banda de arriba, no este botón.
-              !vista.consentimientos.puede
+              !vista.consentimientos.puede ||
+              // clinica-9 (4) · ni fuera del día de la cita. Igual que
+              // las dos de arriba: el botón se apaga y el motivo lo dice
+              // la banda, y quien GARANTIZA es `cerrarSesion`.
+              vista.dia?.sePuedeCerrar === false
             }
             className="h-touch-lg px-7 rounded-[18px] bg-mipiace-coral text-white font-medium text-[16px] disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.98] transition-transform motion-reduce:transform-none"
           >
@@ -1241,6 +1355,186 @@ function SesionPodologiaDentro(props: {
           onNo={() => contestar(false)}
         />
       )}
+
+      {confirmar && resumen && (
+        <HojaDeConfirmarCierre
+          tipos={tipos}
+          marcas={marcas}
+          mapa={vista.listas.mapa}
+          lesiones={lesiones}
+          dolor={dolor}
+          evolucion={evolucion}
+          proximaCita={proximaCita}
+          nota={nota}
+          resumen={resumen}
+          atiende={vista.cabecera.atiende?.nombre ?? null}
+          paciente={vista.cabecera.paciente.nombre}
+          ocupado={ocupado}
+          onVolver={() => setConfirmar(null)}
+          onFirmar={() => {
+            const cerrados = confirmar.cerrados;
+            setConfirmar(null);
+            void cerrar(cerrados);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * clinica-8 (fase B, 12) · EL RESUMEN DE LO QUE SE VA A FIRMAR.
+ *
+ * No es un «¿seguro?». Un «¿seguro?» con un botón al lado se contesta
+ * que sí sin leerlo, y lo que la auditoría pedía al pedir confirmación
+ * no era una fricción: era poder ver, antes de firmar, qué queda
+ * escrito. Así que lo que se enseña son los datos, en el mismo orden en
+ * que se han ido tocando, y el botón está debajo.
+ *
+ * Lo que entra es lo que el servidor va a escribir en el cuerpo: los
+ * tipos, las zonas con su lesión, el dolor, la evolución, lo que pasa a
+ * caja y la próxima cita propuesta. Lo que NO entra son los importes
+ * cuando quien mira no los ve (`resumen.lineas[].precio` ya viene en
+ * `null`, y `euros` no se llama sobre nada).
+ *
+ * Y dice las dos cosas que la hacen irreversible: queda firmada con el
+ * nombre de quien atiende, y no se edita.
+ */
+function HojaDeConfirmarCierre(props: {
+  tipos: readonly TipoDeVisita[];
+  marcas: Record<string, MarcaDeZona>;
+  mapa: MapaVersionado;
+  lesiones: readonly Lesion[];
+  dolor: number | null;
+  evolucion: Evolucion | null;
+  proximaCita: ProximaCita | null;
+  nota: string;
+  resumen: ReturnType<typeof resumenPorTipos>;
+  atiende: string | null;
+  paciente: string;
+  ocupado: boolean;
+  onVolver: () => void;
+  onFirmar: () => void;
+}) {
+  const zonas = Object.entries(props.marcas);
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-[rgba(17,24,39,.45)] flex items-end justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Revisa lo que se va a firmar"
+      data-test="confirmar-cierre"
+    >
+      <div className="bg-mipiace-stone w-full max-w-[760px] rounded-t-[28px] px-5 pt-5 pb-6 max-h-[88vh] overflow-y-auto">
+        <h3 className="m-0 text-[20px] font-bold">
+          Revisa lo que se va a firmar
+        </h3>
+        <div className="text-[14px] text-slate-500 mt-0.5">
+          {props.paciente}
+          {props.atiende ? ` · atiende ${props.atiende}` : ""}
+        </div>
+
+        <dl className="mt-4 grid gap-2.5 m-0">
+          <FilaDelResumen titulo="Tipo de visita">
+            {props.tipos.length > 0
+              ? props.tipos.map((t) => NOMBRE_DE_TIPO_DE_VISITA[t]).join(" + ")
+              : "sin marcar"}
+          </FilaDelResumen>
+          <FilaDelResumen titulo="Qué tiene hoy">
+            {zonas.length === 0
+              ? "nada marcado en el pie"
+              : zonas
+                  .map(([clave, m]) => {
+                    const lesion = props.lesiones.find(
+                      (l) => l.id === m.lesion,
+                    );
+                    // clinica-9 (11) · CON SU GRAVEDAD. La hoja es lo
+                    // último que se lee antes de firmar, y «callo» y
+                    // «callo severo» no son la misma anotación: la lista
+                    // de la tarjeta ya la decía y aquí se perdía, justo
+                    // en el sitio donde se repasa.
+                    const g = m.gravedad
+                      ? ` (${NOMBRE_DE_GRAVEDAD[m.gravedad].toLowerCase()})`
+                      : "";
+                    return `${nombreDeZonaConMapa(clave, props.mapa)}: ${
+                      lesion?.label ?? m.lesion
+                    }${g}`;
+                  })
+                  .join(" · ")}
+          </FilaDelResumen>
+          <FilaDelResumen titulo="Dolor hoy">
+            {props.dolor == null ? "sin marcar" : `${props.dolor} de 10`}
+          </FilaDelResumen>
+          {/* clinica-8 (fase B, 13) · en una primera visita esta
+              pregunta no se hace, así que tampoco se resume. */}
+          {props.evolucion && (
+            <FilaDelResumen titulo="Desde la última visita">
+              {NOMBRE_DE_EVOLUCION[props.evolucion]}
+            </FilaDelResumen>
+          )}
+          <FilaDelResumen titulo="Pasa a caja">
+            {props.resumen.lineas.length === 0
+              ? "nada"
+              : props.resumen.lineas
+                  .map(
+                    (l) =>
+                      `${l.nombre}${l.precio != null ? ` · ${euros(l.precio)}` : ""}`,
+                  )
+                  .join(" + ")}
+          </FilaDelResumen>
+          <FilaDelResumen titulo="Próxima cita">
+            {props.proximaCita
+              ? NOMBRE_DE_PROXIMA_CITA[props.proximaCita]
+              : "sin proponer"}
+          </FilaDelResumen>
+          {props.nota.trim() !== "" && (
+            <FilaDelResumen titulo="Nota">{props.nota.trim()}</FilaDelResumen>
+          )}
+        </dl>
+
+        <p className="text-[13px] text-slate-500 mt-4 leading-relaxed">
+          Al firmar, la sesión queda cerrada con tu nombre y tu número de
+          colegiado y <b className="font-semibold">ya no se edita</b>. Si
+          después hay que corregir algo, se añade en la siguiente visita.
+        </p>
+
+        <div className="flex gap-3 flex-wrap mt-4">
+          <button
+            type="button"
+            data-test="firmar-cierre"
+            disabled={props.ocupado}
+            onClick={props.onFirmar}
+            className="h-touch-lg px-7 rounded-[18px] bg-mipiace-coral text-white font-medium text-[16px] disabled:opacity-45"
+          >
+            {props.ocupado ? "Cerrando…" : "Cerrar y firmar"}
+          </button>
+          <button
+            type="button"
+            data-test="volver-a-la-sesion"
+            disabled={props.ocupado}
+            onClick={props.onVolver}
+            className="h-touch-lg px-6 rounded-[18px] bg-white border border-slate-200 text-mipiace-ink text-[16px] disabled:opacity-45"
+          >
+            Seguir en la sesión
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FilaDelResumen(props: {
+  titulo: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white rounded-2xl px-4 py-3 grid gap-0.5">
+      <dt className="text-[12.5px] font-medium text-slate-500 m-0">
+        {props.titulo}
+      </dt>
+      <dd className="text-[15px] text-mipiace-ink m-0 leading-snug">
+        {props.children}
+      </dd>
     </div>
   );
 }
@@ -1344,9 +1638,49 @@ function estadoDeLaSesion(
 function ChipsDeTipo(props: {
   tipos: readonly TipoDeVisita[];
   onAlternar: (t: TipoDeVisita) => void;
+  /** clinica-8 (fase B, 13) · el paciente tiene diabetes. */
+  recomendarPieDeRiesgo?: boolean;
 }) {
   const ultimo = props.tipos.length <= 1;
+  // Se recomienda SÓLO si no está ya marcado: una recomendación de algo
+  // que ya está hecho es ruido encima de la pantalla más llena del
+  // bloque.
+  const recomendar =
+    props.recomendarPieDeRiesgo === true && !props.tipos.includes("PIE_RIESGO");
   return (
+    <>
+    {/* clinica-8 (fase B, 13) · LA RECOMENDACIÓN, NO LA MARCA.
+        Un pie diabético se explora distinto —monofilamento, pulsos,
+        sensibilidad— y la tarjeta que hace esas tres preguntas es la de
+        «Pie de riesgo». Que no salga con un paciente diabético es lo que
+        la auditoría anotó (punto 14).
+        Lo que NO se hace es marcarlo solo. El tipo de visita queda
+        ESCRITO en el cuerpo de la sesión y congela la especialidad con
+        la que se hizo (S5): marcarlo por el paciente sería escribir en
+        su historia un tipo de visita que nadie eligió — exactamente lo
+        que `tiposSugeridos` se negó a hacer en clinica-5 («sugerir uno
+        por defecto sería escribir el tipo que no se eligió»).
+        Así que se dice, se dice POR QUÉ, y se marca de un toque. */}
+    {recomendar && (
+      <div
+        data-test="recomendar-pie-de-riesgo"
+        className="mb-2.5 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-3"
+      >
+        <span className="text-[14px] text-amber-900 leading-snug">
+          Tiene <b className="font-semibold">diabetes</b>. Se recomienda
+          marcar también «Pie de riesgo»: es la tarjeta que pregunta por
+          la sensibilidad y los pulsos.
+        </span>
+        <button
+          type="button"
+          data-test="marcar-pie-de-riesgo"
+          onClick={() => props.onAlternar("PIE_RIESGO")}
+          className="h-touch px-4 rounded-[15px] bg-amber-900 text-white font-medium text-[14px] shrink-0"
+        >
+          Marcar «Pie de riesgo»
+        </button>
+      </div>
+    )}
     <div
       data-test="chips-de-tipo"
       className="flex gap-2 flex-wrap items-center"
@@ -1382,6 +1716,7 @@ function ChipsDeTipo(props: {
         Puedes marcar varios: se anotan y se cobran todos
       </span>
     </div>
+    </>
   );
 }
 
@@ -1400,7 +1735,16 @@ function Cabecera(props: { vista: VistaDeLaSesion }) {
             {c.paciente.edad != null && (
               <Ficha titulo="Edad">{c.paciente.edad} años</Ficha>
             )}
-            <Ficha titulo="Cita de hoy">
+            {/* clinica-9 (4) · «Cita de hoy» sólo si lo es. Con la cita
+                de otro día la ficha dice QUÉ día, que es lo que la
+                pasada del 24-10 no tuvo delante. */}
+            <Ficha
+              titulo={
+                props.vista.dia && !props.vista.dia.esHoy
+                  ? `Cita del ${diaCorto(c.citaDeHoy.empieza)}`
+                  : "Cita de hoy"
+              }
+            >
               {hora(c.citaDeHoy.empieza)}
               {c.citaDeHoy.servicios.length > 0 &&
                 ` · ${c.citaDeHoy.servicios.join(" + ")}`}
@@ -1657,35 +2001,51 @@ function ComunDeLaSesion(props: {
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-3xl p-5">
-      <button
-        type="button"
-        onClick={props.onRepetir}
-        disabled={!props.hayAnterior}
-        className="w-full h-14 bg-mipiace-coral-soft text-mipiace-coral-dark font-semibold rounded-2xl text-[15px] mb-3.5 disabled:opacity-45 disabled:cursor-not-allowed"
-      >
-        ↺ Igual que la última vez
-      </button>
+      {/* clinica-9 (15) · EN LA PRIMERA VISITA NO SE PINTA.
+          Era un botón grande, coral y desactivado en lo alto de la
+          tarjeta: en la primera visita de una paciente —que es cuando
+          más llena está la pantalla— lo primero que se ve es una acción
+          apagada que no se puede entender («¿igual que qué última
+          vez?»). No hay anterior: no hay botón. */}
+      {props.hayAnterior && (
+        <button
+          type="button"
+          onClick={props.onRepetir}
+          className="w-full h-14 bg-mipiace-coral-soft text-mipiace-coral-dark font-semibold rounded-2xl text-[15px] mb-3.5"
+        >
+          ↺ Igual que la última vez
+        </button>
+      )}
 
       <Seccion titulo="Dolor hoy (0 = nada · 10 = el peor)">
-        {/* ONCE botones que ENVUELVEN, no una rejilla de once columnas:
-            con `grid-cols-11` cada tecla salía de 30 px a 1024. Con
-            `flex-wrap` y `min-w-touch`, ninguna baja del peldaño de la
-            casa y la fila se parte en dos cuando no caben.
-            El `max-w-[88px]` lo trajo el bucle visual de clinica-5: con
-            `flex-1` sin tope, a 1366 entraban diez en la fila y el «10»
-            se quedaba solo abajo ESTIRADO A TODO EL ANCHO — una tecla de
-            790 px al lado de diez de 74. Con el tope caben las once en
-            una fila a 1366 y, donde no quepan, la que sobra tiene el
-            tamaño de sus hermanas. A 390 no cambia nada (seis por fila de
-            55 px, por debajo del tope). */}
-        <div className="flex flex-wrap gap-1">
+        {/* clinica-8 (fase B, 13) · EL «10» YA NO CAE SOLO EN OTRA FILA.
+            Auditoría del 18-10, punto 16. Era `flex-wrap` con
+            `min-w-touch` (48 px) y `gap-1` (4): once teclas necesitan
+            11×48 + 10×4 = 568 px de ancho de contenido para caber en una
+            fila. Esta tarjeta vive en la columna derecha de la rejilla
+            de dos columnas, que a 1024 mide 424 px menos los 40 de
+            padding — 384 — y en una sola columna, en la tablet, el
+            contenido ronda los 536. En los dos casos entran diez y el
+            «10» se va solo a la fila de abajo: la tecla del dolor máximo
+            aislada, que es la que más se mira.
+            `flex-wrap` reparte según el ancho, así que dónde se parte la
+            fila depende del aparato. Una rejilla de SEIS columnas se
+            parte siempre en el mismo sitio —0-5 arriba, 6-10 abajo— y el
+            «10» está siempre en fila con el 6, el 7, el 8 y el 9. Cada
+            tecla mide (ancho − 5×4)/6: a 384 son 60 px, a 536 son 86; en
+            los dos casos por encima del peldaño de 48 de la casa.
+            La rejilla deja un hueco al final de la segunda fila. Se deja
+            a propósito: es el final de la escala y se lee como tal.
+            Rellenarlo estirando el «10» a doble ancho le daría un peso
+            que la escala no tiene. */}
+        <div className="grid grid-cols-6 gap-1" data-test="escala-de-dolor">
           {Array.from({ length: 11 }, (_, i) => (
             <button
               key={i}
               type="button"
               aria-pressed={props.dolor === i}
               onClick={() => props.onDolor(i)}
-              className={`h-touch min-w-touch max-w-[88px] flex-1 rounded-xl font-semibold text-[16px] ${
+              className={`h-touch min-w-touch rounded-xl font-semibold text-[16px] ${
                 props.dolor === i
                   ? "bg-mipiace-coral text-white"
                   : "bg-mipiace-stone text-mipiace-ink-soft"
@@ -1697,13 +2057,25 @@ function ComunDeLaSesion(props: {
         </div>
       </Seccion>
 
-      <Seccion titulo="Desde la última visita">
-        <Segmentos
-          opciones={EVOLUCIONES.map((e) => [e, NOMBRE_DE_EVOLUCION[e]])}
-          valor={props.evolucion}
-          onElegir={props.onEvolucion}
-        />
-      </Seccion>
+      {/* clinica-8 (fase B, 13) · EN LA PRIMERA VISITA NO SE PREGUNTA
+          «DESDE LA ÚLTIMA VISITA».
+          Auditoría del 18-10, punto 15. No es cosmética: las opciones
+          son «mejor / igual / peor», y en una primera visita las tres
+          son falsas. Si se contesta una, queda escrita en el cuerpo de
+          la sesión y mañana la historia viva pintará una evolución
+          respecto de una visita que no existe.
+          El criterio es el mismo que usa «↺ Igual que la última vez»,
+          que ya se desactiva sin anterior: `hayAnterior`. Un solo dato,
+          dos controles, y no pueden contradecirse. */}
+      {props.hayAnterior && (
+        <Seccion titulo="Desde la última visita">
+          <Segmentos
+            opciones={EVOLUCIONES.map((e) => [e, NOMBRE_DE_EVOLUCION[e]])}
+            valor={props.evolucion}
+            onElegir={props.onEvolucion}
+          />
+        </Seccion>
+      )}
 
       <Seccion titulo="Consejos para casa">
         <div className="flex flex-wrap gap-2">

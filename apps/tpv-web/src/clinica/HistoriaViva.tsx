@@ -84,6 +84,7 @@ import {
   type ComparadorDeZona,
   type FotoDeLaHistoria,
 } from "./Fotos.js";
+import { Consentimientos } from "./Consentimientos.js";
 import { Informe } from "./Informe.js";
 import { FranjaRoja, Mal, cuantoHace, diaCorto } from "./piezas.js";
 import { SesionCerrada, type SesionCerradaView } from "./SesionCerrada.js";
@@ -164,7 +165,26 @@ interface DetalleDeVisita {
 // historia LEE las fotos y los consentimientos (hacerlos y firmarlos es de
 // la visita, en la sesión); el informe sí se saca desde aquí, que es donde
 // se tiene delante la historia entera (decisión 15).
-type Pestania = "pie" | "visitas" | "fotos" | "docs" | "informe";
+// clinica-8 (fase B, 15) · «consentimientos» entra en la lista.
+//
+// La auditoría del 18-10 (punto 11) encontró que Historia → «Fotos»
+// dice que falta el consentimiento y **no da forma de firmarlo**: la
+// pieza `Fotos` ya trae el botón («Firmar consentimiento de fotos») y
+// se lo pinta a quien le pase `onFirmarConsentimiento`. Desde la sesión
+// se le pasaba; desde la historia, no — así que la paciente estaba
+// delante, el consentimiento se podía firmar, y el camino era salir,
+// buscar su cita y entrar por otro sitio.
+//
+// La pestaña NO sale en la barra: se llega a ella desde el botón de
+// Fotos y se vuelve con «Volver a las fotos». Ponerla arriba sería
+// invitar a firmar un consentimiento sin haber llegado a necesitarlo.
+type Pestania =
+  | "pie"
+  | "visitas"
+  | "fotos"
+  | "docs"
+  | "informe"
+  | "consentimientos";
 type Capa = "lesiones" | "sensibilidad";
 
 /** El color de cada estado, en las clases del mapa. Es la traducción de
@@ -282,6 +302,11 @@ function HistoriaVivaDentro(props: {
   const [error, setError] = useState<string | null>(null);
 
   const [pestania, setPestania] = useState<Pestania>("pie");
+  /** clinica-8 (fase B, 15) · con qué plantilla entra «Consentimientos»
+   *  cuando se llega desde el botón de Fotos. */
+  const [plantillaInicial, setPlantillaInicial] = useState<string | null>(
+    null,
+  );
   const [capa, setCapa] = useState<Capa>("lesiones");
   const [zonaElegida, setZonaElegida] = useState<string | null>(null);
   const [hoja, setHoja] = useState<null | { sugerido: TipoDeVisita | null }>(
@@ -705,7 +730,43 @@ function HistoriaVivaDentro(props: {
           clinica-6 tomó con «Hoy toca». */}
       {pestania === "fotos" && (
         <div className="mt-3.5" data-test="historia-fotos">
-          <Fotos clientId={props.clientId} mapa={vista.listas.mapa} />
+          <Fotos
+            clientId={props.clientId}
+            mapa={vista.listas.mapa}
+            // clinica-8 (fase B, 15) · sin cita no hay cámara, pero SÍ
+            // hay consentimiento que firmar: firmarlo no depende de una
+            // visita abierta (`appointmentId` es opcional en la ruta),
+            // depende de tener a la paciente delante.
+            onFirmarConsentimiento={(plantillaId) => {
+              setPlantillaInicial(plantillaId);
+              setPestania("consentimientos");
+            }}
+          />
+        </div>
+      )}
+
+      {pestania === "consentimientos" && (
+        <div className="mt-3.5" data-test="historia-consentimientos">
+          <button
+            type="button"
+            data-test="volver-a-fotos"
+            onClick={() => setPestania("fotos")}
+            className="mb-3 min-h-touch px-3.5 rounded-xl border border-slate-200 bg-white text-[14px] text-mipiace-ink"
+          >
+            ‹ Volver a las fotos
+          </button>
+          <Consentimientos
+            clientId={props.clientId}
+            paciente={vista.cabecera.paciente.nombre}
+            plantillaInicial={plantillaInicial}
+            // Al firmar se vuelve a las fotos: lo que se venía a hacer
+            // era ver las fotos, y la puerta ya está abierta. La
+            // historia se recarga para que «Documentos» traiga el PDF.
+            onFirmado={() => {
+              void cargar();
+              setPestania("fotos");
+            }}
+          />
         </div>
       )}
 

@@ -131,3 +131,69 @@ export function suggestedExitAt(startedAt: Date, exits: Date[]): Date | null {
   if (candidate.getTime() <= startedAt.getTime()) return null;
   return candidate;
 }
+
+// ── la salida olvidada ────────────────────────────────────────────────
+//
+// hotfix-fichaje-medianoche · EL ÚNICO SITIO QUE DECIDE si un tramo
+// abierto es una salida olvidada. Lo usan las tres superficies: el cierre
+// (`POST /entries/:id/close`), la pantalla del empleado (`GET /me`) y el
+// panel de la empresa (`GET /admin/fichaje/today`). Comparar `localDate`
+// para esto en cualquier otro sitio es el bug que este hotfix arregla.
+//
+// Lo decide la DURACIÓN, no el calendario. El criterio de antes —«el día
+// local de la entrada no es el de ahora»— dejaba sin poder fichar la
+// salida a quien entra a las 20:00 y sale a la 01:00: se le trataba como
+// un olvido de ayer y tenía que corregirlo con motivo. En una residencia
+// eso es cada turno de noche (22:00-08:00); en un bar, cada cierre pasada
+// la medianoche.
+//
+// Y se mide sobre los INSTANTES, como todo en este fichero: un tramo que
+// cruza el cambio de hora dura lo que dura, no lo que digan los relojes.
+
+/** Horas que puede llevar abierto un tramo antes de ser una salida
+ *  olvidada, cuando el tenant no dice otra cosa. Ver `Tenant.fichajeMaxOpenHours`. */
+export const MAX_OPEN_HOURS_DEFAULT = 16;
+
+/** El rango que acepta la columna. Mismo que el CHECK de la base
+ *  (`tenants_fichaje_max_open_hours_check`) y que el schema de la ruta del
+ *  super-admin: si los tres no coinciden, gana la base y nadie sabe por qué. */
+export const MAX_OPEN_HOURS_MIN = 8;
+export const MAX_OPEN_HOURS_MAX = 24;
+
+/** Un entero fuera de rango —o lo que llegue de una fila vieja— se trata
+ *  como el default. Nunca se recorta al borde: un 0 silenciosamente
+ *  convertido en 8 es peor que un 0 silenciosamente convertido en 16. */
+export function normalizeMaxOpenHours(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return MAX_OPEN_HOURS_DEFAULT;
+  }
+  if (value < MAX_OPEN_HOURS_MIN || value > MAX_OPEN_HOURS_MAX) {
+    return MAX_OPEN_HOURS_DEFAULT;
+  }
+  return value;
+}
+
+export interface OpenEntry {
+  startedAt: Date;
+  endedAt?: Date | null;
+}
+
+/**
+ * ¿Este tramo es una salida OLVIDADA?
+ *
+ * `true` sólo cuando sigue abierto Y lleva abierto **más** del máximo. El
+ * límite exacto NO es olvido: con 16 h de máximo, un tramo de 16 h clavadas
+ * todavía se cierra con un toque; a los 16 h y un minuto, se pregunta.
+ *
+ * Un tramo ya cerrado nunca es una salida olvidada, aunque durara treinta
+ * horas: eso es una jornada larga, y ya tiene su hora de salida.
+ */
+export function esSalidaOlvidada(
+  entry: OpenEntry,
+  now: Date,
+  maxHoras: number = MAX_OPEN_HOURS_DEFAULT,
+): boolean {
+  if (entry.endedAt != null) return false;
+  const abierto = now.getTime() - entry.startedAt.getTime();
+  return abierto > normalizeMaxOpenHours(maxHoras) * 3_600_000;
+}

@@ -40,6 +40,9 @@ export type ModoClientForm = "rapido" | "ficha";
 export function ClientForm({
   existing,
   modo = "ficha",
+  inicial,
+  buscarParecidos,
+  onElegirParecido,
   onSaved,
   onCancel,
 }: {
@@ -48,13 +51,53 @@ export function ClientForm({
   // Qué se pide. Por defecto la ficha entera: así ninguna pantalla que ya
   // usaba este formulario cambia por accidente.
   modo?: ModoClientForm;
+  /**
+   * clinica-8 (fase B, 17) · CON LO QUE YA SE HA TECLEADO.
+   *
+   * Auditoría del 18-10, punto 26: «Nuevo cliente: lo tecleado en el
+   * buscador no pasa al formulario». Se busca «Rosario Ja», no sale, se
+   * pulsa «Crear» y el formulario está vacío: hay que volver a
+   * escribirlo delante de la paciente.
+   *
+   * Es una semilla, no un valor controlado: en cuanto el formulario
+   * existe, manda lo que se teclee en él.
+   */
+  inicial?: { firstName?: string; lastName?: string; phone?: string };
+  /**
+   * clinica-9 (3) · ¿YA EXISTE ESTA PACIENTE? SE PREGUNTA ANTES DE CREAR.
+   *
+   * La pasada en hierro del 24-10 creó una segunda ficha de «Carmen
+   * Prueba Demo» porque el buscador no la encontró (captura 05 → 40). El
+   * buscador ya está arreglado; esto es la segunda red, la que atrapa el
+   * caso en el que se busca de otra manera —por el mote, con el apellido
+   * de casada— y aun así la ficha existe.
+   *
+   * Se pregunta con lo que hay TECLEADO EN ESTE FORMULARIO y no con lo
+   * que se buscó: entre una cosa y la otra la recepción ha podido
+   * escribir el apellido entero, y es ahí donde el parecido se ve.
+   *
+   * No bloquea: dos pacientes pueden llamarse igual. Enseña a quién se
+   * parece —con su teléfono, que es lo que la recepción confirma de viva
+   * voz— y deja elegir esa ficha de un toque.
+   */
+  buscarParecidos?: (datos: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    email: string;
+  }) => Array<{ id: string; nombre: string; telefono: string | null }>;
+  onElegirParecido?: (id: string) => void;
   onSaved: (c: ClientRow) => void;
   onCancel: () => void;
 }) {
   const esRapido = modo === "rapido";
-  const [firstName, setFirstName] = useState(existing?.firstName ?? "");
-  const [lastName, setLastName] = useState(existing?.lastName ?? "");
-  const [phone, setPhone] = useState(existing?.phone ?? "");
+  const [firstName, setFirstName] = useState(
+    existing?.firstName ?? inicial?.firstName ?? "",
+  );
+  const [lastName, setLastName] = useState(
+    existing?.lastName ?? inicial?.lastName ?? "",
+  );
+  const [phone, setPhone] = useState(existing?.phone ?? inicial?.phone ?? "");
   const [email, setEmail] = useState(existing?.email ?? "");
   // El campo se teclea en dd/mm/aaaa; a la API va en YYYY-MM-DD.
   const [birthdate, setBirthdate] = useState(
@@ -69,6 +112,18 @@ export function ClientForm({
   const [phoneWarning, setPhoneWarning] = useState<
     Array<{ id: string; name: string }>
   >([]);
+
+  // clinica-9 (3) · los parecidos, con lo que hay escrito ahora mismo.
+  // Sólo en el ALTA: en una edición, el parecido es la propia ficha.
+  const parecidos =
+    existing || !buscarParecidos
+      ? []
+      : buscarParecidos({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+        });
 
   // La fecha tecleada, ya juzgada. En el alta rápida no hay campo, así que
   // tampoco hay fecha que juzgar.
@@ -162,6 +217,32 @@ export function ClientForm({
           className="w-full px-3.5 py-2.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none resize-none"
         />
       </div>
+      {parecidos.length > 0 && (
+        <div
+          data-test="paciente-parecido"
+          className="text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2"
+        >
+          <div className="leading-snug">
+            Ya hay{" "}
+            {parecidos.length === 1 ? "una ficha parecida" : "fichas parecidas"}
+            . Si es la misma persona, no hagas otra: su historia está en la
+            suya.
+          </div>
+          {parecidos.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              data-test={`usar-parecido-${p.id}`}
+              onClick={() => onElegirParecido?.(p.id)}
+              disabled={!onElegirParecido}
+              className="w-full text-left min-h-touch px-3 py-2 rounded-xl bg-white border border-amber-300 text-[13.5px] font-medium text-mipiace-ink disabled:opacity-60"
+            >
+              ¿Es {p.nombre}
+              {p.telefono ? `, ${p.telefono}` : ""}?
+            </button>
+          ))}
+        </div>
+      )}
       {phoneWarning.length > 0 && (
         <div className="text-[12.5px] text-amber-800 bg-amber-50 rounded-xl p-3">
           Ya hay {phoneWarning.length === 1 ? "un cliente" : "clientes"} con

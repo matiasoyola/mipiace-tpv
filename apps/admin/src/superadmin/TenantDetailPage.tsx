@@ -42,6 +42,7 @@ import type {
   HoldedConnectionStatus,
   ImpersonateResponse,
   ImpersonationMode,
+  CheckRequirement,
   ReadinessCheck,
   TenantDetail,
   TenantModules,
@@ -1413,9 +1414,22 @@ function HealthPanel({
 // El gris atenuado es deliberado: un check que no aplica no es una
 // advertencia, es ruido de fondo que el implantador tiene que poder
 // saltarse de un vistazo.
-const NO_APLICA_MOTIVO: Record<string, string> = {
+// clinica-8 (fase B) · `Record<Exclude<CheckRequirement, "always">, …>` y
+// no `Record<string, …>`: así un requisito nuevo sin motivo NO compila.
+// La fase B estrenó `clinicaDePodologia` y con el tipo abierto la fila
+// habría salido «No aplica» a secas, sin que nada avisara.
+const NO_APLICA_MOTIVO: Record<Exclude<CheckRequirement, "always">, string> = {
   caja: "sin caja",
   holded: "sin Holded",
+  // clinica-8 · el catálogo clínico sólo se mide donde hay historia
+  // clínica. En los demás sale «No aplica · sin historia clínica», que es
+  // distinto de cumplir y de fallar.
+  clinica: "sin historia clínica",
+  // clinica-8 (fase B) · y además NO en una residencia, que tiene la
+  // historia clínica encendida por diseño y no cobra por tipo de visita.
+  // Sin esta entrada la fila sale «No aplica» a secas, que es peor que
+  // antes del bloque: el motivo es lo que evita el «¿y esto por qué?».
+  clinicaDePodologia: "no es una consulta clínica",
 };
 
 function CheckRow({ check }: { check: ReadinessCheck }) {
@@ -1426,7 +1440,10 @@ function CheckRow({ check }: { check: ReadinessCheck }) {
       ? { row: "bg-emerald-50", badge: "bg-emerald-600", label: "text-slate-900" }
       : { row: "bg-amber-50", badge: "bg-amber-500", label: "text-slate-900" };
   const estado = !aplica ? "No aplica" : check.ok ? "Cumple" : "Falta";
-  const motivo = !aplica ? NO_APLICA_MOTIVO[check.requires ?? ""] : undefined;
+  const motivo =
+    !aplica && check.requires && check.requires !== "always"
+      ? NO_APLICA_MOTIVO[check.requires]
+      : undefined;
   return (
     <li className={`flex items-start gap-2 p-2.5 rounded-lg ${tone.row}`}>
       <span

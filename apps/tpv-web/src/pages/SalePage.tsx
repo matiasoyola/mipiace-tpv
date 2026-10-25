@@ -15,6 +15,8 @@ import {
   Bookmark,
   Cake,
   Calculator,
+  Activity,
+  Bandage,
   Check,
   ChevronDown,
   CircleAlert,
@@ -24,7 +26,11 @@ import {
   CupSoda,
   Ellipsis,
   Fish,
+  Footprints,
   GlassWater,
+  HeartPulse,
+  Stethoscope,
+  Syringe,
   LayoutGrid,
   Loader2,
   FileText,
@@ -249,6 +255,13 @@ const RAIL_LEADING_BASE =
 // el NOMBRE; la resolución al componente vive aquí para que el módulo de
 // tonos siga siendo puro y testeable sin montar React.
 const CATEGORY_ICONS: Record<CategoryIconName, typeof Package> = {
+  // clinica-8 (fase B, 19) · los seis de clínica.
+  Footprints,
+  Stethoscope,
+  Syringe,
+  Activity,
+  Bandage,
+  HeartPulse,
   Coffee,
   Beer,
   Wine,
@@ -269,6 +282,36 @@ const CATEGORY_ICONS: Record<CategoryIconName, typeof Package> = {
   Sparkles,
   Package,
 };
+
+/**
+ * clinica-8 (fase B, 19) · con qué icono se queda una categoría que no
+ * casa con ninguna palabra.
+ *
+ * Sin esto el respaldo es el icono del TONO, y el tono se reparte por
+ * orden: la primera categoría de un catálogo clínico se lleva ámbar, y
+ * ámbar es la taza de café. En la rejilla de Rosario eso son tazas
+ * encima de «Quiropodia», «Cirugía» y «Biomecánica» (auditoría del
+ * 18-10, punto 28).
+ *
+ * Se decide con la caché del catálogo, igual que la entrada por la
+ * agenda de la fase A: vale sin red y está puesta antes de que la
+ * pantalla exista. En los catorce comercios sin historia clínica
+ * devuelve `undefined` y el respaldo es el de siempre.
+ */
+function iconoPorDefectoDelNegocio(): CategoryIconName | undefined {
+  // La MISMA clave que `catalog.ts` escribe, leída a mano y no por su
+  // `getCachedClinicaEnabled`: una docena de bancos de esta pantalla
+  // mockean `catalog.js` entero con `vi.mock`, y un import nuevo ahí
+  // revienta ficheros que no tienen nada que ver con el icono de una
+  // categoría. Lo que se comparte es un string, no una decisión.
+  try {
+    return localStorage.getItem("mipiacetpv-catalog-clinica-enabled") === "1"
+      ? "Stethoscope"
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // v1.2-Lite Lote 3.A: los tags se persisten en lowercase para evitar
 // duplicados visuales (Thalia tenía chips "Papelería"/"papeleria" como
@@ -370,6 +413,15 @@ export interface AppointmentContext {
   // Para el encabezado y el aviso de vuelta a la agenda.
   clientName: string | null;
   serviceLabel: string;
+  /**
+   * clinica-9 (15) · quién atiende la cita, para que «Atendido por» del
+   * cobro venga puesto en vez de en blanco.
+   *
+   * Es una SEMILLA: en cuanto el campo existe, manda lo que se teclee en
+   * él. La recepción lo puede cambiar —a veces atiende otra persona— y
+   * lo que no tiene que hacer es teclear lo que el sistema ya sabe.
+   */
+  atendidoPor?: string | null;
 }
 
 export interface SalePageProps {
@@ -3709,6 +3761,8 @@ export function SalePage(props: SalePageProps) {
                   ? etiquetaDeMostrador(mostrador.numero)
                   : undefined
           }
+          // clinica-9 (15) · ver `AppointmentContext.atendidoPor`.
+          attendedByInicial={appointmentContext?.atendidoPor ?? null}
           doneLabel={appointmentContext ? "Volver a la agenda" : undefined}
           onPaid={
             appointmentContext
@@ -4355,13 +4409,29 @@ function ProductTile({
         />
       )}
       <div className="relative flex flex-1 flex-col justify-between px-3 pb-2.5 pt-3 md:px-3.5">
-        {/* Dos líneas como máximo, con elipsis: `line-clamp-2` corta con
-            puntos suspensivos en vez de partir la palabra. */}
+        {/* clinica-8 (fase B, 19) · TRES líneas, no dos.
+            «Venta: nombres cortados en lo que distingue» (auditoría del
+            18-10, punto 28). El catálogo de Rosario tiene pares cuya
+            última palabra es lo único que los separa: «Revisión
+            biomecánica adultos» / «Revisión biomecánica niños»,
+            «Órtesis de silicona pequeña / mediana / grande». A 16,5 px
+            en una tarjeta de ~150 px entran dos palabras por línea, así
+            que con `line-clamp-2` los dos primeros se leían «Revisión
+            biomecánica…» — el mismo botón dos veces.
+            Con tres líneas caben enteros, y la tarjeta NO cambia de
+            alto: `PRODUCT_CARD_MIN_HEIGHT` son 104 px y el reparto que
+            v1.22 §3 dejó escrito usa 81 (dos líneas de 16,5 con
+            `leading-tight` = 41, el precio 18, los paddings 22). La
+            tercera línea son 20 px más: 101 de 104. La rejilla se
+            reparte igual.
+            Lo que no cambia es que haya un tope: un nombre de verdad
+            largo sigue cortando con puntos suspensivos. Lo que se
+            arregla es el caso que se da todos los días. */}
         <span
           className={
             imgSrc
-              ? "line-clamp-2 text-[16.5px] font-medium leading-tight text-white drop-shadow"
-              : "line-clamp-2 text-[16.5px] font-medium leading-tight text-mipiace-ink"
+              ? "line-clamp-3 text-[16.5px] font-medium leading-tight text-white drop-shadow"
+              : "line-clamp-3 text-[16.5px] font-medium leading-tight text-mipiace-ink"
           }
         >
           {product.name}
@@ -4830,7 +4900,7 @@ function SaleWorkspace({
     () =>
       displayTags.map((tag) => {
         const tone = toneAssignments[tag] ?? "stone";
-        const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
+        const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone, iconoPorDefectoDelNegocio())];
         const active = selectedTag === tag;
         return {
           tag,
@@ -5059,7 +5129,7 @@ function SaleWorkspace({
           {visibleTags.map((tag) => {
             const active = selectedTag === tag;
             const tone = toneAssignments[tag] ?? "stone";
-            const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
+            const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone, iconoPorDefectoDelNegocio())];
             return (
               <button
                 key={tag}
@@ -5401,7 +5471,7 @@ function SaleWorkspace({
         <CategoriesSheet
           categories={overflowTags.map<SheetCategory>((tag) => {
             const tone: CategoryTone = toneAssignments[tag] ?? "stone";
-            const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
+            const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone, iconoPorDefectoDelNegocio())];
             // Mismo criterio que en la barra: el tono pinta el icono
             // salvo cuando la categoría está seleccionada, que entonces
             // el chip entero habla en coral.

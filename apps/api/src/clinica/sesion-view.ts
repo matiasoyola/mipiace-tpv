@@ -140,6 +140,10 @@ export function serializarVista(
     // los de la ruta no lo veían porque miran la vista, no el serializado.
     // Lo que lo vio fue abrir la sesión en el producto.
     consentimientos: v.consentimientos,
+    // clinica-9 (4) · y el día de la cita, por la MISMA razón que la
+    // línea de arriba: este serializador es un allowlist campo a campo y
+    // lo que no esté aquí no existe para la pantalla.
+    dia: v.dia,
     tratamientos: v.tratamientos.map((t) =>
       serializarTratamiento(t, verImportes),
     ),

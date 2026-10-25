@@ -151,6 +151,14 @@ export function CheckoutOverlay(props: {
   // Etiqueta del botón de salir de "Ticket emitido". Sin ella, el copy
   // por vertical de siempre.
   doneLabel?: string;
+  /**
+   * clinica-9 (15) · con quién viene puesto «Atendido por».
+   *
+   * Lo manda quien abre el cobro de una cita, que es el único que sabe
+   * quién la atiende. En una venta suelta no viene y el campo arranca
+   * vacío, como siempre. Semilla, no valor controlado.
+   */
+  attendedByInicial?: string | null;
   // Etiqueta del item del outbox mientras el cobro está en tránsito
   // ("Mesa", "Cita"…). Sin ella se cae al copy por vertical de siempre.
   draftLabel?: string;
@@ -235,7 +243,11 @@ export function CheckoutOverlay(props: {
   >(null);
   // v1.3-Servicios-Pinta · Lote 3: profesional que atendió. Texto libre
   // opcional ≤60 chars, sólo visible en SERVICES.
-  const [attendedBy, setAttendedBy] = useState("");
+  // clinica-9 (15) · con el profesional de la cita YA PUESTO. Semilla,
+  // no valor controlado: la recepción lo puede cambiar.
+  const [attendedBy, setAttendedBy] = useState(
+    props.attendedByInicial?.trim().slice(0, 60) ?? "",
+  );
   // B6 §2: si el descuento del ticket supera el umbral del tenant, el
   // backend devuelve 403 MANAGER_AUTHORIZATION_REQUIRED. Abrimos el
   // modal del encargado, validamos PIN y reintentamos con el token.
