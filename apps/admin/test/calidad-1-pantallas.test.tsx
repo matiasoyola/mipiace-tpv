@@ -24,6 +24,10 @@ import { ProcesosPage } from "../src/pages/residencia/ProcesosPage.js";
 import { ProcesoPage } from "../src/pages/residencia/ProcesoPage.js";
 import { NoConformidadesPage } from "../src/pages/residencia/NoConformidadesPage.js";
 import { NoConformidadPage } from "../src/pages/residencia/NoConformidadPage.js";
+import {
+  entradasDeConfiguracion,
+  entradasDelMenu,
+} from "../src/AdminShell.js";
 import type {
   NcDeLaLista,
   RespuestaDeNc,
@@ -663,5 +667,54 @@ describe("el expediente de una no conformidad", () => {
     // vez.
     expect(boton("Guardar la causa")).toBeTruthy();
     expect(texto).toContain("se escribe");
+  });
+});
+
+// ══ 5 · DÓNDE VIVEN LAS DOS ENTRADAS (cuadro-de-control, decisión 2) ══
+
+describe("el mapa y las no conformidades viven en «Configuración»", () => {
+  const RESIDENCIA = {
+    residencia: true,
+    clinica: true,
+    agenda: true,
+    caja: false,
+    fichaje: false,
+    holded: false,
+    holdedEnabled: false,
+    holdedDejado: false,
+    bonos: false,
+    cocina: false,
+    businessType: "RESIDENCIA",
+  } as never;
+
+  it("**NO están en el menú**: son cinco entradas y «Configuración»", () => {
+    const menu = entradasDelMenu(RESIDENCIA, "OWNER", false).map((i) => i.to);
+    expect(menu).toEqual([
+      "/admin/residencia/panel",
+      "/admin/residencia/residentes",
+      "/admin/residencia/incidencias",
+      "/admin/residencia/relevos",
+      "/admin/residencia/obligaciones",
+      "/admin/residencia/configuracion",
+    ]);
+    expect(menu).not.toContain("/admin/residencia/procesos");
+    expect(menu).not.toContain("/admin/residencia/no-conformidades");
+  });
+
+  it("y SÍ están en «Configuración», pegadas a los indicadores", () => {
+    // El mapa se ajusta una vez al año y las NC se trabajan por semanas:
+    // no son lo del día a día. Lo urgente de calidad sale en el panel,
+    // y sale como una banda.
+    const config = entradasDeConfiguracion(RESIDENCIA, "OWNER", false).map(
+      (i) => i.to,
+    );
+    expect(config).toContain("/admin/residencia/procesos");
+    expect(config).toContain("/admin/residencia/no-conformidades");
+    // Pegadas al indicador del que hablan, y en ese orden: el mapa es de
+    // dónde cuelgan los indicadores, las NC es a dónde van los que se
+    // salen dos meses.
+    const i = config.indexOf("/admin/residencia/indicadores");
+    expect(config[i + 1]).toBe("/admin/residencia/procesos");
+    expect(config[i + 2]).toBe("/admin/residencia/no-conformidades");
   });
 });

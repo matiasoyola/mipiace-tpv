@@ -401,61 +401,73 @@ function CalidadQueNoEspera({ panel }: { panel: Panel }) {
       data-test="panel-calidad"
       className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900"
     >
-      {acciones.length > 0 && (
+      {/* **LO VENCIDO, EN UNA LÍNEA.** Una acción correctiva con el plazo
+          pasado y una revisión de riesgo fuera de fecha son la misma
+          clase de cosa —algo que tenía día y se pasó— así que comparten
+          renglón. Separarlas costaba 32 px medidos, y en un panel que
+          tiene que caber en 768 eso es media sección. */}
+      {acciones.length + revisiones.length > 0 && (
         <p>
-          <strong className="font-semibold">
-            {acciones.length === 1
-              ? "1 acción correctiva vencida"
-              : `${acciones.length} acciones correctivas vencidas`}
-          </strong>
-          : el plazo pasó y la no conformidad sigue abierta.{" "}
-          {acciones.slice(0, 3).map((a, i) => (
-            <span key={a.id}>
-              {i > 0 && ", "}
-              <Link
-                to={`/admin/residencia/no-conformidades/${a.ncId}`}
-                className="underline"
-              >
-                {a.referencia}
-              </Link>
-              {` · ${a.responsable}`}
-            </span>
-          ))}
-          {acciones.length > 3 && ` y ${acciones.length - 3} más`}
+          {acciones.length > 0 && (
+            <>
+              <strong className="font-semibold">
+                {acciones.length === 1
+                  ? "1 acción correctiva vencida"
+                  : `${acciones.length} acciones correctivas vencidas`}
+              </strong>{" "}
+              {acciones.slice(0, 2).map((a, i) => (
+                <span key={a.id}>
+                  {i > 0 && ", "}
+                  <Link
+                    to={`/admin/residencia/no-conformidades/${a.ncId}`}
+                    className="underline"
+                  >
+                    {a.referencia}
+                  </Link>
+                  {` · ${a.responsable}`}
+                </span>
+              ))}
+              {acciones.length > 2 && ` y ${acciones.length - 2} más`}
+            </>
+          )}
+          {acciones.length > 0 && revisiones.length > 0 && " · "}
+          {revisiones.length > 0 && (
+            <>
+              <strong className="font-semibold">
+                {revisiones.length === 1
+                  ? "1 revisión de riesgo vencida"
+                  : `${revisiones.length} revisiones de riesgo vencidas`}
+              </strong>{" "}
+              {revisiones.slice(0, 2).map((r, i) => (
+                <span key={r.id}>
+                  {i > 0 && ", "}
+                  <Link
+                    to={`/admin/residencia/procesos/${r.procesoId}`}
+                    className="underline"
+                  >
+                    {r.proceso}
+                  </Link>
+                </span>
+              ))}
+              {revisiones.length > 2 && ` y ${revisiones.length - 2} más`}
+            </>
+          )}
         </p>
       )}
-      {revisiones.length > 0 && (
-        <p className={acciones.length > 0 ? "mt-1.5" : undefined}>
-          <strong className="font-semibold">
-            {revisiones.length === 1
-              ? "1 revisión de riesgo vencida"
-              : `${revisiones.length} revisiones de riesgo vencidas`}
-          </strong>
-          :{" "}
-          {revisiones.slice(0, 3).map((r, i) => (
-            <span key={r.id}>
-              {i > 0 && ", "}
-              <Link
-                to={`/admin/residencia/procesos/${r.procesoId}`}
-                className="underline"
-              >
-                {r.proceso}
-              </Link>
-            </span>
-          ))}
-          {revisiones.length > 3 && ` y ${revisiones.length - 3} más`}
-        </p>
-      )}
+      {/* Y la propuesta en su renglón: no es algo vencido, es algo que
+          hay que DECIDIR, y el enlace lleva el origen ya relleno (D-74).
+          Sin la coletilla de «la decide una persona»: ocupaba el segundo
+          renglón —20 px medidos— y lo mismo se lee entero en la pantalla
+          de la no conformidad, que es donde se decide. */}
       {propuestas.length > 0 && (
-        <p className={acciones.length + revisiones.length > 0 ? "mt-1.5" : undefined}>
+        <p className={acciones.length + revisiones.length > 0 ? "mt-1" : undefined}>
           <strong className="font-semibold">
             {propuestas.length === 1
               ? "1 indicador lleva dos meses fuera de umbral"
               : `${propuestas.length} indicadores llevan dos meses fuera de umbral`}
           </strong>
-          : el sistema <strong>propone</strong> abrir una no conformidad con
-          el origen ya relleno —la decide una persona—.{" "}
-          {propuestas.slice(0, 3).map((p, i) => (
+          :{" "}
+          {propuestas.slice(0, 2).map((p, i) => (
             <span key={p.code}>
               {i > 0 && ", "}
               <Link
@@ -466,7 +478,7 @@ function CalidadQueNoEspera({ panel }: { panel: Panel }) {
               </Link>
             </span>
           ))}
-          {propuestas.length > 3 && ` y ${propuestas.length - 3} más`}
+          {propuestas.length > 2 && ` y ${propuestas.length - 2} más`}
         </p>
       )}
     </div>
@@ -1118,10 +1130,36 @@ function Hoy({
 
 // ══ EL MES, EN UNA FILA ═══════════════════════════════════════════════
 
+/**
+ * calidad-1 · **CUÁNTAS FICHAS DE INDICADOR CABEN EN LA FILA.**
+ *
+ * Seis, que es exactamente una fila de la rejilla de `lg:grid-cols-6`.
+ *
+ * Y es una regla de cuadro-de-control, no un capricho de este bloque:
+ * «lo que pasa de cuatro o cinco elementos se ve con “Ver…”, porque una
+ * sección que crece con el centro deja de caber». Cuando ese bloque midió
+ * el panel había SEIS indicadores y la fila era una; calidad-1 los subió
+ * a trece y la fila pasó a tres, **140 px más** — medidos en el bucle
+ * visual a 1366×768. El catálogo seguirá creciendo (quedan trece
+ * nombrados sin dato), así que la fila no puede depender de él.
+ */
+const FICHAS_EN_LA_FILA = 6;
+
 function ElMes({ panel }: { panel: Panel }) {
   const { indicadores } = panel;
   const conDato = indicadores.filter((i) => i.valor != null);
   const fuera = conDato.filter((i) => i.dentro === false);
+  // **Los que piden algo, primero.** Fuera de umbral, después los que
+  // están dentro y al final los que no tienen dato: en una fila de seis,
+  // lo que no se ve tiene que ser lo que no hace falta mirar. El
+  // recuento del encabezado sigue siendo sobre TODOS, así que la cifra
+  // no miente aunque la fila esté recortada.
+  const enLaFila = [
+    ...fuera,
+    ...conDato.filter((i) => i.dentro !== false),
+    ...indicadores.filter((i) => i.valor == null),
+  ].slice(0, FICHAS_EN_LA_FILA);
+  const deMas = indicadores.length - enLaFila.length;
   return (
     <section className="min-w-0 rounded-2xl border border-slate-200 bg-white px-5 py-2.5">
       <h3 className="mb-2 flex items-baseline justify-between gap-3 text-[16px] font-semibold tracking-tight text-mipiace-ink">
@@ -1143,11 +1181,11 @@ function ElMes({ panel }: { panel: Panel }) {
           to="/admin/residencia/indicadores"
           className="text-[12.5px] font-medium text-mipiace-coral-dark underline"
         >
-          Ver indicadores
+          {deMas > 0 ? `Ver los ${indicadores.length} indicadores` : "Ver indicadores"}
         </Link>
       </h3>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        {indicadores.map((i) => (
+        {enLaFila.map((i) => (
           <Link
             key={i.code}
             to="/admin/residencia/indicadores"
