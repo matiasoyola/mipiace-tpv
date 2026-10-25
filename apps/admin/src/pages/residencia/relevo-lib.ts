@@ -374,6 +374,11 @@ export interface Panel {
     }>;
   };
   indicadores: ValorDeIndicador[];
+  /** calidad-1 · las no conformidades sin cerrar, las acciones y las
+   *  revisiones de riesgo vencidas y las propuestas de abrir NC.
+   *  Opcional por lo mismo que `porArreglar`: un panel servido por una
+   *  API anterior a este bloque no lo trae. */
+  calidad?: import("./calidad-lib.js").CalidadDelPanel;
   mes: string;
   /** primer-acceso (punto 4) · el centro no tiene todavía ni un
    *  residente. Opcional porque el panel de una API anterior a este

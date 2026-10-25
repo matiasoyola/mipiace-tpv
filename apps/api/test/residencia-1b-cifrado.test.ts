@@ -62,6 +62,12 @@ import {
   sitioNotaDeFicha,
   sitioNotaTecnica,
   sitioResumenTardio,
+  sitioDescripcionDeNc,
+  sitioCausaDeNc,
+  sitioTextoDeAccionCorrectiva,
+  sitioCierreDeAccionCorrectiva,
+  sitioNotaDeEvidencia,
+  sitioNotaDeVerificacion,
   sitioNotaDeRegistro,
   sitioNssDeResidente,
   sitioRespuestaDeFamilia,
@@ -128,6 +134,17 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     // podría copiar al contenido de un parte y descifraría.
     ["contenido del parte", sitioContenidoDeRelevo, "handovers", "content"],
     ["resumen del añadido tardío", sitioResumenTardio, "handover_late_additions", "resumen"],
+    // calidad-1 (D-63, D-73) · el expediente de una no conformidad.
+    // **Seis columnas lógicas y no tres**, y por lo mismo de siempre:
+    // con el mismo nombre lógico, la causa de una NC se podría copiar a
+    // su descripción, o la nota de cierre de una acción al texto de la
+    // acción, y descifrarían.
+    ["descripción de la NC", sitioDescripcionDeNc, "non_conformities", "description"],
+    ["causa de la NC", sitioCausaDeNc, "non_conformities", "cause"],
+    ["texto de la acción correctiva", sitioTextoDeAccionCorrectiva, "corrective_actions", "what"],
+    ["cierre de la acción correctiva", sitioCierreDeAccionCorrectiva, "corrective_actions", "closing_note"],
+    ["nota de la evidencia", sitioNotaDeEvidencia, "corrective_action_evidences", "note"],
+    ["nota de la verificación", sitioNotaDeVerificacion, "effectiveness_verifications", "note"],
   ];
 
   it.each(SITIOS)("%s → tenant|%s|%s|fila", (_, sitioDe, tabla, columna) => {
@@ -136,7 +153,7 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     );
   });
 
-  it("son VEINTICUATRO, y no se añade una columna cifrada sin su sitio", () => {
+  it("son TREINTA, y no se añade una columna cifrada sin su sitio", () => {
     // El CHECK de formato (`~ '^c[0-9]+:…'`) es la marca de una columna
     // cifrada con una DEK: se cuentan los de TODAS las migraciones y se
     // comparan con los sitios de este inventario.

@@ -44,7 +44,8 @@ import {
 } from "@mipiacetpv/residencia-plan";
 
 import { ensureResidenciaEnabled } from "./gate.js";
-import { construirPanel, indicadoresDelMes } from "./panel.js";
+import { construirPanel, indicadoresDelMes, recogerDatosDelMes } from "./panel.js";
+import { registrosDeIndicador } from "./indicador-registros.js";
 import {
   construirParte,
   leerAnadidosTardios,
@@ -410,19 +411,47 @@ export async function registerResidenciaPanelRoutes(
       const ahora = new Date();
       const { mes } = request.query as { mes?: string };
       const elMes = mes ?? utcToWallDate(ahora).slice(0, 7);
-      const { INDICADORES_SIN_DATO } = await import("@mipiacetpv/residencia-plan");
-      const indicadores = await indicadoresDelMes(
-        getPrisma(),
-        auth.tenantId,
-        elMes,
-        ahora,
+      const { INDICADORES_SIN_DATO, calcularIndicadores } = await import(
+        "@mipiacetpv/residencia-plan"
       );
+      const prisma = getPrisma();
+      const [recogida, colgados, procesos] = await Promise.all([
+        recogerDatosDelMes(prisma, auth.tenantId, elMes, ahora),
+        // calidad-1 (D-72) · de qué proceso del CENTRO cuelga cada uno.
+        prisma.indicatorProcess.findMany({
+          where: { tenantId: auth.tenantId },
+          select: { code: true, processId: true },
+        }),
+        prisma.process.findMany({
+          where: { tenantId: auth.tenantId },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const nombreDeProceso = new Map(procesos.map((p) => [p.id, p.name]));
+      const procesoDe = new Map(colgados.map((c) => [c.code, c.processId]));
+      const indicadores = calcularIndicadores(recogida.datos, recogida.umbrales);
+
       return reply.code(200).send({
         mes: elMes,
-        indicadores,
+        indicadores: indicadores.map((i) => {
+          const processId = procesoDe.get(i.code) ?? null;
+          return {
+            ...i,
+            // `null` cuando el centro todavía no ha cargado el mapa: la
+            // pantalla lo dice y enseña el botón, en vez de pintar un
+            // hueco que parecería un proceso sin nombre.
+            proceso:
+              processId == null
+                ? null
+                : { id: processId, nombre: nombreDeProceso.get(processId) ?? "—" },
+          };
+        }),
         // **Los que NO se pintan, nombrados.** Un indicador que falta y no
         // se nombra es un indicador que alguien da por calculado.
         sinDato: INDICADORES_SIN_DATO,
+        // calidad-1 (R9) · la cumplimentación abierta por turno y zona,
+        // que es lo que la supervisora mira al cerrar el turno.
+        cumplimentacionPorTurnoYZona: recogida.cumplimentacionPorTurnoYZona,
       });
     },
   );
@@ -522,6 +551,70 @@ export async function registerResidenciaPanelRoutes(
         where: { tenantId: auth.tenantId, code },
       });
       return reply.code(200).send({ borrado: count > 0 });
+    },
+  );
+
+  // ════════════════════════════════════════════════════════════════
+  //  8 · calidad-1 (D-72) · ABRIR UN INDICADOR HASTA SUS REGISTROS
+  // ════════════════════════════════════════════════════════════════
+  //
+  // «Cada indicador enseña de qué registros sale y se puede abrir hasta
+  // la lista de esos registros» (07-calidad-iso §2). Es lo que convierte
+  // un número que hay que creerse en un número que se puede contrastar
+  // delante de un auditor.
+  //
+  // Pide el contrato de encargado: la lista lleva nombres de residentes.
+  app.get(
+    "/residencia/indicadores/:code/registros",
+    {
+      ...puerta,
+      schema: {
+        params: {
+          type: "object",
+          required: ["code"],
+          properties: { code: { type: "string", maxLength: 60 } },
+        },
+        querystring: {
+          type: "object",
+          properties: { mes: { type: "string", pattern: "^[0-9]{4}-[0-9]{2}$" } },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const negativa = await negativaDeDireccion(
+        auth.tenantId,
+        auth.userId,
+        auth.role === "OWNER",
+      );
+      if (negativa) return reply.code(403).send(negativa);
+      const contrato = await negativaClinica(auth.tenantId, "LEER");
+      if (contrato) {
+        return reply
+          .code(423)
+          .send({ error: contrato.code, code: contrato.code, message: contrato.message });
+      }
+
+      const ahora = new Date();
+      const { code } = request.params as { code: string };
+      const { mes } = request.query as { mes?: string };
+      const elMes = mes ?? utcToWallDate(ahora).slice(0, 7);
+      const tabla = await registrosDeIndicador(
+        getPrisma(),
+        auth.tenantId,
+        code,
+        elMes,
+        ahora,
+      );
+      if (tabla == null) {
+        // 404 y no una tabla vacía: una tabla vacía diría «no hubo
+        // ninguno», y lo que pasa es que ese indicador no existe.
+        return reply.code(404).send({
+          error: "INDICADOR_DESCONOCIDO",
+          message: `«${code}» no es uno de los indicadores que este sistema calcula.`,
+        });
+      }
+      return reply.code(200).send({ mes: elMes, code, ...tabla });
     },
   );
 }

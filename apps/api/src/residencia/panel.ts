@@ -53,8 +53,11 @@
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
   addDays,
+  bandaDeRiesgo,
   calcularIndicadores,
   datosQueFaltan,
+  mesAnterior,
+  proponeNc,
   pinPorRenovar,
   cuantoVaHecho,
   diaDelTurno,
@@ -69,6 +72,7 @@ import {
   type ControlParaNoHecho,
   type DatoQueFalta,
   type DatosDelMes,
+  type Ocurrencia,
   type RegistroHecho,
   type ResumenDeFichas,
   type ValorDeIndicador,
@@ -232,6 +236,53 @@ export interface PorArreglar {
 }
 
 /**
+ * calidad-1 (D-71, D-73, D-74) · **LO QUE CALIDAD TIENE ENCIMA DE LA
+ * MESA.**
+ *
+ * Cuatro cosas, y las cuatro son «alguien tiene que hacer algo hoy»:
+ *
+ *   · **las no conformidades sin cerrar**, por estado;
+ *   · **las acciones correctivas vencidas**, con su responsable — es lo
+ *     que convierte «se resolvió de palabra» en una fila con un nombre;
+ *   · **las revisiones de riesgo vencidas** (D-71);
+ *   · **las propuestas de abrir NC** (D-74): un indicador que lleva dos
+ *     meses completos fuera de umbral. Propone; la decide una persona.
+ */
+export interface CalidadDelPanel {
+  noConformidades: {
+    abiertas: number;
+    porEstado: Array<{ estado: string; cuantas: number }>;
+  };
+  accionesVencidas: Array<{
+    id: string;
+    ncId: string;
+    referencia: string;
+    responsable: string;
+    dueOn: string;
+  }>;
+  revisionesVencidas: Array<{
+    id: string;
+    procesoId: string;
+    proceso: string;
+    descripcion: string;
+    nivel: number;
+    banda: string;
+    reviewAt: string;
+  }>;
+  propuestas: Array<{
+    code: string;
+    nombre: string;
+    meses: [string, string];
+    mesDeReferencia: string;
+    procesoId: string | null;
+  }>;
+  /** `false` cuando el centro todavía no ha cargado el mapa: la pantalla
+   *  enseña el botón en vez de cuatro listas vacías, que parecerían
+   *  «todo en orden». */
+  mapaCargado: boolean;
+}
+
+/**
  * alta-minima · **LAS FICHAS DE RESIDENTE INCOMPLETAS.**
  *
  * La tarjeta del panel: «12 fichas de residentes incompletas · 31 datos
@@ -324,6 +375,8 @@ export interface Panel extends CabeceraDelPanel {
   /** alta-minima · las fichas de residente a las que les falta algo. */
   fichasIncompletas: FichasIncompletas;
   indicadores: ValorDeIndicador[];
+  /** calidad-1 · lo que calidad tiene encima de la mesa. */
+  calidad: CalidadDelPanel;
   /** El mes de los indicadores, «YYYY-MM». */
   mes: string;
   /**
@@ -358,6 +411,7 @@ export async function construirPanel(
     porArreglar,
     fichasIncompletas,
     indicadores,
+    calidad,
     cuantosResidentes,
     cabecera,
   ] = await Promise.all([
@@ -372,6 +426,7 @@ export async function construirPanel(
     // navegador, que es una ida más en serie.
     lasFichasIncompletas(prisma, tenantId),
     indicadoresDelMes(prisma, tenantId, mes, ahora),
+    calidadDelPanel(prisma, tenantId, ahora),
     // primer-acceso · dentro del mismo `Promise.all`: un `count` sobre un
     // índice de tenant no mueve el presupuesto de los 10 segundos, y
     // fuera habría sido una ida más a la base en serie.
@@ -401,6 +456,7 @@ export async function construirPanel(
     porArreglar,
     fichasIncompletas,
     indicadores,
+    calidad,
     mes,
     centroVacio: cuantosResidentes === 0,
     generadoEn: ahora.toISOString(),
@@ -1040,8 +1096,41 @@ async function turnoEnCurso(
 // ── 5 · LOS INDICADORES ──────────────────────────────────────────────
 
 /**
- * Los seis del mes. La FÓRMULA está en el paquete puro; aquí se recoge lo
- * que necesita.
+ * calidad-1 (R9) · **LA CUMPLIMENTACIÓN, ABIERTA POR TURNO Y POR ZONA.**
+ *
+ * El acta de la inspección del 08-10-2026 habla de «anotaciones vacías
+ * puntuales» y la respuesta del centro comprometió que **la supervisora
+ * compruebe al final de cada turno** que no quedan casillas sin anotar.
+ * Un porcentaje del mes no sirve para eso: lo que hace falta es ver qué
+ * turno y qué planta se quedan cortos, que es lo que esta tabla dice.
+ *
+ * Sale del MISMO cruce que el parte de relevo, así que el indicador y el
+ * parte **no se pueden contradecir para el mismo turno**.
+ */
+export interface CumplimentacionPorTurnoYZona {
+  shiftCode: string | null;
+  turno: string;
+  floorId: string | null;
+  zona: string;
+  tocan: number;
+  hechas: number;
+}
+
+/** Lo que `recogerDatosDelMes` devuelve: lo que la fórmula necesita más
+ *  lo que la pantalla abre. */
+export interface RecogidaDelMes {
+  datos: DatosDelMes;
+  umbrales: Array<{
+    code: string;
+    target: number;
+    comparison: "AT_LEAST" | "AT_MOST";
+  }>;
+  cumplimentacionPorTurnoYZona: CumplimentacionPorTurnoYZona[];
+}
+
+/**
+ * Los trece del mes. La FÓRMULA está en el paquete puro; aquí se recoge
+ * lo que necesita.
  *
  * El denominador de los porcentajes de cumplimiento sale del MISMO cruce
  * que el parte de relevo (`queToca` + `loQueNoSeHizo`): así «el 73,5 % de
@@ -1055,6 +1144,16 @@ export async function indicadoresDelMes(
   mes: string,
   ahora: Date,
 ): Promise<ValorDeIndicador[]> {
+  const { datos, umbrales } = await recogerDatosDelMes(prisma, tenantId, mes, ahora);
+  return calcularIndicadores(datos, umbrales);
+}
+
+export async function recogerDatosDelMes(
+  prisma: PrismaClient,
+  tenantId: string,
+  mes: string,
+  ahora: Date,
+): Promise<RecogidaDelMes> {
   const primero = `${mes}-01`;
   const siguiente = mesSiguiente(mes);
   const desde = wallTimeToUtc(primero, "00:00");
@@ -1073,15 +1172,31 @@ export async function indicadoresDelMes(
     actividades,
     sinDeposicion,
     averias,
+    caidas,
+    cerradasDeResidente,
+    quejas,
+    camas,
+    bajas,
+    activos,
+    plantas,
   ] = await Promise.all([
     prisma.indicatorTarget.findMany({
       where: { tenantId },
       select: { code: true, target: true, comparison: true },
     }),
+    // Las ocupaciones que tocan el mes, **sin `distinct`**: hacen falta
+    // enteras para dos cosas distintas. Los residentes del denominador
+    // son los `clientId` únicos; la ocupación media necesita los tramos
+    // con sus fechas para sumar camas-día. Dos consultas habrían sido
+    // dos barridos del mismo índice.
     prisma.bedAssignment.findMany({
       where: { tenantId, OR: [{ toAt: null }, { toAt: { gte: desde } }], fromAt: { lt: hasta } },
-      select: { clientId: true },
-      distinct: ["clientId"],
+      select: {
+        clientId: true,
+        fromAt: true,
+        toAt: true,
+        bed: { select: { room: { select: { floorId: true } } } },
+      },
     }),
     prisma.controlType.findMany({
       where: {
@@ -1160,6 +1275,50 @@ export async function indicadoresDelMes(
       },
       select: { openedAt: true, closedAt: true },
     }),
+
+    // ── calidad-1 (D-72) · lo que necesitan los siete nuevos ───────
+    prisma.incident.count({
+      where: {
+        tenantId,
+        incidentType: "CAIDA",
+        openedAt: { gte: desde, lt: hasta },
+      },
+    }),
+    // Las incidencias de RESIDENTE **cerradas** en el mes, con sus
+    // comunicaciones a familia. El denominador son las cerradas: una
+    // abierta todavía está a tiempo de comunicarse.
+    prisma.incident.findMany({
+      where: {
+        tenantId,
+        subject: "RESIDENT",
+        closedAt: { gte: desde, lt: hasta },
+      },
+      select: {
+        closedAt: true,
+        familyCommunications: { select: { kind: true, at: true } },
+      },
+    }),
+    prisma.incident.findMany({
+      where: {
+        tenantId,
+        subject: "COMPLAINT",
+        openedAt: { gte: desde, lt: hasta },
+      },
+      select: { openedAt: true, closedAt: true },
+    }),
+    // Las camas activas del centro. Se cuentan a día de hoy y no día a
+    // día: `beds` no tiene histórico —`active` es una columna, no una
+    // vigencia— y reconstruir «cuántas camas había el 3 de marzo» sería
+    // inventárselo. Queda dicho en el `deDonde` del indicador.
+    prisma.bed.count({ where: { tenantId, active: true } }),
+    prisma.employee.count({
+      where: { tenantId, deactivatedAt: { gte: desde, lt: hasta } },
+    }),
+    prisma.employee.count({ where: { tenantId, active: true } }),
+    prisma.floor.findMany({
+      where: { tenantId },
+      select: { id: true, name: true },
+    }),
   ]);
 
   const paraControles: ControlParaNoHecho[] = controles.map((c) => ({
@@ -1208,9 +1367,98 @@ export async function indicadoresDelMes(
     });
   }
 
+  // ── calidad-1 (R9) · LA CUMPLIMENTACIÓN, GLOBAL Y POR TURNO Y ZONA ─
+  //
+  // Lo global sale del mismo `cuantoVaHecho` que los dos porcentajes de
+  // arriba, pero **sobre todas las ocurrencias** y no sobre las de un
+  // control: es «¿se anotó lo que tocaba?», que es lo que la inspección
+  // mira.
+  //
+  // Y el desglose se saca del MISMO array de ocurrencias, agrupándolas:
+  // volver a llamar a `queToca` por turno y planta habría multiplicado
+  // por nueve el trabajo más caro de esta función para recalcular lo
+  // mismo.
+  const cumplimentacion = cuantoVaHecho({
+    ocurrencias,
+    registros: hechos,
+    controles: paraControles,
+  });
+
+  const zonaDe = new Map<string, string | null>();
+  for (const o of ocupaciones) {
+    // Si un residente cambió de planta dentro del mes, manda la última
+    // asignación que se lee: el desglose es una ayuda para mirar dónde
+    // están los huecos, no un reparto contable.
+    zonaDe.set(o.clientId, o.bed?.room.floorId ?? null);
+  }
+  const nombreDePlanta = new Map(plantas.map((p) => [p.id, p.name]));
+  const nombreDeTurno = new Map(turnos.map((t) => [t.code, t.name]));
+
+  const cubos = new Map<string, Ocurrencia[]>();
+  for (const o of ocurrencias) {
+    const clave = `${o.shiftCode ?? ""}|${zonaDe.get(o.clientId) ?? ""}`;
+    const lista = cubos.get(clave);
+    if (lista) lista.push(o);
+    else cubos.set(clave, [o]);
+  }
+  const cumplimentacionPorTurnoYZona: CumplimentacionPorTurnoYZona[] = [];
+  for (const [clave, suyas] of cubos) {
+    const [shiftCode, floorId] = clave.split("|");
+    const { tocan, hechas } = cuantoVaHecho({
+      ocurrencias: suyas,
+      registros: hechos,
+      controles: paraControles,
+    });
+    if (tocan === 0) continue;
+    cumplimentacionPorTurnoYZona.push({
+      shiftCode: shiftCode === "" ? null : shiftCode!,
+      turno:
+        shiftCode === "" || shiftCode == null
+          ? "Fuera de turno"
+          : (nombreDeTurno.get(shiftCode) ?? shiftCode),
+      floorId: floorId === "" ? null : floorId!,
+      zona:
+        floorId === "" || floorId == null
+          ? "Sin planta"
+          : (nombreDePlanta.get(floorId) ?? "Sin planta"),
+      tocan,
+      hechas,
+    });
+  }
+  // Lo peor primero: el turno y la planta con más huecos es lo que la
+  // supervisora tiene que mirar, y buscarlo en una tabla ordenada por
+  // nombre es trabajo que la pantalla puede ahorrarle.
+  cumplimentacionPorTurnoYZona.sort(
+    (a, b) => a.hechas / a.tocan - b.hechas / b.tocan,
+  );
+
+  // ── La ocupación media, sumada día a día ──────────────────────────
+  //
+  // Sobre los días que YA han pasado del mes, por lo mismo que el corte
+  // del cumplimiento: contar los días que faltan como camas vacías daría
+  // el día 3 una ocupación del 10 %.
+  const finDeCuenta = hasta.getTime() < ahora.getTime() ? hasta : ahora;
+  let camasDia = 0;
+  let ocupadasDia = 0;
+  for (
+    let dia = new Date(desde.getTime());
+    dia.getTime() < finDeCuenta.getTime();
+    dia = new Date(dia.getTime() + 86_400_000)
+  ) {
+    const finDelDia = new Date(dia.getTime() + 86_400_000);
+    camasDia += camas;
+    ocupadasDia += ocupaciones.filter(
+      (o) =>
+        o.fromAt.getTime() < finDelDia.getTime() &&
+        (o.toAt == null || o.toAt.getTime() >= dia.getTime()),
+    ).length;
+  }
+
+  const residentesUnicos = new Set(ocupaciones.map((o) => o.clientId));
+
   const datos: DatosDelMes = {
     mes,
-    residentes: ocupaciones.length,
+    residentes: residentesUnicos.size,
     cumplimiento,
     residentesConVisitaMedica: visitas.length,
     actividadesSocioculturales: actividades,
@@ -1221,9 +1469,32 @@ export async function indicadoresDelMes(
           ? null
           : (a.closedAt.getTime() - a.openedAt.getTime()) / 3_600_000,
     })),
+
+    cumplimentacion,
+    caidas,
+    incidenciasDeResidenteCerradas: cerradasDeResidente.length,
+    // **Comunicada ANTES de cerrar.** Un `COMUNICADO` fechado después
+    // del cierre no cuenta: lo que la observación 10 de AENOR pide es
+    // que la familia se entere, no que conste a posteriori.
+    conFamiliaComunicadaAntesDeCerrar: cerradasDeResidente.filter((i) =>
+      i.familyCommunications.some(
+        (c) =>
+          c.kind === "COMUNICADO" &&
+          i.closedAt != null &&
+          c.at.getTime() <= i.closedAt.getTime(),
+      ),
+    ).length,
+    quejas: quejas.map((q) => ({
+      dias:
+        q.closedAt == null
+          ? null
+          : (q.closedAt.getTime() - q.openedAt.getTime()) / 86_400_000,
+    })),
+    ocupacion: { camasDia, ocupadasDia },
+    personal: { bajas, plantilla: activos + bajas },
   };
 
-  return calcularIndicadores(datos, umbrales);
+  return { datos, umbrales, cumplimentacionPorTurnoYZona };
 }
 
 /** El primer día del mes siguiente, «YYYY-MM-DD». */
@@ -1231,4 +1502,157 @@ function mesSiguiente(mes: string): string {
   const anio = Number(mes.slice(0, 4));
   const m = Number(mes.slice(5, 7));
   return m === 12 ? `${anio + 1}-01-01` : `${anio}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
+// ── 6 · calidad-1 · LO QUE CALIDAD TIENE ENCIMA DE LA MESA ───────────
+
+/**
+ * Las cuatro listas de calidad del panel.
+ *
+ * ── LAS PROPUESTAS CUESTAN DOS MESES MÁS DE CÁLCULO, Y SE PAGAN ─────
+ *
+ * `proponeNc` necesita los dos meses completos anteriores, y cada mes
+ * es la consulta más cara de este fichero (el plan entero cruzado con
+ * los registros). Van en el mismo `Promise.all` que el resto, así que el
+ * panel no tarda tres veces más — tarda lo que el más lento— pero sí
+ * hace tres veces el trabajo en la base.
+ *
+ * La alternativa era una ruta aparte que la pantalla pidiera después, y
+ * se descartó por el presupuesto de lectura del bloque C §1: «cualquier
+ * dato en menos de 10 segundos y 3 toques». Una propuesta de abrir una
+ * no conformidad que hay que ir a buscar a otra pantalla es una
+ * propuesta que nadie ve.
+ *
+ * Y se calcula sobre meses CERRADOS, así que el resultado es el mismo
+ * todo el mes: es el candidato natural a una caché el día que 49 plazas
+ * sean 500. Hoy no la tiene, y está dicho.
+ */
+export async function calidadDelPanel(
+  prisma: PrismaClient,
+  tenantId: string,
+  ahora: Date,
+): Promise<CalidadDelPanel> {
+  const hoy = utcToWallDate(ahora);
+  const mesEnCurso = hoy.slice(0, 7);
+  const ultimo = mesAnterior(mesEnCurso);
+  const penultimo = mesAnterior(ultimo);
+
+  const [procesos, porEstado, accionesVencidas, riesgos, ncDeIndicador] =
+    await Promise.all([
+      prisma.process.count({ where: { tenantId } }),
+      prisma.nonConformity.groupBy({
+        by: ["state"],
+        where: { tenantId, state: { not: "CLOSED" } },
+        _count: { _all: true },
+      }),
+      prisma.correctiveAction.findMany({
+        where: { tenantId, closedAt: null, dueOn: { lt: hoy } },
+        orderBy: { dueOn: "asc" },
+        take: 20,
+        select: {
+          id: true,
+          dueOn: true,
+          nonConformity: { select: { id: true, reference: true } },
+          responsibleCareRole: { select: { name: true } },
+          responsibleUser: { select: { alias: true, email: true } },
+          responsibleLabel: true,
+        },
+      }),
+      prisma.riskOpportunity.findMany({
+        where: { tenantId, active: true, reviewAt: { lt: hoy } },
+        orderBy: { reviewAt: "asc" },
+        take: 20,
+        select: {
+          id: true,
+          description: true,
+          level: true,
+          reviewAt: true,
+          process: { select: { id: true, name: true } },
+        },
+      }),
+      // Las NC que ya salieron de un indicador: una propuesta aceptada
+      // deja de proponerse. Si alguien la rechaza vuelve a salir el mes
+      // que viene, y eso es correcto — el centro sigue fuera de umbral.
+      prisma.nonConformity.findMany({
+        where: { tenantId, origin: "INDICATOR" },
+        select: { sourceIndicatorCode: true, sourceIndicatorMonth: true },
+      }),
+    ]);
+
+  // El mapa sin cargar se contesta aquí y se acaba: sin procesos no hay
+  // nada que proponer ni que revisar, y calcular dos meses de
+  // indicadores para enseñar cuatro listas vacías es trabajo tirado.
+  if (procesos === 0) {
+    return {
+      noConformidades: { abiertas: 0, porEstado: [] },
+      accionesVencidas: [],
+      revisionesVencidas: [],
+      propuestas: [],
+      mapaCargado: false,
+    };
+  }
+
+  const [delUltimo, delPenultimo, colgados] = await Promise.all([
+    indicadoresDelMes(prisma, tenantId, ultimo, ahora),
+    indicadoresDelMes(prisma, tenantId, penultimo, ahora),
+    prisma.indicatorProcess.findMany({
+      where: { tenantId },
+      select: { code: true, processId: true },
+    }),
+  ]);
+
+  const yaAbierta = new Set(
+    ncDeIndicador.map((n) => `${n.sourceIndicatorCode}|${n.sourceIndicatorMonth}`),
+  );
+  const procesoDe = new Map(colgados.map((c) => [c.code, c.processId]));
+  const porCodigoPenultimo = new Map(delPenultimo.map((i) => [i.code, i]));
+
+  const propuestas: CalidadDelPanel["propuestas"] = [];
+  for (const i of delUltimo) {
+    const anterior = porCodigoPenultimo.get(i.code);
+    if (anterior == null) continue;
+    const p = proponeNc(
+      { code: i.code, nombre: i.nombre },
+      [
+        { mes: penultimo, dentro: anterior.dentro },
+        { mes: ultimo, dentro: i.dentro },
+      ],
+    );
+    if (p == null) continue;
+    if (yaAbierta.has(`${p.code}|${p.mesDeReferencia}`)) continue;
+    propuestas.push({ ...p, procesoId: procesoDe.get(p.code) ?? null });
+  }
+
+  return {
+    noConformidades: {
+      abiertas: porEstado.reduce((n, g) => n + g._count._all, 0),
+      porEstado: porEstado.map((g) => ({
+        estado: g.state,
+        cuantas: g._count._all,
+      })),
+    },
+    accionesVencidas: accionesVencidas.map((a) => ({
+      id: a.id,
+      ncId: a.nonConformity.id,
+      referencia: a.nonConformity.reference,
+      responsable:
+        a.responsibleCareRole?.name ??
+        a.responsibleUser?.alias ??
+        a.responsibleUser?.email.split("@")[0] ??
+        a.responsibleLabel ??
+        "—",
+      dueOn: a.dueOn,
+    })),
+    revisionesVencidas: riesgos.map((r) => ({
+      id: r.id,
+      procesoId: r.process.id,
+      proceso: r.process.name,
+      descripcion: r.description,
+      nivel: r.level,
+      banda: bandaDeRiesgo(r.level),
+      reviewAt: r.reviewAt,
+    })),
+    propuestas,
+    mapaCargado: true,
+  };
 }

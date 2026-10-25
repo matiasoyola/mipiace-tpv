@@ -49,6 +49,12 @@ import { RelevosPage } from "./pages/residencia/RelevosPage.js";
 import { RelevoPage } from "./pages/residencia/RelevoPage.js";
 import { ObligacionesPage } from "./pages/residencia/ObligacionesPage.js";
 import { IndicadoresPage } from "./pages/residencia/IndicadoresPage.js";
+// calidad-1 (D-70, D-73, D-76) · el mapa de procesos, la ficha de un
+// proceso y el registro de no conformidades con su ciclo.
+import { ProcesosPage } from "./pages/residencia/ProcesosPage.js";
+import { ProcesoPage } from "./pages/residencia/ProcesoPage.js";
+import { NoConformidadesPage } from "./pages/residencia/NoConformidadesPage.js";
+import { NoConformidadPage } from "./pages/residencia/NoConformidadPage.js";
 // cuadro-de-control · el índice de todo lo que se configura una vez.
 import { ConfiguracionPage } from "./pages/residencia/ConfiguracionPage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
@@ -300,6 +306,22 @@ export function App() {
             —y cada una lo sigue comprobando por su cuenta, en el cliente y
             en el servidor. */}
         <Route path="/admin/residencia/configuracion" element={<ResidenciaGate title="Configuración"><ConfiguracionPage /></ResidenciaGate>} />
+        {/* calidad-1 (D-70) · el mapa de procesos y lo que cuelga de él.
+            Mismo gate que el resto: la puerta de verdad es la del
+            servidor, que contesta 403 CALIDAD_ES_DE_DIRECCION a un
+            encargado sin rol directivo ni rol de calidad. La ficha de un
+            proceso va debajo del mapa porque se llega desde él.
+
+            Las dos entradas viven en «Configuración» y no en el menú
+            (cuadro-de-control, decisión 2): el mapa se ajusta una vez al
+            año y las no conformidades se trabajan por semanas, no es lo
+            del día. La RUTA no cambia, que es la promesa de ese bloque. */}
+        <Route path="/admin/residencia/procesos" element={<ResidenciaGate title="Mapa de procesos"><ProcesosPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/procesos/:id" element={<ResidenciaGate title="Proceso"><ProcesoPage /></ResidenciaGate>} />
+        {/* calidad-1 (D-73) · el registro de no conformidades y el
+            expediente de una. */}
+        <Route path="/admin/residencia/no-conformidades" element={<ResidenciaGate title="No conformidades"><NoConformidadesPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/no-conformidades/:id" element={<ResidenciaGate title="No conformidad"><NoConformidadPage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

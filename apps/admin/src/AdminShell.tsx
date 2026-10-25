@@ -18,6 +18,8 @@ import {
   FileText,
   FileWarning,
   Gauge,
+  Network,
+  ClipboardX,
   Gift,
   KeyRound,
   LayoutDashboard,
@@ -429,6 +431,35 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Gauge,
     capability: "residencia",
   },
+  // calidad-1 (D-70, D-73) · el mapa y las no conformidades.
+  //
+  // **No están en el menú de una residencia: viven en «Configuración»**
+  // (cuadro-de-control, decisión 2). Y no hace falta marcarlas: ese
+  // bloque descartó a propósito una bandera `enConfiguracion` porque la
+  // primera entrada a la que se le olvidara se quedaba sin forma de
+  // llegar. Lo que enseña «Configuración» es **todo lo que pasa el
+  // filtro y no es una de las cinco del día a día**, así que estas dos
+  // caen ahí solas por estar aquí y no en `MENU_DE_RESIDENCIA`.
+  //
+  // Que es además lo correcto: el mapa se ajusta una vez al año y las no
+  // conformidades se trabajan por semanas. Lo urgente de calidad —una
+  // acción vencida, una revisión pasada de fecha, una propuesta— sí sale
+  // en el panel, y sale como una banda (`CalidadQueNoEspera`).
+  //
+  // El mapa va antes que las NC porque una NC cuelga de un proceso: sin
+  // mapa, la pantalla de no conformidades no deja hacer nada.
+  {
+    to: "/admin/residencia/procesos",
+    label: "Procesos",
+    icon: Network,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/no-conformidades",
+    label: "No conformidades",
+    icon: ClipboardX,
+    capability: "residencia",
+  },
   // B-reservas-8 · los bonos de sesiones: los ajustes del centro, por qué
   // número empieza su numeración, qué productos son bonos y el alta de los
   // que venían en papel.
@@ -573,6 +604,10 @@ const ORDEN_EN_CONFIGURACION = [
   "/admin/residencia/guardia",
   "/admin/staff",
   "/admin/residencia/indicadores",
+  // calidad-1 · pegadas a los indicadores: el mapa es de dónde cuelgan y
+  // las NC es a dónde van los que se salen del umbral dos meses.
+  "/admin/residencia/procesos",
+  "/admin/residencia/no-conformidades",
   "/admin/contrato-tratamiento",
   "/admin/account",
   "/admin/security",

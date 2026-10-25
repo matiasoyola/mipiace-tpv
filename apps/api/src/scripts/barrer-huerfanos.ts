@@ -104,8 +104,16 @@ export interface Barrido {
  */
 export async function referenciados(): Promise<Map<ClaseDeFichero, Set<string>>> {
   const prisma = getPrisma();
-  const [fotos, consentimientos, informes, residentes, voces, evidencias] =
-    await Promise.all([
+  const [
+    fotos,
+    consentimientos,
+    informes,
+    residentes,
+    voces,
+    evidencias,
+    informesDeNc,
+    evidenciasDeAccion,
+  ] = await Promise.all([
       prisma.clinicalPhoto.findMany({ select: { fileName: true } }),
       prisma.clientConsent.findMany({
         where: { pdfFileName: { not: null } },
@@ -127,6 +135,21 @@ export async function referenciados(): Promise<Map<ClaseDeFichero, Set<string>>>
         where: { evidenceFileName: { not: null } },
         select: { evidenceFileName: true },
       }),
+      // calidad-1 · **la clase `EVIDENCIA` la comparten AHORA TRES
+      // tablas**, y por eso estas dos están aquí: el informe adjunto de
+      // una no conformidad y las evidencias de sus acciones correctivas
+      // van al mismo volumen que el certificado de una obligación. Sin
+      // contarlas, el barrido las vería huérfanas y borraría los
+      // adjuntos del PAC — que es la evidencia que una certificadora
+      // pide ver.
+      prisma.nonConformity.findMany({
+        where: { reportFileName: { not: null } },
+        select: { reportFileName: true },
+      }),
+      prisma.correctiveActionEvidence.findMany({
+        where: { fileName: { not: null } },
+        select: { fileName: true },
+      }),
     ]);
 
   const de = (xs: Array<Record<string, string | null>>, campo: string): Set<string> =>
@@ -140,7 +163,15 @@ export async function referenciados(): Promise<Map<ClaseDeFichero, Set<string>>>
     ["INFORME", de(informes, "pdfFileName")],
     ["RESIDENTE", de(residentes, "photoFileName")],
     ["VOZ", de(voces, "voiceFileName")],
-    ["EVIDENCIA", de(evidencias, "evidenceFileName")],
+    // Las tres de la clase `EVIDENCIA`, en un solo conjunto.
+    [
+      "EVIDENCIA",
+      new Set([
+        ...de(evidencias, "evidenceFileName"),
+        ...de(informesDeNc, "reportFileName"),
+        ...de(evidenciasDeAccion, "fileName"),
+      ]),
+    ],
   ]);
 }
 

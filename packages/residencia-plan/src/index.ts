@@ -26,7 +26,11 @@
 //   · `obligaciones.ts` — residencia-5: cuándo toca una obligación de
 //     dirección, con el fin de mes y el 29 de febrero dentro.
 //   · `indicadores.ts` — residencia-5: la FÓRMULA de cada indicador de
-//     AENOR (el umbral es del centro, rama de controles §10).
+//     AENOR (el umbral es del centro, rama de controles §10). calidad-1
+//     le añade siete más y el proceso de referencia de cada uno.
+//   · `calidad.ts`    — calidad-1: las bandas de un riesgo, el ciclo de
+//     una no conformidad y cuándo un indicador fuera de umbral propone
+//     abrir una (D-71, D-73, D-74).
 //   · `pin-por-alcance.ts` — residencia-6 (D-68): cuántas cifras tiene
 //     que tener un PIN de cuidado según el alcance de sus roles, y
 //     cuándo el que tiene puesto se quedó corto. La ejecutan la puerta
@@ -125,6 +129,7 @@ export {
 export {
   INDICADORES,
   INDICADORES_SIN_DATO,
+  PLAZO_DE_QUEJA_DIAS,
   calcularIndicadores,
   type ComparacionDeIndicador,
   type DatosDelMes,
@@ -132,6 +137,33 @@ export {
   type UnidadDeIndicador,
   type ValorDeIndicador,
 } from "./indicadores.js";
+
+// calidad-1 (D-71, D-73, D-74) · las bandas de un riesgo, el ciclo de la
+// no conformidad y la propuesta de abrir NC. Aquí por lo mismo que
+// `gravedadDe`: las ejecutan el servidor y la pantalla, y si no dieran lo
+// mismo el botón estaría encendido y la ruta contestaría 409.
+export {
+  BANDA_EN_PALABRAS,
+  CLASE_EN_PALABRAS,
+  ESTADO_EN_PALABRAS,
+  TRANSICIONES,
+  accionVencida,
+  bandaDeRiesgo,
+  estadoTrasVerificar,
+  exigeCausa,
+  loQueFaltaPara,
+  mesAnterior,
+  nivelDeRiesgo,
+  proponeNc,
+  revisionVencida,
+  type BandaDeRiesgo,
+  type ClaseDeNc,
+  type EstadoDeNc,
+  type MesDeIndicador,
+  type NcParaElCiclo,
+  type PropuestaDeNc,
+  type ResultadoDeVerificacion,
+} from "./calidad.js";
 
 export {
   alcanceDe,

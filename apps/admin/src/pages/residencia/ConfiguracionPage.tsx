@@ -58,6 +58,11 @@ const QUE_HAY_DENTRO: Record<string, string> = {
   "/admin/staff": "El personal, sus roles de cuidado y sus PIN.",
   "/admin/residencia/indicadores":
     "Los indicadores del mes y el objetivo de cada uno.",
+  // calidad-1 · el mapa y el registro de no conformidades.
+  "/admin/residencia/procesos":
+    "El mapa de procesos del centro, sus riesgos y sus objetivos de calidad.",
+  "/admin/residencia/no-conformidades":
+    "Los hallazgos de auditorías e inspecciones, sus acciones y el PAC.",
   "/admin/contrato-tratamiento":
     "El contrato de encargado del tratamiento. Lo acepta la dirección.",
   "/admin/account": "Tu nombre, tu correo y tu contraseña.",
