@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingreso y documentos · residencia (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.383.0/dist/umd/lucide.min.js"></script>
+<style>
+  :root{
+    --coral:#E97058; --coral-dark:#C75A45; --coral-soft:#FDEAE3;
+    --ink:#1F2937; --ink-soft:#374151; --stone:#F8F6F3;
+    --line:#E2E8F0; --muted:#64748B; --faint:#94A3B8;
+    --amber-bg:#FFFBEB; --amber-line:#FCD34D; --amber-tx:#B45309;
+    --red-bg:#FEF2F2; --red-line:#FCA5A5; --red-tx:#B91C1C;
+    --green-bg:#ECFDF5; --green-tx:#047857; --blue-bg:#EFF6FF; --blue-tx:#1D4ED8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'DM Sans',-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;background:var(--stone);color:var(--ink);font-size:14px}
+  a{color:inherit;text-decoration:none} button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  .num{font-variant-numeric:tabular-nums}
+  .app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+
+  /* barra del mockup (no es producto) */
+  .mk{position:sticky;top:0;z-index:20;display:flex;gap:8px;align-items:center;padding:8px 16px;background:#1F2937;color:#fff;font-size:12.5px}
+  .mk button{padding:5px 12px;border-radius:9px;background:#374151;color:#fff}
+  .mk button.on{background:var(--coral)}
+  .mk span{opacity:.7;margin-left:auto}
+
+  aside{background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:20px 14px}
+  .centro{padding:4px 10px 22px}.centro b{display:block;font-weight:600;font-size:15.5px}.centro span{font-size:12px;color:var(--muted)}
+  nav a{display:flex;align-items:center;gap:12px;height:46px;padding:0 12px;border-radius:14px;color:#475569;font-weight:500;margin-bottom:2px}
+  nav a svg{width:19px;height:19px;stroke-width:2.25;color:#94A3B8}
+  nav a.on{background:var(--coral-soft);color:var(--coral-dark)} nav a.on svg{color:var(--coral)}
+  nav .badge{margin-left:auto;font-size:11.5px;font-weight:500;border-radius:9px;padding:2px 8px;background:var(--stone)}
+  nav .badge.r{background:var(--red-bg);color:var(--red-tx)} nav .badge.a{background:var(--amber-bg);color:var(--amber-tx)}
+  .spacer{flex:1}.conf{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+
+  main{padding:26px 32px 40px;max-width:1240px;width:100%}
+  .vista{display:none}.vista.on{display:block}
+
+  /* ── LISTA ───────────────────────────── */
+  .cab{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+  .cab h1{font-size:23px;font-weight:600;letter-spacing:-.015em}
+  .cab h1 em{font-style:normal;font-weight:400;color:var(--faint);margin-left:6px}
+  .cab p{color:var(--muted);margin-top:3px}
+  .acc{display:flex;gap:8px}
+  .btn{display:inline-flex;align-items:center;gap:7px;height:42px;padding:0 16px;border-radius:13px;font-weight:500;font-size:13.5px;border:1px solid var(--line);background:#fff}
+  .btn svg{width:16px;height:16px}
+  .btn.p{background:var(--coral);border-color:var(--coral);color:#fff}
+
+  .buscar{position:relative;margin-bottom:12px}
+  .buscar svg{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:19px;height:19px;color:var(--faint)}
+  .buscar input{width:100%;height:52px;border-radius:16px;border:1px solid var(--line);background:#fff;padding:0 16px 0 46px;font:inherit;font-size:15.5px;color:var(--ink);outline:none}
+  .buscar input:focus{border-color:var(--coral);box-shadow:0 0 0 3px var(--coral-soft)}
+  .buscar kbd{position:absolute;right:14px;top:50%;transform:translateY(-50%);font:inherit;font-size:11.5px;color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .chip{height:36px;padding:0 13px;border-radius:11px;border:1px solid var(--line);background:#fff;font-size:13px;font-weight:500;color:#475569;display:inline-flex;align-items:center;gap:6px}
+  .chip b{font-weight:500;color:var(--faint)}
+  .chip.on{background:var(--ink);border-color:var(--ink);color:#fff}.chip.on b{color:#CBD5E1}
+  .chip.am:not(.on){border-color:var(--amber-line);background:var(--amber-bg);color:var(--amber-tx)}
+  .aviso-busq{font-size:12.5px;color:var(--muted);margin:8px 2px 10px;min-height:18px}
+
+  .lista{background:#fff;border:1px solid var(--line);border-radius:22px;overflow:hidden}
+  .res{display:flex;align-items:center;gap:14px;padding:11px 18px;border-top:1px solid #F1F5F9;cursor:pointer}
+  .res:first-child{border-top:0}
+  .res:hover{background:#FBFAF8}
+  .res .q{flex:1;min-width:0}
+  .res .q b{display:block;font-weight:500;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .res .q span{font-size:12.5px;color:var(--muted)}
+  .res .ir{width:18px;height:18px;color:#CBD5E1;flex:none}
+  .tag{font-size:12px;font-weight:500;border-radius:8px;padding:3px 9px;white-space:nowrap}
+  .tag.a{background:var(--amber-bg);color:var(--amber-tx)} .tag.r{background:var(--red-bg);color:var(--red-tx)}
+  .tag.b{background:var(--blue-bg);color:var(--blue-tx)} .tag.g{background:var(--green-bg);color:var(--green-tx)}
+  .tag.s{background:#F1F5F9;color:#475569}
+  .vacio{padding:26px;color:var(--muted);text-align:center}
+
+  /* avatar: foto o iniciales en el MISMO hueco */
+  .av{flex:none;width:46px;height:46px;border-radius:15px;display:grid;place-items:center;font-weight:600;font-size:14px;color:#fff;position:relative;overflow:hidden}
+  .av.foto{background:linear-gradient(160deg,#d6c3b4,#9c8474)}
+  .av.foto::after{content:"";position:absolute;left:50%;bottom:-12%;width:70%;height:62%;transform:translateX(-50%);background:#f3e9e1;border-radius:50% 50% 40% 40%;opacity:.9}
+  .av.foto::before{content:"";position:absolute;left:50%;top:18%;width:38%;height:38%;transform:translateX(-50%);background:#f3e9e1;border-radius:50%;opacity:.95;z-index:1}
+  .av.ini{background:#E2E8F0;color:#475569}
+  .av.sin{background:#fff;border:1.5px dashed #CBD5E1;color:var(--faint)}
+  .av.sin svg{width:18px;height:18px}
+
+  /* ── FICHA ───────────────────────────── */
+  .miga{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;color:var(--muted);font-size:13px}
+  .miga a{display:inline-flex;align-items:center;gap:6px}.miga a svg{width:16px;height:16px}
+  .nav2{display:flex;align-items:center;gap:6px}
+  .nav2 button{width:36px;height:36px;border-radius:11px;border:1px solid var(--line);background:#fff;display:grid;place-items:center}
+  .nav2 button svg{width:16px;height:16px}
+
+  .head{background:#fff;border:1px solid var(--line);border-radius:24px;padding:22px 24px;display:grid;grid-template-columns:auto 1fr auto;gap:22px;align-items:center}
+  .head .av{width:112px;height:112px;border-radius:28px;font-size:30px}
+  .head .camara{position:absolute;right:6px;bottom:6px;z-index:3;width:30px;height:30px;border-radius:10px;background:#fff;display:grid;place-items:center;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+  .head .camara svg{width:15px;height:15px;color:var(--ink)}
+  .head h1{font-size:26px;font-weight:600;letter-spacing:-.02em}
+  .head .l2{color:var(--ink-soft);margin-top:4px;font-size:14.5px}
+  .head .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .head .acc{flex-direction:column;align-items:stretch}
+
+  .franja{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
+  .alerta{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:14px;background:var(--red-bg);border:1px solid var(--red-line);color:var(--red-tx);font-weight:500;font-size:13.5px}
+  .alerta svg{width:16px;height:16px}
+  .banda{margin-top:12px;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;background:var(--amber-bg);color:#92400E;font-size:13.5px}
+  .banda svg{width:16px;height:16px;flex:none}
+  .banda a{text-decoration:underline;text-underline-offset:2px}
+  .banda .btn{margin-left:auto;height:34px;background:#fff;border-color:var(--amber-line)}
+
+  .tabs{display:flex;gap:4px;margin:18px 0 16px;border-bottom:1px solid var(--line);overflow-x:auto}
+  .tabs a{padding:11px 14px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;display:flex;gap:7px;align-items:center}
+  .tabs a.on{color:var(--ink);border-color:var(--coral)}
+  .tabs a i{font-style:normal;font-size:11.5px;border-radius:8px;padding:1px 7px;background:var(--amber-bg);color:var(--amber-tx)}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px 20px}
+  .card.w2{grid-column:span 2}
+  .card h2{font-size:15.5px;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .card h2 small{font-size:12.5px;font-weight:500;color:var(--coral-dark)}
+  dl.d{display:grid;grid-template-columns:120px 1fr;gap:7px 12px;font-size:13.5px}
+  dl.d dt{color:var(--muted)} dl.d dd.falta{color:var(--amber-tx)}
+  .ln{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid #F1F5F9;font-size:13.5px}
+  .ln:first-of-type{border-top:0}
+  .ln .h{color:var(--muted);font-size:12.5px;width:46px;flex:none;padding-top:1px}
+  .ln svg{width:15px;height:15px;flex:none;margin-top:2px}
+  .ok{color:var(--green-tx)} .no{color:var(--red-tx)}
+  .barra{height:8px;border-radius:6px;background:#EEF2F6;overflow:hidden;margin:6px 0 4px}.barra i{display:block;height:100%;background:var(--coral)}
+  .tel{display:inline-flex;align-items:center;gap:6px;margin-top:10px;height:38px;padding:0 13px;border-radius:12px;background:var(--stone);font-weight:500;font-size:13px}
+  .tel svg{width:15px;height:15px}
+
+
+  .panel{display:none}.panel.on{display:block}
+  .grid.g2{grid-template-columns:repeat(2,1fr)}
+  .f{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted);position:relative}
+  .f input,.f select{height:42px;border-radius:12px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit;font-size:14px;color:var(--ink);width:100%}
+  .f input:disabled{background:var(--stone);color:var(--muted)}
+  .f.falta input,.f.falta select{border-color:var(--amber-line);background:var(--amber-bg)}
+  .f em{font-style:normal;font-size:11.5px;color:var(--amber-tx)}
+  .f2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .f4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+  .ancho{grid-column:1/-1}.ancho2{grid-column:span 2}
+  .pills{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 12px}
+  .pills span{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--line);display:inline-flex;align-items:center;gap:6px;color:var(--ink-soft);font-size:13.5px;cursor:pointer;background:#fff}
+  .pills span.on{background:var(--coral-soft);border-color:var(--coral);color:var(--coral-dark);font-weight:500}
+  .pills span svg{width:15px;height:15px}
+  .contacto{border-top:1px solid #F1F5F9;padding:12px 0}.contacto:first-of-type{border-top:0;padding-top:0}
+  .cab-c{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.cab-c b{font-weight:600;margin-right:4px}
+  .contacto .f4{margin-top:8px}
+  .fila-b{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .guardar{display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-top:14px}
+  .guardar span{color:var(--coral-dark);font-weight:500;font-size:13.5px}
+  .aviso-s{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--ink-soft);background:#F1F5F9;border-radius:12px;padding:9px 13px;margin-bottom:14px}
+  .aviso-s svg{width:15px;height:15px}
+  .tarifa{display:grid;gap:8px}
+  .tarifa>div{background:var(--stone);border-radius:14px;padding:11px 14px;display:grid;grid-template-columns:1fr auto;gap:2px 10px}
+  .tarifa span{font-size:13px;color:var(--ink-soft)} .tarifa b{font-size:20px;font-weight:600;grid-row:span 2;align-self:center}
+  .tarifa em{font-style:normal;font-size:12px;color:var(--muted)}
+  .nota-c{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5}
+  .nota-p{font-size:12.5px;color:var(--muted);margin:12px 4px}
+  .sub{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;margin:18px 0 0}
+  .sepa{border-top:1px solid var(--line);margin-top:16px}
+  .adj{height:42px;border-radius:12px;border:1.5px dashed #CBD5E1;display:flex;align-items:center;gap:8px;padding:0 12px;color:var(--ink-soft);font-size:13.5px}
+  .adj svg{width:15px;height:15px}
+  .it{border-top:1px solid #F1F5F9;padding:9px 0;font-size:13.5px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+  .it:first-of-type{border-top:0}
+  .it>span:not(.tag){flex-basis:100%;font-size:12.5px;color:var(--muted)}
+  .it b{font-weight:500}
+  .it .mini{flex-basis:100%;display:flex;gap:12px}.it .mini a{font-size:12px;color:var(--coral-dark);cursor:pointer}
+  .it.pasado b{color:var(--muted);text-decoration:line-through}
+  .barra-sup{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px}
+  .barra-sup>span:last-child{display:flex;gap:8px}
+  table.t{width:100%;border-collapse:collapse;font-size:13.5px}
+  .t th{text-align:left;font-weight:500;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .t td{padding:8px;border-bottom:1px solid #F1F5F9}
+  .t td:nth-child(n+3):not(:last-child),.t th:nth-child(n+3):not(:last-child){text-align:center;color:var(--coral);width:70px}
+  .t tr.g td{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500;padding-top:14px;background:#fff}
+  .tl{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-top:1px solid #F1F5F9;font-size:13.5px}
+  .tl:first-child{border-top:0}
+  .tl .h{width:76px;flex:none;color:var(--muted);font-size:12.5px;padding-top:1px}
+  .tl b{font-weight:500;display:block}.tl span{font-size:12.5px;color:var(--muted)}
+  .pt{width:10px;height:10px;border-radius:50%;background:#CBD5E1;flex:none;margin-top:5px}
+  .pt.ok{background:#34D399}.pt.no{background:#F87171}.pt.am{background:#FBBF24}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .cal i{aspect-ratio:1;border-radius:9px;display:grid;place-items:center;font-style:normal;font-size:12px;background:#D1FAE5;color:var(--green-tx)}
+  .cal i.f{background:#DBEAFE;color:var(--blue-tx)}.cal i.x{background:#F1F5F9;color:var(--faint)}.cal i.v{background:transparent}
+  .ley-cal{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px}
+  .ley-cal i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .ley-cal .c{background:#D1FAE5}.ley-cal .h{background:#FEE2E2}.ley-cal .f{background:#DBEAFE}.ley-cal .x{background:#F1F5F9}
+  .chk-l{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #F1F5F9;font-size:13.5px}
+  .chk-l:first-child{border-top:0}.chk-l>div{flex:1}.chk-l b{font-weight:500;display:block}.chk-l span{font-size:12.5px;color:var(--muted)}
+  .ck{width:24px;height:24px;border-radius:8px;border:1.5px solid #CBD5E1;flex:none;display:grid;place-items:center}
+  .ck.ok{background:var(--green-bg);border-color:#6EE7B7}.ck svg{width:14px;height:14px;color:var(--green-tx);stroke-width:3}
+  .vencida{color:var(--red-tx)!important}
+  .ir-a{cursor:pointer}
+  .estado-fuera{display:none;margin-top:12px;align-items:center;gap:12px;padding:12px 16px;border-radius:16px;background:var(--blue-bg);border:1px solid #BFDBFE;color:#1E3A8A;font-size:14px}
+  .estado-fuera.on{display:flex}.estado-fuera svg{width:20px;height:20px;flex:none}
+  .estado-fuera b{font-weight:600}.estado-fuera .btn{margin-left:auto;border-color:#BFDBFE}
+  .modal{position:fixed;inset:0;background:rgba(15,23,42,.35);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow-y:auto}
+  .modal.on{display:flex}
+  .modal>div{background:#fff;border-radius:24px;padding:22px 24px;width:100%;max-width:560px}
+  .modal h3{font-size:18px;font-weight:600;margin-bottom:4px}.modal p{color:var(--muted);font-size:13.5px;margin-bottom:14px}
+  .modal .f2{margin-bottom:12px}
+  .modal .pie{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+  .modal .aviso-tipo{font-size:12.5px;color:var(--ink-soft);background:var(--stone);border-radius:12px;padding:9px 12px;margin-top:4px}
+
+  .leyenda{max-width:1240px;margin:0 32px 28px;padding:14px 18px;border:1px dashed #CBD5E1;border-radius:16px;color:var(--ink-soft);font-size:13px;line-height:1.6;background:#fff}
+  .leyenda b{font-weight:600} .leyenda li{margin-left:18px}
+
+  @media (max-width:820px){
+    .app{grid-template-columns:minmax(0,1fr)} aside{display:none}
+    .mk{flex-wrap:wrap}.mk span{display:none}
+    main{padding:18px 16px 30px}
+    .head{grid-template-columns:auto 1fr;padding:18px}
+    .head .av{width:76px;height:76px;border-radius:22px;font-size:22px}
+    .head h1{font-size:21px}
+    .head .acc{grid-column:1/-1;flex-direction:row}
+    .head .acc .btn{flex:1;justify-content:center}
+    .grid,.grid.g2{grid-template-columns:1fr}.card.w2{grid-column:auto}
+    .f2,.f4{grid-template-columns:1fr}.ancho2{grid-column:auto}
+    table.t th:nth-child(2),table.t td:nth-child(2){display:none}
+    .res{padding:10px 14px;flex-wrap:wrap;row-gap:4px}
+    .res .q{flex:1 1 calc(100% - 90px)}
+    .res .tag{margin-left:60px}.res .tag~.tag{margin-left:0}
+    .buscar kbd{display:none}
+    .res .tag.s{display:none}
+    .leyenda{margin:0 16px 20px}
+  }
+  .vista{display:none}.vista.on{display:block}
+  .head-mini{background:#fff;border:1px solid var(--line);border-radius:20px;padding:12px 16px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;align-items:center;margin-bottom:18px}
+  .head-mini .av{width:48px;height:48px;border-radius:15px;grid-row:span 2}
+  .head-mini b{font-size:16px;font-weight:600;display:block}.head-mini span{font-size:12.5px;color:var(--muted)}
+  .tabs-mini{grid-column:2;display:flex;gap:14px;font-size:12.5px;color:var(--muted);overflow-x:auto;white-space:nowrap}
+  .tabs-mini a.on{color:var(--coral-dark);font-weight:500}
+  .guion-top{display:grid;gap:12px;margin-bottom:14px}
+  .adapta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.adapta .lbl{font-size:13px;color:var(--muted);margin-right:4px}
+  .fases{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .fase{background:#fff;border:1px solid var(--line);border-radius:16px;padding:11px 14px;display:grid;grid-template-columns:1fr auto;gap:2px}
+  .fase b{font-weight:500}.fase span{font-size:13px;color:var(--muted)}.fase .barra{grid-column:1/-1;margin:6px 0 0}
+  .fase.ok .barra i{background:#34D399}.fase.on{border-color:var(--coral)}
+  .siguiente{display:flex;align-items:center;gap:16px;background:var(--coral-soft);border:1px solid rgba(233,112,88,.35);border-radius:20px;padding:14px 18px;margin-bottom:18px}
+  .siguiente .n{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--coral-dark);font-weight:600;writing-mode:horizontal-tb;width:72px}
+  .siguiente .q{flex:1}.siguiente .q b{display:block;font-size:16px;font-weight:600}.siguiente .q span{font-size:13px;color:var(--ink-soft)}
+  .fase-l{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:16px 4px 8px}
+  .fase-l em{font-style:normal;text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
+  .pasos{padding:4px 18px}
+  .paso{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #F1F5F9}
+  .paso:first-child{border-top:0}
+  .paso .q{flex:1;min-width:0}.paso .q b{display:block;font-weight:500;font-size:14px}.paso .q span{font-size:12.5px;color:var(--muted)}
+  .paso .q a{color:var(--coral-dark);cursor:pointer}
+  .paso.ok .q b{color:var(--ink-soft)}
+  .paso.sig{background:var(--coral-soft);margin:0 -18px;padding:10px 18px}
+  .ck{width:24px;height:24px;border-radius:8px;border:1.5px solid #CBD5E1;flex:none;display:grid;place-items:center}
+  .ck.ok{background:var(--green-bg);border-color:#6EE7B7}.ck svg{width:14px;height:14px;stroke-width:3;color:var(--green-tx)}
+  .ck.esp{background:var(--blue-bg);border-color:#BFDBFE}.ck.esp svg{color:var(--blue-tx);stroke-width:2.5}
+  .tipo{font-size:11.5px;font-weight:500;border-radius:7px;padding:2px 8px;width:62px;text-align:center;flex:none}
+  .tipo.d{background:#F1F5F9;color:#475569}.tipo.r{background:var(--blue-bg);color:var(--blue-tx)}.tipo.f{background:#F5EBFF;color:#6D28D9}
+  .quien{font-size:12.5px;color:var(--muted);width:120px;flex:none}
+  .btn.sm{height:34px;padding:0 12px;font-size:13px}
+  .am{color:var(--amber-tx);font-weight:500}
+  .nota-p{font-size:12.5px;color:var(--muted);margin:12px 4px}
+  .nota-c{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5}
+  .prep{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
+  .hoja{background:#fff;border:1px solid var(--line);border-radius:6px;padding:34px 40px;box-shadow:0 6px 24px rgba(15,23,42,.06);font-family:Georgia,serif;font-size:13.5px;line-height:1.6;color:#111}
+  .hoja p{margin:10px 0}
+  .doc-cab{border-bottom:1px solid #ddd;padding-bottom:10px;margin-bottom:6px;display:flex;flex-direction:column;gap:3px}
+  .doc-cab b{letter-spacing:.04em}.doc-cab span{font-size:12px;color:#555}
+  mark{background:#FDEAE3;color:#9A3412;padding:0 3px;border-radius:3px}
+  table.campos{width:100%;border-collapse:collapse;margin:10px 0}
+  .campos td{border-bottom:1px solid #eee;padding:7px 4px;vertical-align:top}.campos td:first-child{color:#666;width:34%}
+  .campos td.sep{font-family:'DM Sans',sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:14px}
+  .mono{font-family:ui-monospace,monospace;font-size:12.5px}
+  .gris{color:#777;font-size:12.5px}
+  .lado{display:grid;gap:12px}
+  .lado .card h2{margin-bottom:8px}
+  dd.ok{color:var(--green-tx)}
+  .firmante{display:flex;gap:12px;align-items:center}.firmante b{display:block;font-weight:500}.firmante span{font-size:12.5px;color:var(--muted)}
+  .numf{width:28px;height:28px;border-radius:9px;background:var(--stone);display:grid;place-items:center;font-weight:600;font-size:13px}
+  .ancho-b{justify-content:center;height:48px}
+  .fila-b{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .f{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted)}
+  .f select,.f input{height:42px;border-radius:12px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit;font-size:14px;color:var(--ink)}
+  .f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .pills{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
+  .pills span{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--line);display:inline-flex;align-items:center;gap:6px;color:var(--ink-soft);font-size:13.5px;cursor:pointer;background:#fff}
+  .pills span.on{background:var(--coral-soft);border-color:var(--coral);color:var(--coral-dark);font-weight:500}
+  .pills span svg{width:15px;height:15px}
+  .tablet{max-width:860px;margin:0 auto;background:#fff;border:10px solid #1F2937;border-radius:30px;overflow:hidden}
+  .t-cab{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .t-cab b{font-size:16px}.t-cab span{font-size:12.5px;color:var(--muted)}
+  .t-doc{padding:16px 26px;font-family:Georgia,serif;font-size:14px;line-height:1.6;max-height:230px;overflow:auto;background:#FCFCFB}
+  .leido{font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--green-tx);background:var(--green-bg);border-radius:9px;padding:4px 10px}
+  .leido svg{width:14px;height:14px}
+  .t-firma{padding:16px 20px;border-top:1px solid var(--line)}
+  .quien-f{font-size:13.5px;margin-bottom:8px}
+  #pad{width:100%;height:170px;border:1.5px dashed #CBD5E1;border-radius:16px;background:#fff;touch-action:none;cursor:crosshair;display:block}
+  .t-pie{display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
+  .chk-c{flex:1;font-size:13px;color:var(--ink-soft);display:flex;align-items:center;gap:8px}
+  .btn.off{opacity:.4;pointer-events:none}
+  .moviles{display:flex;gap:22px;justify-content:center;flex-wrap:wrap}
+  .movil{width:250px;background:#fff;border:9px solid #1F2937;border-radius:34px;padding:14px 14px 10px;min-height:470px;display:flex;flex-direction:column;gap:12px;position:relative}
+  .m-top{font-size:12px;color:var(--muted);text-align:center;border-bottom:1px solid #F1F5F9;padding-bottom:8px}
+  .sms{background:#E5E7EB;border-radius:16px 16px 16px 4px;padding:10px 12px;font-size:13px;line-height:1.45}
+  .m-doc{font-size:12.5px;line-height:1.5}.m-doc b{display:block;font-size:14px}.m-doc span{color:var(--muted)}
+  .m-codigo{margin-top:auto;font-size:12px;color:var(--muted)}
+  .cod{display:flex;gap:5px;margin-top:6px}.cod i{font-style:normal;flex:1;height:38px;border-radius:9px;border:1px solid var(--line);display:grid;place-items:center;font-size:17px;color:var(--ink);font-weight:600}
+  .m-firma{border:1.5px dashed #CBD5E1;border-radius:14px;padding:8px;font-size:12px;color:var(--muted)}
+  .m-ok{margin-top:auto;text-align:center;display:flex;flex-direction:column;align-items:center;gap:4px}
+  .m-ok svg{width:36px;height:36px;color:var(--green-tx)}.m-ok b{font-size:16px}.m-ok span{font-size:12.5px;color:var(--muted)}
+  .m-n{position:absolute;bottom:-36px;left:0;right:0;text-align:center;font-size:12.5px;color:var(--ink-soft);font-weight:500}
+  #v-distancia .nota-p{margin-top:50px;text-align:center}
+  table.t{width:100%;border-collapse:collapse;font-size:13.5px}
+  .t th{text-align:left;font-weight:500;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .t td{padding:9px 8px;border-bottom:1px solid #F1F5F9}.t b{font-weight:500}
+  .editor{border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-family:Georgia,serif;font-size:14px;line-height:1.8;background:#FCFCFB}
+  .var{font-family:'DM Sans',sans-serif;font-size:12.5px;background:#F5EBFF;color:#6D28D9;border-radius:6px;padding:2px 6px}
+  @media (max-width:820px){
+    .fases,.prep{grid-template-columns:1fr}
+    .quien{display:none}.siguiente{flex-wrap:wrap}.siguiente .n{width:auto}
+    .paso{flex-wrap:wrap}.paso .q{flex-basis:calc(100% - 40px)}.paso .tipo{margin-left:36px}
+    .hoja{padding:22px 18px}
+    .t-cab{flex-direction:column;align-items:flex-start;gap:2px}
+    .t th:nth-child(3),.t td:nth-child(3),.t th:nth-child(4),.t td:nth-child(4){display:none}
+  }
+</style>
+</head>
+<body>
+<div class="mk">
+  Mockup · ingreso y documentos ·
+  <button class="on" data-v="guion">1 · El guion</button>
+  <button data-v="preparar">2 · Preparar un documento</button>
+  <button data-v="presencial">3 · Firma aquí</button>
+  <button data-v="distancia">4 · Firma a distancia</button>
+  <button data-v="pdf">5 · El PDF firmado</button>
+  <button data-v="plantillas">6 · Plantillas del centro</button>
+  <span>Nombres inventados.</span>
+</div>
+<div class="app">
+  <aside>
+    <div class="centro"><b>Jardín de Gredos</b><span>Residencia · 49 plazas</span></div>
+    <nav>
+      <a href="#"><i data-lucide="layout-dashboard"></i>Panel</a>
+      <a class="on" href="#"><i data-lucide="users"></i>Residentes<span class="badge a num">12</span></a>
+      <a href="#"><i data-lucide="triangle-alert"></i>Incidencias<span class="badge r num">4</span></a>
+      <a href="#"><i data-lucide="repeat-2"></i>Relevos<span class="badge a num">2</span></a>
+      <a href="#"><i data-lucide="calendar-check"></i>Obligaciones<span class="badge r num">1</span></a>
+    </nav>
+    <div class="spacer"></div>
+    <nav class="conf"><a href="#"><i data-lucide="settings"></i>Configuración</a></nav>
+  </aside>
+
+  <main>
+    <!-- cabecera compacta del residente (la de la ficha completa) -->
+    <div class="head-mini" id="cab">
+      <div class="av foto"></div>
+      <div><b>Dolores Alcázar Peña</b><span>Hab. 12 · cama A · Concertada · Dependiente II · ingresa el lunes 26/10</span></div>
+      <div class="tabs-mini"><a>Resumen</a><a>Datos y familia</a><a>Plaza y pago</a><a>Ficha clínica</a><a class="on">Ingreso y documentos</a><a>Historial</a></div>
+    </div>
+
+    <!-- ═════════ 1 · EL GUION ═════════ -->
+    <section class="vista on" id="v-guion">
+      <div class="guion-top">
+        <div class="adapta">
+          <span class="lbl">Este guion se ha hecho para su caso:</span>
+          <span class="tag s">Plaza concertada</span><span class="tag s">Paga por recibo domiciliado</span><span class="tag s">Firma su hijo, como guardador de hecho</span><span class="tag s">Sin sujeción prescrita</span>
+        </div>
+        <div class="fases">
+          <div class="fase ok"><b>Antes del ingreso</b><span class="num">6 de 6</span><div class="barra"><i style="width:100%"></i></div></div>
+          <div class="fase on"><b>El día del ingreso</b><span class="num">5 de 9</span><div class="barra"><i style="width:55%"></i></div></div>
+          <div class="fase"><b>Primeros 30 días</b><span class="num">1 de 4</span><div class="barra"><i style="width:25%"></i></div></div>
+        </div>
+      </div>
+
+      <div class="siguiente">
+        <div class="n">Siguiente paso</div>
+        <div class="q"><b>Mandato SEPA</b><span>Sin él no se le puede pasar el recibo del mes. Lo firma Antonio, el titular de la cuenta. El programa ya lo tiene relleno con su IBAN.</span></div>
+        <a class="btn p" href="#" data-ir="preparar"><i data-lucide="pen-line"></i>Preparar y firmar</a>
+      </div>
+
+      <div class="fase-l">Antes del ingreso <em>hecho</em></div>
+      <div class="card pasos">
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Datos personales y de la familia</b><span>Nombre, DNI, nacimiento, NSS, contactos · se comprueba solo con la ficha</span></div><span class="tipo d">Dato</span><span class="quien">Carmen</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Quién firma por ella</b><span>Antonio Alcázar (hijo) · guardador de hecho · no hay medida judicial ni poder</span></div><span class="tipo d">Dato</span><span class="quien">Carmen</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Declaración de guardador de hecho</b><span>Firmada por Antonio el 20/10 a distancia · <a>ver PDF</a></span></div><span class="tipo f">Firmar</span><span class="quien">Antonio</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Resolución de la Junta</b><span>Concesión de plaza · SB/TO/2026/0912 · <a>ver PDF</a></span></div><span class="tipo r">Recoger</span><span class="quien">Carmen</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Tarifa y forma de pago</b><span>Copago 612,40 €/mes · recibo a Antonio · IBAN anotado</span></div><span class="tipo d">Dato</span><span class="quien">Administración</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Cama asignada y revisada</b><span>12 A · cama, barandillas y colchón revisados por mantenimiento el 23/10</span></div><span class="tipo d">Dato</span><span class="quien">Mantenimiento</span></div>
+      </div>
+
+      <div class="fase-l">El día del ingreso <em>5 de 9</em></div>
+      <div class="card pasos">
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>DNI y tarjeta sanitaria</b><span>2 fotos hechas con la tablet · <a>ver</a></span></div><span class="tipo r">Recoger</span><span class="quien">Carmen</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Informe médico y tratamiento actual</b><span>Del centro de salud · 3 páginas · pasa a la ficha clínica y a medicación</span></div><span class="tipo r">Recoger</span><span class="quien">DUE</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Contrato de estancia</b><span>Firmado por Antonio (aquí, 10:42) y por Carmen (10:44) · <a>ver PDF</a></span></div><span class="tipo f">Firmar</span><span class="quien">Antonio + Carmen</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Reglamento de régimen interior</b><span>Recibido y leído · firmado por Antonio</span></div><span class="tipo f">Firmar</span><span class="quien">Antonio</span></div>
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Protección de datos</b><span>Tratamiento, cesión a la familia, comunicaciones · firmado</span></div><span class="tipo f">Firmar</span><span class="quien">Antonio</span></div>
+        <div class="paso esp"><span class="ck esp"><i data-lucide="clock"></i></span><div class="q"><b>Consentimiento de imagen</b><span>Enviado a Antonio por SMS hace 2 h · sin abrir todavía</span></div><span class="tipo f">Firmar</span><span class="quien">Antonio</span><a class="btn sm">Reenviar</a></div>
+        <div class="paso sig"><span class="ck"></span><div class="q"><b>Mandato SEPA</b><span>Porque paga por recibo domiciliado</span></div><span class="tipo f">Firmar</span><span class="quien">Antonio</span><a class="btn sm p" data-ir="preparar">Preparar</a></div>
+        <div class="paso"><span class="ck"></span><div class="q"><b>Salidas autorizadas</b><span>Quién puede sacarla del centro y si puede salir sola</span></div><span class="tipo f">Firmar</span><span class="quien">Antonio</span><a class="btn sm">Preparar</a></div>
+        <div class="paso"><span class="ck"></span><div class="q"><b>Inventario de pertenencias y ropa marcada</b><span>Se rellena en la habitación con la tablet y lo firman los dos</span></div><span class="tipo f">Firmar</span><span class="quien">Auxiliar + Antonio</span><a class="btn sm">Empezar</a></div>
+      </div>
+
+      <div class="fase-l">Primeros 30 días <em>1 de 4</em></div>
+      <div class="card pasos">
+        <div class="paso ok"><span class="ck ok"><i data-lucide="check"></i></span><div class="q"><b>Plan de cuidados cargado</b><span>Plantilla «Dependiente» · se comprueba solo</span></div><span class="tipo d">Dato</span><span class="quien">DUE</span></div>
+        <div class="paso"><span class="ck"></span><div class="q"><b>Valoración inicial</b><span>Barthel, Pfeiffer y Norton · <b class="am">plazo: 2 de noviembre</b></span></div><span class="tipo d">Dato</span><span class="quien">DUE</span><a class="btn sm">Empezar</a></div>
+        <div class="paso"><span class="ck"></span><div class="q"><b>PAI inicial firmado por la familia</b><span>Plazo: 25 de noviembre · se genera del plan y la valoración</span></div><span class="tipo f">Firmar</span><span class="quien">DUE + Antonio</span></div>
+        <div class="paso"><span class="ck"></span><div class="q"><b>Reunión de acogida del primer mes</b><span>Con la familia · se anota cómo se ha adaptado</span></div><span class="tipo d">Dato</span><span class="quien">Carmen</span></div>
+      </div>
+      <p class="nota-p">No aplica a Dolores, y por eso no sale: consentimiento de sujeción (no tiene ninguna prescrita), documento de la medida judicial de apoyo (no hay), solicitud de plaza privada.</p>
+    </section>
+
+    <!-- ═════════ 2 · PREPARAR ═════════ -->
+    <section class="vista" id="v-preparar">
+      <div class="prep">
+        <div class="hoja">
+          <div class="doc-cab"><b>MANDATO DE ADEUDO DIRECTO SEPA</b><span>Referencia del mandato: <mark>JG-0043</mark></span></div>
+          <p><b>Acreedor:</b> Jardín de Gredos, S.A. · NIF A45080173 · Identificador de acreedor SEPA [el del centro] · [domicilio del centro]</p>
+          <p>Mediante la firma de esta orden de domiciliación, el deudor autoriza al acreedor a enviar instrucciones a la entidad del deudor para adeudar su cuenta, y a la entidad para efectuar los adeudos en su cuenta siguiendo las instrucciones del acreedor…</p>
+          <table class="campos">
+            <tr><td>Nombre del deudor</td><td><mark>Antonio Alcázar Pérez</mark></td></tr>
+            <tr><td>NIF</td><td><mark>•••••321 K</mark></td></tr>
+            <tr><td>IBAN</td><td><mark>ES21 •••• •••• •••• •••• 4567</mark> · <mark>Eurocaja Rural</mark></td></tr>
+            <tr><td>Concepto</td><td>Estancia de <mark>Dolores Alcázar Peña</mark> en plaza <mark>concertada</mark> · aportación mensual</td></tr>
+            <tr><td>Tipo de pago</td><td>Recurrente</td></tr>
+            <tr><td>Fecha y lugar</td><td><mark>26/10/2026</mark> · Talavera de la Reina</td></tr>
+          </table>
+          <p class="gris">Lo resaltado sale de la ficha. Para cambiarlo se cambia la ficha, no el documento: así nunca dicen cosas distintas.</p>
+        </div>
+        <div class="lado">
+          <div class="card">
+            <h2>Mandato SEPA</h2>
+            <dl class="d">
+              <dt>Plantilla</dt><dd>Mandato SEPA · versión 2 · aprobada por Carmen el 01/10/2026</dd>
+              <dt>Datos</dt><dd class="ok">Están todos</dd>
+            </dl>
+          </div>
+          <div class="card">
+            <h2>Quién firma</h2>
+            <div class="firmante">
+              <span class="numf">1</span>
+              <div><b>Antonio Alcázar Pérez</b><span>Hijo · titular de la cuenta</span></div>
+            </div>
+            <div class="f" style="margin-top:12px">¿Cómo firma Antonio?
+              <div class="pills" id="como">
+                <span class="on" data-c="aqui"><i data-lucide="tablet"></i>Aquí, ahora</span>
+                <span data-c="dist"><i data-lucide="send"></i>A distancia</span>
+              </div>
+            </div>
+            <div id="dist-op" style="display:none">
+              <div class="f2">
+                <label class="f">Enviar el enlace por<select><option>SMS y email</option><option>SMS</option><option>Email</option></select></label>
+                <label class="f">Caduca<select><option>En 7 días</option><option>En 48 horas</option></select></label>
+              </div>
+              <p class="nota-c">Le llega un SMS al 6•• ••• 412 y un email a antonio.alcazar@correo.es. Para firmar tiene que leer el documento entero y meter el código que le llega al móvil.</p>
+            </div>
+          </div>
+          <a class="btn p ancho-b" href="#" id="b-ir-firmar" data-ir="presencial"><i data-lucide="pen-line"></i>Firmar ahora en esta pantalla</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════ 3 · FIRMA PRESENCIAL ═════════ -->
+    <section class="vista" id="v-presencial">
+      <div class="tablet">
+        <div class="t-cab"><b>Contrato de estancia</b><span>Lee hasta el final para poder firmar · página 4 de 4</span></div>
+        <div class="t-doc">
+          <p class="gris">… <b>Cláusula 14. Protección de datos.</b> Los datos del residente y de su familia se tratarán según lo firmado en el documento de protección de datos…</p>
+          <p><b>Cláusula 15. Duración y resolución.</b> El presente contrato tiene duración indefinida y podrá resolverse por cualquiera de las partes con un preaviso de quince días…</p>
+          <p>Y en prueba de conformidad, las partes firman el presente contrato en Talavera de la Reina, a <mark>26 de octubre de 2026</mark>.</p>
+          <div class="leido"><i data-lucide="check"></i>Has llegado al final del documento</div>
+        </div>
+        <div class="t-firma">
+          <div class="quien-f">Firma <b>Antonio Alcázar Pérez</b>, hijo, como guardador de hecho de <b>Dolores Alcázar Peña</b></div>
+          <canvas id="pad" width="760" height="200"></canvas>
+          <div class="t-pie">
+            <a class="btn" href="#" onclick="limpiar();return false"><i data-lucide="eraser"></i>Borrar</a>
+            <label class="chk-c"><input type="checkbox" checked> Le he explicado el documento · Carmen Oyola</label>
+            <a class="btn p" href="#" id="b-firmar">Firmar</a>
+          </div>
+        </div>
+      </div>
+      <p class="nota-p">Después firma Carmen por el centro, en la misma pantalla o luego desde su ordenador. El contrato no cuenta como firmado hasta que están las dos firmas.</p>
+    </section>
+
+    <!-- ═════════ 4 · A DISTANCIA ═════════ -->
+    <section class="vista" id="v-distancia">
+      <div class="moviles">
+        <div class="movil">
+          <div class="m-top">Mensajes</div>
+          <div class="sms">Jardín de Gredos: Antonio, tiene un documento para firmar: <b>Consentimiento de imagen de Dolores</b>. Ábralo aquí: <u>firmar.jardindegredos.com/k7Q2</u> · Caduca el 2/11.</div>
+          <p class="m-n">1 · Le llega el SMS (y el email)</p>
+        </div>
+        <div class="movil">
+          <div class="m-top">Jardín de Gredos</div>
+          <div class="m-doc"><b>Consentimiento de imagen</b><span>Dolores Alcázar Peña</span>
+            <p>Autorizo a la residencia a tomar y mostrar fotografías de Dolores para identificarla dentro del centro (puerta de su habitación, tablet del personal)…</p>
+            <p class="gris">Lea el documento entero para continuar.</p>
+          </div>
+          <div class="m-codigo"><span>Le hemos enviado un código al 6•• ••• 412</span>
+            <div class="cod num"><i>4</i><i>8</i><i>1</i><i>0</i><i>2</i><i>7</i></div>
+          </div>
+          <p class="m-n">2 · Lo lee y mete el código</p>
+        </div>
+        <div class="movil">
+          <div class="m-top">Jardín de Gredos</div>
+          <div class="m-firma"><span>Firme con el dedo</span><svg viewBox="0 0 200 70"><path d="M10 50 C 30 10, 45 60, 60 35 S 90 15, 100 40 S 130 60, 150 25 S 175 30, 190 45" fill="none" stroke="#1F2937" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+          <div class="m-ok"><i data-lucide="circle-check"></i><b>Firmado</b><span>Le hemos enviado una copia en PDF a su email.</span></div>
+          <p class="m-n">3 · Firma y recibe su copia</p>
+        </div>
+      </div>
+      <p class="nota-p">En la ficha, el paso pasa de «enviado» a «firmado» en cuanto firma. Si no lo abre en 48 h, sale en el panel de Carmen para llamarle o reenviarlo.</p>
+    </section>
+
+    <!-- ═════════ 5 · PDF ═════════ -->
+    <section class="vista" id="v-pdf">
+      <div class="prep">
+        <div class="hoja">
+          <div class="doc-cab"><b>HOJA DE PRUEBAS DE FIRMA</b><span>Contrato de estancia · Dolores Alcázar Peña</span></div>
+          <table class="campos">
+            <tr><td>Documento</td><td>Contrato de estancia · plantilla v3 (aprobada 01/10/2026) · 4 páginas</td></tr>
+            <tr><td>Huella del documento</td><td class="mono">SHA-256 9f3a…c41e</td></tr>
+            <tr><td colspan="2" class="sep">Firmante 1</td></tr>
+            <tr><td>Quién</td><td>Antonio Alcázar Pérez · DNI •••••321 K · hijo, guardador de hecho de la residente</td></tr>
+            <tr><td>Cuándo</td><td>26/10/2026 10:42:18 (hora de Madrid)</td></tr>
+            <tr><td>Cómo</td><td>En persona, con firma manuscrita en la tablet «Despacho» · leyó hasta el final a las 10:41:55</td></tr>
+            <tr><td>Informó</td><td>Carmen Oyola Sánchez, directora</td></tr>
+            <tr><td colspan="2" class="sep">Firmante 2</td></tr>
+            <tr><td>Quién</td><td>Carmen Oyola Sánchez · por Jardín de Gredos, S.A.</td></tr>
+            <tr><td>Cuándo</td><td>26/10/2026 10:44:02</td></tr>
+            <tr><td>Cómo</td><td>Sesión de su cuenta, con su contraseña</td></tr>
+            <tr><td colspan="2" class="sep">Si hubiera sido a distancia</td></tr>
+            <tr><td>Cómo</td><td>Enlace enviado por SMS al 6•• ••• 412 · código verificado 11:42:03 · IP 85.•••.•••.12 · Chrome en Android</td></tr>
+            <tr><td>Sello de tiempo</td><td>Del servidor del programa (o de una autoridad de sellado, si se contrata)</td></tr>
+          </table>
+          <p class="gris">Si alguien cambiara una letra del PDF, la huella ya no coincidiría y el programa lo diría al abrirlo.</p>
+        </div>
+        <div class="lado">
+          <div class="card">
+            <h2>Contrato de estancia</h2>
+            <dl class="d">
+              <dt>Estado</dt><dd class="ok">Firmado por los dos</dd>
+              <dt>Copia</dt><dd>Enviada a antonio.alcazar@correo.es el 26/10 a las 10:44</dd>
+              <dt>Guardado</dt><dd>En su expediente, para siempre (no se puede borrar)</dd>
+            </dl>
+            <div class="fila-b"><a class="btn"><i data-lucide="download"></i>Descargar</a><a class="btn"><i data-lucide="mail"></i>Reenviar</a><a class="btn"><i data-lucide="printer"></i>Imprimir</a></div>
+          </div>
+          <div class="card">
+            <h2>Si hay que cambiarlo</h2>
+            <p class="nota-c" style="margin-top:0">Un documento firmado no se edita. Si cambia algo (otra tarifa, otra habitación), se genera un <b>anexo</b> o un contrato nuevo y se firma; el anterior queda en el historial.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════ 6 · PLANTILLAS ═════════ -->
+    <section class="vista" id="v-plantillas">
+      <div class="cab"><div><h1>Plantillas de documentos</h1><p>Configuración · lo que el centro da a firmar en un ingreso</p></div><a class="btn p" href="#"><i data-lucide="plus"></i>Nueva plantilla</a></div>
+      <div class="card">
+        <table class="t">
+          <thead><tr><th>Documento</th><th>Cuándo se pide</th><th>Quién firma</th><th>Versión</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><b>Contrato de estancia</b></td><td>Siempre</td><td>Residente o representante + centro</td><td>v3 · 01/10/2026</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Reglamento de régimen interior</b></td><td>Siempre</td><td>Residente o representante</td><td>v2</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Protección de datos</b></td><td>Siempre</td><td>Residente o representante</td><td>v1</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Consentimiento de imagen</b></td><td>Siempre (puede decir que no)</td><td>Residente o representante</td><td>v1</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Mandato SEPA</b></td><td>Si paga por recibo</td><td>Titular de la cuenta</td><td>v2</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Salidas autorizadas</b></td><td>Siempre</td><td>Residente o representante</td><td>v1</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Declaración de guardador de hecho</b></td><td>Si firma un guardador de hecho</td><td>El guardador</td><td>v1</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Consentimiento de sujeción</b></td><td>Si se prescribe una sujeción (uno por tipo)</td><td>Residente o representante + médico</td><td>v1</td><td><a class="btn sm">Editar</a></td></tr>
+            <tr><td><b>Inventario de pertenencias</b></td><td>Siempre</td><td>Auxiliar + familia</td><td>v1</td><td><a class="btn sm">Editar</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2>Así se escribe una plantilla</h2>
+        <div class="editor">El residente <span class="var">{residente.nombre}</span>, con DNI <span class="var">{residente.dni}</span>, ocupará la habitación <span class="var">{cama.habitacion}</span> en régimen de plaza <span class="var">{plaza.tipo}</span>. La aportación mensual será de <span class="var">{tarifa.aportacion}</span>, que se abonará mediante <span class="var">{pago.forma}</span>…</div>
+        <p class="nota-c">Los huecos se eligen de una lista (no se escriben a mano). Cambiar una plantilla crea la versión siguiente: lo ya firmado sigue con su versión. La primera vez se cargan vuestros Word actuales.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="leyenda" id="leyenda"></div>
+
+<script>
+const LEY={
+ guion:`<b>El guion.</b> Tres momentos (antes, el día del ingreso, primeros 30 días) y en cada paso: qué es, por qué hace falta, quién lo hace y si es un <b>dato</b> (se comprueba solo con la ficha), algo que hay que <b>recoger</b> (foto con la tablet o el móvil) o algo que hay que <b>firmar</b> (lo genera el programa). Se adapta al residente: lo que no aplica no sale. Arriba, el siguiente paso, con un botón.`,
+ preparar:`<b>Preparar un documento.</b> El programa rellena la plantilla del centro con los datos de la ficha (resaltados). Si falta un dato, no deja generarlo y lleva al campo. Se elige si la persona firma aquí o a distancia.`,
+ presencial:`<b>Firma aquí.</b> En la tablet o en la pantalla del despacho. No se puede firmar sin haber llegado al final del texto. Queda quién firma, en calidad de qué y quién le explicó el documento. Prueba a firmar con el ratón.`,
+ distancia:`<b>Firma a distancia.</b> Enlace por SMS y email, lectura completa, código al móvil y firma con el dedo. La familia recibe su copia sin pasar por la residencia.`,
+ pdf:`<b>El PDF firmado.</b> El documento más una hoja final de pruebas: quién, cuándo, cómo, quién informó y la huella del documento. Queda en el expediente, no se borra ni se edita: si algo cambia, se firma un anexo.`,
+ plantillas:`<b>Plantillas del centro</b> (en Configuración). Cada documento con cuándo se pide y quién lo firma: de ahí sale el guion de cada residente. Huecos que se rellenan con la ficha. Versionadas.`
+};
+function ver(v){
+  document.querySelectorAll(".vista").forEach(s=>s.classList.toggle("on",s.id==="v-"+v));
+  document.querySelectorAll(".mk button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  document.getElementById("cab").style.display=v==="plantillas"?"none":"";
+  document.getElementById("leyenda").innerHTML=LEY[v];window.scrollTo(0,0);
+}
+document.querySelectorAll(".mk button").forEach(b=>b.onclick=()=>ver(b.dataset.v));
+document.querySelectorAll("[data-ir]").forEach(b=>b.addEventListener("click",e=>{e.preventDefault();
+  if(b.id==="b-ir-firmar"&&document.querySelector("#como .on").dataset.c==="dist"){ver("distancia");return}
+  ver(b.dataset.ir)}));
+document.querySelectorAll("#como span").forEach(x=>x.onclick=()=>{
+  document.querySelectorAll("#como span").forEach(y=>y.classList.remove("on"));x.classList.add("on");
+  const d=x.dataset.c==="dist";document.getElementById("dist-op").style.display=d?"block":"none";
+  document.getElementById("b-ir-firmar").lastChild.textContent=d?"Enviar para firmar":"Firmar ahora en esta pantalla";});
+// pad de firma
+const c=document.getElementById("pad"),g=c.getContext("2d");let dib=false,hay=false;
+g.lineWidth=2.6;g.lineCap="round";g.strokeStyle="#1F2937";
+function pos(e){const r=c.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return[(t.clientX-r.left)*c.width/r.width,(t.clientY-r.top)*c.height/r.height]}
+c.addEventListener("pointerdown",e=>{dib=true;const[x,y]=pos(e);g.beginPath();g.moveTo(x,y)});
+c.addEventListener("pointermove",e=>{if(!dib)return;const[x,y]=pos(e);g.lineTo(x,y);g.stroke();hay=true;document.getElementById("b-firmar").classList.remove("off")});
+window.addEventListener("pointerup",()=>dib=false);
+function limpiar(){g.clearRect(0,0,c.width,c.height);hay=false;document.getElementById("b-firmar").classList.add("off")}
+document.getElementById("b-firmar").classList.add("off");
+document.getElementById("b-firmar").onclick=e=>{e.preventDefault();if(hay)ver("pdf")};
+ver("guion");
+try{lucide.createIcons()}catch(e){}
+</script>
+</body>
+</html>
