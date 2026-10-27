@@ -304,6 +304,12 @@ CREATE TABLE "staff_rule_settings" (
     "weekly_rest_hours"          INTEGER NOT NULL DEFAULT 36,
     "weekly_rest_window_days"    INTEGER NOT NULL DEFAULT 7,
     "no_show_tolerance_minutes"  INTEGER NOT NULL DEFAULT 15,
+    -- Qué es «una jornada completa» a efectos de la RATIO. La ratio se
+    -- mide en jornadas completas equivalentes, no en personas: tres
+    -- auxiliares de cuatro horas no son tres jornadas. 480 minutos (8 h)
+    -- de serie, y parámetro porque una jornada completa de convenio no es
+    -- la misma en todas partes.
+    "full_day_minutes"           INTEGER NOT NULL DEFAULT 480,
     "updated_at"                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_by_user_id"         UUID,
 
@@ -329,5 +335,8 @@ CREATE TABLE "staff_rule_settings" (
             AND "weekly_rest_window_days" BETWEEN 7 AND 14
             AND "no_show_tolerance_minutes" IS NOT NULL
             AND "no_show_tolerance_minutes" BETWEEN 0 AND 240
+            -- De 1 h a 12 h. Un 0 haría que la ratio dividiera por cero.
+            AND "full_day_minutes" IS NOT NULL
+            AND "full_day_minutes" BETWEEN 60 AND 720
         )
 );

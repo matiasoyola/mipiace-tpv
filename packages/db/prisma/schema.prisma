@@ -5588,6 +5588,12 @@ model StaffRuleSettings {
   /// Cuántos minutos después del inicio de su turno se considera que
   /// alguien «no ha fichado» (punto 9).
   noShowToleranceMinutes Int @default(15)  @map("no_show_tolerance_minutes")
+  /// Qué es «una jornada completa» a efectos de la RATIO, en minutos. La
+  /// ratio se mide en jornadas completas equivalentes y no en personas:
+  /// tres auxiliares de cuatro horas no son tres jornadas. 480 (8 h) de
+  /// serie, y parámetro porque una jornada completa de convenio no es la
+  /// misma en todas partes.
+  fullDayMinutes         Int @default(480) @map("full_day_minutes")
 
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz()
   updatedByUserId String?  @map("updated_by_user_id") @db.Uuid

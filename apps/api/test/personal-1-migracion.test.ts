@@ -178,13 +178,14 @@ describe("personal-1 · TODOS los CHECK llevan su IS NULL delante", () => {
     );
   });
 
-  it("y los cinco rangos de las reglas, cada uno con el suyo", () => {
+  it("y los seis rangos de las reglas, cada uno con el suyo", () => {
     for (const col of [
       "ratio_direct_care_per_mil",
       "min_rest_hours",
       "weekly_rest_hours",
       "weekly_rest_window_days",
       "no_show_tolerance_minutes",
+      "full_day_minutes",
     ]) {
       expect(FICHA_PLANO).toContain(`"${col}" IS NOT NULL`);
       expect(FICHA_PLANO).toMatch(
