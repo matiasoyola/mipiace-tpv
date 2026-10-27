@@ -8,12 +8,25 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CloudOff, PencilLine, TriangleAlert } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarOff,
+  CloudOff,
+  Clock4,
+  PencilLine,
+  TriangleAlert,
+} from "lucide-react";
 
 import { AdminShell } from "../../AdminShell.js";
 import { api, ApiError } from "../../api.js";
 import { CenteredLoader, FieldError } from "../../ui.js";
-import { diaLargo, duracion, horaLocal, type TodayResponse } from "./lib.js";
+import {
+  diaLargo,
+  duracion,
+  horaLocal,
+  retraso,
+  type TodayResponse,
+} from "./lib.js";
 
 export function HoyPage() {
   const [data, setData] = useState<TodayResponse | null>(null);
@@ -57,11 +70,15 @@ export function HoyPage() {
   return (
     <AdminShell title="Control horario">
       <p className="-mt-2 mb-5 text-[13.5px] text-slate-500">
-        {diaLargo(data.date, data.timeZone)}. Quién está dentro, quién no ha
-        fichado y lo que conviene mirar.
+        {diaLargo(data.date, data.timeZone)}.{" "}
+        {data.notClockedIn != null
+          ? "Quién está dentro, quién no ha fichado y lo que conviene mirar."
+          : "Quién está dentro, qué estaba previsto y lo que conviene mirar."}
       </p>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div
+        className={`grid gap-5 ${data.notClockedIn != null ? "lg:grid-cols-2" : ""}`}
+      >
         <section>
           <h2 className="mb-3 text-[16px] font-semibold text-mipiace-ink">
             Dentro ahora{" "}
@@ -103,6 +120,12 @@ export function HoyPage() {
           )}
         </section>
 
+        {/* personal-1 · «Sin fichar hoy» sólo cuando NO hay cuadrante
+            publicado. Con él, la respuesta buena es «Lo previsto y lo
+            fichado», de abajo: esta columna significa «no ha aparecido» y
+            lista a quien libra y a quien entra de noche. Era justo la
+            queja del punto 1 de `fichaje-1-done` §10. */}
+        {data.notClockedIn != null && (
         <section>
           <h2 className="mb-3 text-[16px] font-semibold text-mipiace-ink">
             Sin fichar hoy{" "}
@@ -128,7 +151,73 @@ export function HoyPage() {
             </ul>
           )}
         </section>
+        )}
       </div>
+
+      {/* ── personal-1 (punto 9) · PLANIFICADO FRENTE A FICHADO ────────
+          Es lo que hace que «quién no ha fichado hoy» deje de significar
+          «no ha aparecido» y pase a significar algo (fichaje-1 §10, punto
+          1). Sólo con el cuadrante PUBLICADO: contra un borrador a medio
+          pintar, todo el mundo saldría sin turno. */}
+      <h2 className="mb-3 mt-8 text-[16px] font-semibold text-mipiace-ink">
+        Lo previsto y lo fichado
+      </h2>
+      {data.planned == null ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-[13px] text-slate-500">
+          Este mes no tiene cuadrante publicado, así que no hay con qué
+          comparar los fichajes.{" "}
+          <Link
+            to="/admin/fichaje/cuadrante"
+            className="underline decoration-slate-300 hover:decoration-slate-500"
+          >
+            Hacer el cuadrante del mes
+          </Link>
+          .
+        </div>
+      ) : data.planned.withoutClockIn.length === 0 &&
+        data.planned.withoutShift.length === 0 &&
+        data.planned.pastTheirHour.length === 0 ? (
+        <Vacio texto="Todo el mundo está donde tenía que estar." />
+      ) : (
+        <div className="space-y-2.5">
+          {data.planned.withoutClockIn.map((p) => (
+            <Aviso
+              key={`sf-${p.employeeId}`}
+              icono={<CalendarClock className="h-4 w-4 text-mipiace-coral-dark" />}
+              tono="coral"
+              quien={p.employeeName}
+              que={`tenía turno ${p.code} y no ha fichado`}
+              cuando={`entraba a las ${horaLocal(p.inicioAt, data.timeZone)} · ${retraso(p.minutosDeRetraso)} de retraso`}
+              mes={p.dia.slice(0, 7)}
+              empleado={p.employeeId}
+            />
+          ))}
+          {data.planned.pastTheirHour.map((p) => (
+            <Aviso
+              key={`ph-${p.entryId}`}
+              icono={<Clock4 className="h-4 w-4 text-mipiace-coral-dark" />}
+              tono="coral"
+              quien={p.employeeName}
+              que="sigue dentro pasada su hora"
+              cuando={`su turno ${p.code} acababa a las ${horaLocal(p.finPlanificadoAt, data.timeZone)} · lleva ${String(p.horasDeMas).replace(".", ",")} h de más`}
+              mes={p.dia.slice(0, 7)}
+              empleado={p.employeeId}
+            />
+          ))}
+          {data.planned.withoutShift.map((p) => (
+            <Aviso
+              key={`st-${p.entryId}`}
+              icono={<CalendarOff className="h-4 w-4 text-slate-500" />}
+              tono="neutro"
+              quien={p.employeeName}
+              que="ha fichado y hoy no tenía turno"
+              cuando={`entró a las ${horaLocal(p.inicioAt, data.timeZone)}`}
+              mes={p.dia.slice(0, 7)}
+              empleado={p.employeeId}
+            />
+          ))}
+        </div>
+      )}
 
       <h2 className="mb-3 mt-8 text-[16px] font-semibold text-mipiace-ink">
         Avisos{" "}

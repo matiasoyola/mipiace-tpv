@@ -26,6 +26,17 @@ export interface ExportBlock {
   employeeName: string;
   days: DayView[];
   totalMinutes: number;
+  /**
+   * personal-1 (punto 9) · minutos **planificados** del mes para esta
+   * persona, al lado de los fichados.
+   *
+   * `null` cuando el mes no tiene cuadrante publicado, y entonces la
+   * columna **no se pinta**: una columna de ceros al lado de las horas
+   * reales se lee como «no tenía que trabajar», que es lo contrario de lo
+   * que pasa. Es la misma decisión que `toEntryView` tomó con los minutos
+   * de un tramo abierto.
+   */
+  plannedMinutes?: number | null;
 }
 
 export interface ExportInput {
@@ -84,7 +95,16 @@ export function buildRegistroCsv(input: ExportInput): string {
     fechaHoraLarga(input.generatedAt, input.timeZone),
   ]);
   filas.push([]);
-  filas.push(["Empleado", "Día", "Entrada", "Salida", "Total", "Observaciones"]);
+  // personal-1 · la columna de PLANIFICADO sólo existe si hay cuadrante
+  // publicado del mes. Si no, el fichero es exactamente el de antes: una
+  // columna vacía en un CSV que se cruza con la nómina es una columna que
+  // alguien interpreta.
+  const conPlan = input.blocks.some((b) => b.plannedMinutes != null);
+  filas.push(
+    conPlan
+      ? ["Empleado", "Día", "Entrada", "Salida", "Total", "Planificado", "Diferencia", "Observaciones"]
+      : ["Empleado", "Día", "Entrada", "Salida", "Total", "Observaciones"],
+  );
 
   for (const b of input.blocks) {
     for (const d of b.days) {
@@ -100,12 +120,39 @@ export function buildRegistroCsv(input: ExportInput): string {
           e.startedLocal,
           e.endedLocal ?? "",
           e.minutes === null ? "" : formatDuration(e.minutes),
+          // El planificado es del MES, no de un tramo: en la fila de un
+          // fichaje la columna va vacía a propósito. Repartirlo por días
+          // sería inventar a qué turno pertenece cada toque.
+          ...(conPlan ? ["", ""] : []),
           obs.join(", "),
         ]);
       }
-      filas.push([b.employeeName, d.date, "", "TOTAL DÍA", formatDuration(d.totalMinutes), ""]);
+      filas.push([
+        b.employeeName,
+        d.date,
+        "",
+        "TOTAL DÍA",
+        formatDuration(d.totalMinutes),
+        ...(conPlan ? ["", ""] : []),
+        "",
+      ]);
     }
-    filas.push([b.employeeName, "", "", "TOTAL MES", formatDuration(b.totalMinutes), ""]);
+    filas.push([
+      b.employeeName,
+      "",
+      "",
+      "TOTAL MES",
+      formatDuration(b.totalMinutes),
+      ...(conPlan
+        ? [
+            b.plannedMinutes == null ? "" : formatDuration(b.plannedMinutes),
+            b.plannedMinutes == null
+              ? ""
+              : diferenciaLarga(b.totalMinutes - b.plannedMinutes),
+          ]
+        : []),
+      "",
+    ]);
     filas.push([]);
   }
 
@@ -144,6 +191,15 @@ export function buildRegistroCsv(input: ExportInput): string {
     .map((f) => f.map((v) => esc(v ?? "")).join(sep))
     .join("\r\n");
   return `﻿${cuerpo}\r\n`;
+}
+
+/** «+2h 30m» / «−1h 05m» / «0h 00m». El signo importa y va delante. */
+export function diferenciaLarga(min: number): string {
+  if (min === 0) return formatDuration(0);
+  // Menos matemático (U+2212) y no guion: es el que WinAnsi sí conoce
+  // —`→` no, y eso costó un 500 en el PDF de F1— y el que no se confunde
+  // con un guion de separación al leer la columna.
+  return `${min > 0 ? "+" : "\u2212"}${formatDuration(Math.abs(min))}`;
 }
 
 function localDay(d: Date, timeZone: string): string {
@@ -286,7 +342,25 @@ export async function buildRegistroPdf(input: ExportInput): Promise<Uint8Array> 
     y -= 13;
     texto("Total del mes", COL.sal, 9, bold);
     texto(formatDuration(b.totalMinutes), COL.tot, 9.5, bold);
-    y -= 26;
+    y -= 14;
+    // personal-1 · el planificado DEBAJO del total y no en una columna
+    // nueva: la tabla ya tiene cinco columnas y el bucle visual de F1 se
+    // pasó media sesión arreglando que un nombre largo pisara la de al
+    // lado. Una línea más por persona no puede solaparse con nada.
+    if (b.plannedMinutes != null) {
+      espacio(20);
+      texto("Planificado en el cuadrante", COL.sal, 8, font, SOFT);
+      texto(formatDuration(b.plannedMinutes), COL.tot, 8.5, font, SOFT);
+      texto(
+        `Diferencia ${diferenciaLarga(b.totalMinutes - b.plannedMinutes)}`,
+        COL.obs,
+        8,
+        font,
+        SOFT,
+      );
+      y -= 14;
+    }
+    y -= 12;
   }
 
   // ── las correcciones, al final ───────────────────────────────────────

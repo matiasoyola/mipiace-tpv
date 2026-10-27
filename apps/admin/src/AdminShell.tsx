@@ -12,6 +12,7 @@ import {
   Calculator,
   CalendarCheck,
   CalendarClock,
+  CalendarDays,
   ClipboardCheck,
   ClipboardList,
   Clock,
@@ -335,6 +336,26 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/admin/fichaje/registro",
     label: "Registro de jornada",
     icon: ClipboardList,
+    capability: "fichaje",
+  },
+  // personal-1 · dos entradas más, y no cuatro: la importación, la ficha
+  // de una persona, los cambios del cuadrante y las reglas se llegan desde
+  // dentro. El menú de una residencia ya tenía dieciocho entradas y
+  // cuadro-de-control acabó de desmontarlo; añadirle cuatro habría sido
+  // volver a empezar.
+  //
+  // El orden es el del trabajo: primero quién trabaja aquí, después qué
+  // hace cada día.
+  {
+    to: "/admin/fichaje/personal",
+    label: "Personal",
+    icon: Users,
+    capability: "fichaje",
+  },
+  {
+    to: "/admin/fichaje/cuadrante",
+    label: "Cuadrante",
+    icon: CalendarDays,
     capability: "fichaje",
   },
   // residencia-5 (decisión de producto 5) · **EL PANEL VA PRIMERO.** Es

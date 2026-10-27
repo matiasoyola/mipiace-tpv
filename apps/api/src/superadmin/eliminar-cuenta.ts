@@ -674,6 +674,9 @@ export interface ResultadoEliminacion {
     turnos: number;
     fichajes: number;
     empleados: number;
+    /** personal-1 · los cuadrantes mensuales. La cascada se lleva sus
+     *  celdas y su registro de cambios. */
+    cuadrantes: number;
     enlacesPublicos: number;
   };
 }
@@ -752,6 +755,17 @@ export async function eliminarLaCuenta(params: {
       where: { register: { store: { tenantId } } },
     });
     const fichajes = await tx.timeEntry.deleteMany({ where: { tenantId } });
+    // personal-1 · el cuadrante ANTES de los empleados. `StaffScheduleCell`
+    // y `StaffScheduleChange` apuntan al empleado con **RESTRICT**, así que
+    // dejarlos para la cascada del paso 7 haría rebotar esta línea con un
+    // error de Postgres en crudo — mismo caso exacto que los bonos con
+    // `clients`, y medido con el e2e de personal-1.
+    //
+    // Se borra la CABECERA y la cascada se lleva celdas y cambios: sus dos
+    // triggers llevan la escapatoria del «padre borrado», y el de la
+    // cabecera lleva la de la marca de ADR-021 §5 (un cuadrante publicado
+    // no se borra por ninguna otra puerta).
+    const cuadrantes = await tx.staffSchedule.deleteMany({ where: { tenantId } });
     const empleados = await tx.employee.deleteMany({ where: { tenantId } });
     const enlacesPublicos = await tx.publicLink.deleteMany({ where: { tenantId } });
     // B-reservas-8 · ver el paso 6b de la cabecera.
@@ -769,6 +783,7 @@ export async function eliminarLaCuenta(params: {
         turnos: turnos.count,
         fichajes: fichajes.count,
         empleados: empleados.count,
+        cuadrantes: cuadrantes.count,
         enlacesPublicos: enlacesPublicos.count,
       },
     };

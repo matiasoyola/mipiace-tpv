@@ -75,7 +75,44 @@ export interface TodayResponse {
     entryId: string;
     startedAt: string;
   }>;
-  notClockedIn: Array<{ employeeId: string; employeeName: string }>;
+  /** `null` cuando el mes tiene cuadrante publicado: entonces la columna
+   *  no se pinta, porque `planned` contesta mejor la misma pregunta. */
+  notClockedIn: Array<{ employeeId: string; employeeName: string }> | null;
+  /** personal-1 (punto 9) · planificado frente a fichado. `null` cuando el
+   *  mes no tiene cuadrante publicado: la pantalla dice «publica el
+   *  cuadrante para poder comparar» en vez de pintar tres listas vacías,
+   *  que se leen como «todo en orden». */
+  planned: {
+    toleranceMinutes: number;
+    marginHours: number;
+    withoutClockIn: Array<{
+      employeeId: string;
+      employeeName: string;
+      dia: string;
+      turnoId: string;
+      code: string;
+      inicioAt: string;
+      minutosDeRetraso: number;
+    }>;
+    withoutShift: Array<{
+      entryId: string;
+      employeeId: string;
+      employeeName: string;
+      dia: string;
+      inicioAt: string;
+    }>;
+    pastTheirHour: Array<{
+      entryId: string;
+      employeeId: string;
+      employeeName: string;
+      dia: string;
+      inicioAt: string;
+      turnoId: string;
+      code: string;
+      finPlanificadoAt: string;
+      horasDeMas: number;
+    }>;
+  } | null;
   alerts: {
     missingExit: Array<{
       entryId: string;
@@ -204,4 +241,266 @@ export function componerLocal(
   const off2 = off(r);
   if (off2 !== off(guess)) r = guess - off2;
   return new Date(r).toISOString();
+}
+
+// ══ personal-1 · la ficha de personal y el cuadrante ═══════════════════
+//
+// Los tipos de las respuestas nuevas y las funciones de lectura que las
+// tres pantallas comparten. **El cálculo no se rehace aquí**, con una
+// excepción declarada: `comprobarCuadrante` se ejecuta también en el
+// navegador (viene del paquete puro) para pintar los avisos en el mismo
+// toque, sin esperar al servidor. Es la MISMA función, no una copia.
+
+export type PesoDelDato = "IMPRESCINDIBLE" | "RECOMENDABLE";
+
+export interface DatoQueFalta {
+  campo: string;
+  etiqueta: string;
+  peso: PesoDelDato;
+}
+
+export interface EstadoDeFicha {
+  faltan: DatoQueFalta[];
+  incompleta: boolean;
+  conImprescindibles: boolean;
+}
+
+export interface CategoriaRow {
+  id: string;
+  code: string;
+  name: string;
+  countsAsDirectCare: boolean;
+  isStandard?: boolean;
+  active?: boolean;
+  employees?: number;
+}
+
+export interface PersonalRow {
+  id: string;
+  name: string;
+  lastName: string | null;
+  nombreCompleto: string;
+  categoryId: string | null;
+  categoria: string | null;
+  atencionDirecta: boolean;
+  weeklyMinutes: number | null;
+  contractKind: string | null;
+  hiredOn: string | null;
+  contractEndsOn: string | null;
+  phone: string | null;
+  email: string | null;
+  active: boolean;
+  tieneDni: boolean;
+  tieneAfiliacion: boolean;
+  faltan: EstadoDeFicha;
+}
+
+export interface PersonalResponse {
+  personal: PersonalRow[];
+  categorias: CategoriaRow[];
+  resumen: {
+    total: number;
+    incompletas: number;
+    datosPendientes: number;
+    conImprescindibles: number;
+    contratosQueAcaban: Array<{
+      employeeId: string;
+      nombre: string;
+      contractEndsOn: string;
+      dias: number;
+    }>;
+  };
+}
+
+export interface FichaResponse {
+  ficha: {
+    id: string;
+    name: string;
+    lastName: string | null;
+    dni: string | null;
+    afiliacion: string | null;
+    categoryId: string | null;
+    weeklyMinutes: number | null;
+    contractKind: string | null;
+    hiredOn: string | null;
+    contractEndsOn: string | null;
+    phone: string | null;
+    email: string | null;
+    userId: string | null;
+    active: boolean;
+    faltan: DatoQueFalta[];
+    estado: EstadoDeFicha;
+  };
+  /** Lo que la ficha ENSEÑA de las otras dos «personas». No lo mueve. */
+  vinculo: {
+    userId: string;
+    nombre: string | null;
+    rol: string | null;
+    rolesDeCuidado: Array<{ code: string; name: string; desde: string }>;
+    perfilDeAgenda: { displayName: string; active: boolean } | null;
+  } | null;
+}
+
+export interface TurnoRow {
+  id: string;
+  code: string;
+  name: string;
+  startsAt: string;
+  endsAt: string;
+  sortOrder: number;
+  coberturaMinima: number | null;
+}
+
+export interface AvisoDeTurnosRow {
+  problema: "SOLAPE" | "HUECO" | "SIN_COBERTURA";
+  codigos: string[];
+  mensaje: string;
+}
+
+export interface AvisoRow {
+  regla: string;
+  gravedad: "ROJO" | "AMBAR";
+  employeeId: string | null;
+  dia: string | null;
+  turnoId: string | null;
+  mensaje: string;
+  falta?: number;
+  exceso?: number;
+  celda: { employeeId: string; dia: string } | null;
+}
+
+export interface CeldaRow {
+  employeeId: string;
+  dia: string;
+  turnoId: string | null;
+  ausencia: string | null;
+}
+
+export interface CuadranteResponse {
+  month: string;
+  dias: string[];
+  cabecera: {
+    id: string;
+    month: string;
+    state: "BORRADOR" | "PUBLICADO";
+    origin: "MANUAL" | "GENERADO";
+    publishedAt: string | null;
+    publishedBy: string | null;
+    warningsAtPublish: number | null;
+  } | null;
+  turnos: TurnoRow[];
+  personas: Array<{
+    employeeId: string;
+    nombre: string;
+    atencionDirecta: boolean;
+    minutosContratados: number | null;
+    altaEl: string | null;
+    finEl: string | null;
+    active: boolean;
+    categoria: string | null;
+  }>;
+  celdas: CeldaRow[];
+  ausencias: string[];
+  reglas: {
+    ratioAtencionDirecta: number;
+    minutosDeJornadaCompleta: number;
+    horasDescansoDiario: number;
+    horasDescansoSemanal: number;
+    diasComputoSemanal: number;
+    conRatioDeResidencia: boolean;
+  };
+  avisos: AvisoRow[];
+  resumen: {
+    total: number;
+    rojos: number;
+    ambares: number;
+    porRegla: Record<string, number>;
+  };
+  ocupacionPorDia: Record<string, number> | null;
+}
+
+export interface CambioDelCuadranteRow {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  dia: string;
+  antes: string | null;
+  despues: string | null;
+  motivo: string;
+  autor: string;
+  cuando: string;
+}
+
+/** Cómo se lee cada ausencia en la rejilla. */
+export const AUSENCIAS_LABEL: Record<string, string> = {
+  LIBRE: "Libre",
+  VACACIONES: "Vacaciones",
+  IT: "Baja (IT)",
+  ASUNTOS_PROPIOS: "Asuntos propios",
+  PERMISO: "Permiso",
+};
+
+/** Y su abreviatura, que es lo que cabe en una celda de 31 columnas. */
+export const AUSENCIAS_CORTO: Record<string, string> = {
+  LIBRE: "L",
+  VACACIONES: "V",
+  IT: "IT",
+  ASUNTOS_PROPIOS: "AP",
+  PERMISO: "P",
+};
+
+/** Cómo se lee cada regla en el resumen de arriba. */
+export const REGLAS_LABEL: Record<string, string> = {
+  COBERTURA: "Cobertura del turno",
+  RATIO: "Ratio de atención directa",
+  DESCANSO_DIARIO: "Descanso entre jornadas",
+  DESCANSO_SEMANAL: "Descanso semanal",
+  HORAS_SEMANA: "Horas de la semana",
+  HORAS_MES: "Horas del mes",
+  DOS_SITIOS_A_LA_VEZ: "Dos turnos a la vez",
+  FUERA_DE_CONTRATO: "Fuera de contrato",
+};
+
+/** 2 250 → «37,5 h». Y `null` → «—», que es «no se sabe». */
+export function jornada(minutos: number | null): string {
+  if (minutos == null) return "—";
+  return `${String(Math.round((minutos / 60) * 10) / 10).replace(".", ",")} h`;
+}
+
+/** «+2h 30m» / «−1h 05m». El signo delante, y el menos matemático. */
+export function diferencia(minutos: number): string {
+  if (minutos === 0) return duracion(0);
+  return `${minutos > 0 ? "+" : "−"}${duracion(Math.abs(minutos))}`;
+}
+
+/**
+ * «42 min» / «7h 42m». Lo que se lee de un retraso.
+ *
+ * Por encima de hora y media se pasa a horas: «462 min de retraso»
+ * obliga a hacer la cuenta, y lo que la dirección quiere saber de un
+ * turno de mañana a las cuatro de la tarde es que lleva siete horas sin
+ * aparecer. Lo enseñó el bucle visual.
+ */
+export function retraso(minutos: number): string {
+  if (minutos < 90) return `${minutos} min`;
+  return duracion(minutos);
+}
+
+/** El día del mes, «1»…«31». Es lo que va en la cabecera de la rejilla. */
+export function numeroDeDia(dia: string): string {
+  return String(Number(dia.slice(8, 10)));
+}
+
+/** «L», «M», «X»… la inicial del día de la semana, para la segunda fila
+ *  de la cabecera. Sin ella, 31 números no dicen dónde cae el fin de
+ *  semana — que es lo primero que se mira en un cuadrante. */
+export function inicialDeDiaSemana(dia: string): string {
+  const d = new Date(`${dia}T12:00:00Z`);
+  return ["D", "L", "M", "X", "J", "V", "S"][d.getUTCDay()]!;
+}
+
+/** `true` si es sábado o domingo. La rejilla los pinta más grises. */
+export function esFinDeSemana(dia: string): boolean {
+  const d = new Date(`${dia}T12:00:00Z`).getUTCDay();
+  return d === 0 || d === 6;
 }

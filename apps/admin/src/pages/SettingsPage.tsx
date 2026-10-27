@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FileText } from "lucide-react";
+import { FileText, Scale } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import {
@@ -42,6 +42,10 @@ interface TenantSettings {
   // ella — todas menos "Módulos del negocio", que es lo que una empresa
   // sin caja viene a tocar. Opcional por si el backend va por detrás.
   cajaEnabled?: boolean;
+  // personal-1 · sólo lectura, como `cajaEnabled`, y por lo mismo: la
+  // enciende el super-admin. Aquí sirve para enseñar la puerta de las
+  // reglas del cuadrante sólo a quien tiene el módulo.
+  fichajeEnabled?: boolean;
 }
 
 const AUTO_LOGOUT_MIN = 5;
@@ -316,6 +320,30 @@ export function SettingsPage() {
           Ver la declaración responsable
         </Link>
       </Section>
+
+      {/* personal-1 (decisión 7) · los parámetros de las reglas del
+          cuadrante. El prompt los pide «en Ajustes», y aquí está su puerta:
+          el contenido vive en su propia pantalla porque son seis
+          parámetros MÁS la cobertura mínima de cada turno, y meter eso en
+          esta página la habría convertido en la lista de dieciocho
+          opciones que cuadro-de-control acababa de desmontar.
+
+          Fuera del bloque gateado por `cajaEnabled`, como la declaración:
+          el cliente cero del control horario es un colegio sin caja. */}
+      {settings.fichajeEnabled === true && (
+        <Section
+          title="Reglas del cuadrante"
+          subtitle="La ratio de atención directa, los descansos y la cobertura mínima de cada turno. Es lo que el cuadrante comprueba al pintarlo y lo que deja apuntado al publicarlo."
+        >
+          <Link
+            to="/admin/fichaje/reglas"
+            className="inline-flex items-center gap-2 text-[14px] font-medium text-mipiace-coral hover:text-mipiace-coral-dark"
+          >
+            <Scale className="w-4 h-4" strokeWidth={2.1} />
+            Ver y cambiar las reglas
+          </Link>
+        </Section>
+      )}
 
       {canEdit && (
         <div className="flex gap-2.5 mt-6">

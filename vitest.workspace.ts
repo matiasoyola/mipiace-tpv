@@ -9,6 +9,9 @@ export default [
   "packages/escpos-builder",
   "packages/holded-client",
   "packages/kitchen-lan",
+  // personal-1 · el paquete puro del cuadrante (`comprobarCuadrante`), la
+  // ficha de personal y la importación CSV.
+  "packages/cuadrante",
   // residencia-2 · el paquete puro del plan de cuidados (`queToca`).
   "packages/residencia-plan",
   "packages/ticket-model",

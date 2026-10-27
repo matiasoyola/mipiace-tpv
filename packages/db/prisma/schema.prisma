@@ -1415,6 +1415,24 @@ model Tenant {
   // El rango 8–24 vive además en un CHECK de la base
   // (`tenants_fichaje_max_open_hours_check`).
   fichajeMaxOpenHours            Int               @default(16) @map("fichaje_max_open_hours")
+  // personal-1 · EL MARGEN SOBRE EL FIN DEL TURNO PLANIFICADO.
+  //
+  // #45 dejó la salida olvidada decidida por duración, con el máximo de
+  // arriba. Lo que personal-1 añade es que, CUANDO la persona tiene turno
+  // en el cuadrante, el límite sea además «el fin de su turno más este
+  // margen»: la auxiliar de noche sale a las 08:00, y si a las 13:00 sigue
+  // dentro nadie tenía por qué esperar a las 16 h para enterarse.
+  //
+  // Hermana de `fichajeMaxOpenHours` en TODO: entero por tenant, default
+  // que no cambia a nadie (sin cuadrante no se usa), rango en un CHECK de
+  // la base (`tenants_fichaje_shift_margin_hours_check`, 1–12) y en el
+  // schema de la ruta, y la mueve SÓLO el super-admin porque no hay
+  // pantalla para esto.
+  //
+  // El límite que decide es el MENOR de los dos (ver `limiteDeSalidaOlvidada`
+  // en `@mipiacetpv/cuadrante`): el turno planificado aprieta, nunca
+  // afloja.
+  fichajeShiftMarginHours        Int               @default(4) @map("fichaje_shift_margin_hours")
   // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
   // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
   // que responde a otra pregunta: ¿lo tiene conectado YA?
@@ -1734,6 +1752,23 @@ model Tenant {
   correctiveActionEvidences     CorrectiveActionEvidence[]
   effectivenessVerifications    EffectivenessVerification[]
 
+  // personal-1 · el catálogo de categorías profesionales, el cuadrante
+  // mensual con sus celdas y su registro de cambios, y los parámetros de
+  // las reglas.
+  //
+  // El catálogo y los ajustes se van con el centro (`Cascade`): son su
+  // configuración. El cuadrante también, y es deliberado: lo que se
+  // conserva cuatro años es el REGISTRO de jornada (`time_entries`, que
+  // cuelga con su propio trigger de no-borrado), no lo que estaba
+  // previsto. Un cuadrante publicado no se borra —lo impide
+  // `staff_schedules_delete_guard`— salvo que el tenant entero se vaya,
+  // que es la única escapatoria que el trigger admite.
+  employeeCategories            EmployeeCategory[]
+  staffSchedules                StaffSchedule[]
+  staffScheduleCells            StaffScheduleCell[]
+  staffScheduleChanges          StaffScheduleChange[]
+  staffRuleSettings             StaffRuleSettings?
+
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
   // de tabla; con 1 tenant es invisible, pero ya documentamos el
@@ -1992,6 +2027,17 @@ model User {
   // unicidad de verdad es `@@unique([tenantId, userId])` en `Employee`, y
   // un `User` pertenece a un solo tenant, así que como mucho hay uno.
   employees Employee[]
+
+  // personal-1 · los cuatro papeles de este usuario en el cuadrante: quién
+  // lo creó, quién lo publicó, quién firmó un cambio y quién cambió los
+  // parámetros de las reglas. Los cuatro con `SetNull` al otro lado: borrar
+  // a quien publicó un cuadrante no puede borrar el cuadrante, y el nombre
+  // queda congelado en `publishedBy` / `author` para que la firma no
+  // enmudezca.
+  staffSchedulesCreated   StaffSchedule[]       @relation("StaffScheduleCreatedBy")
+  staffSchedulesPublished StaffSchedule[]       @relation("StaffSchedulePublishedBy")
+  staffScheduleChanges    StaffScheduleChange[] @relation("StaffScheduleChangeAuthor")
+  staffRuleSettingsSet    StaffRuleSettings[]   @relation("StaffRuleSettingsUpdatedBy")
 
   // clinica-1 · los cuatro papeles que un usuario puede tener en la
   // historia clínica. Listas por exigencia de Prisma; lo que importa de
@@ -5016,6 +5062,52 @@ enum TimeEntryCorrectionReason {
   OTRO
 }
 
+/// personal-1 · tipo de contrato. Cerrado y de dos valores, que son los
+/// dos que hay en el Estatuto. De esto cuelga «un temporal a 15 días de su
+/// fecha de fin sale como aviso en el panel», y un valor inventado por un
+/// centro no tendría esa semántica.
+enum EmployeeContractKind {
+  INDEFINIDO
+  TEMPORAL
+}
+
+/// personal-1 (decisión 6) · el cuadrante nace en borrador y «Publicar» lo
+/// fija. No hay vuelta: despublicar sería la forma elegante de borrar el
+/// registro de cambios (bajas a borrador, mueves lo que quieras sin traza
+/// y vuelves a publicar). Lo impide `staff_schedules_guard`.
+enum StaffScheduleState {
+  BORRADOR
+  PUBLICADO
+}
+
+/// personal-1 (decisión 6) · de dónde salió el cuadrante.
+///
+/// `GENERADO` no lo escribe nada todavía: es **personal-2**, que generará
+/// borradores con IA y los dejará para que una persona los publique igual.
+/// La columna nace ahora porque añadir un valor a un enum después obliga a
+/// repasar quién lo compara.
+enum StaffScheduleOrigin {
+  MANUAL
+  GENERADO
+}
+
+/// personal-1 (decisión 5) · las cinco ausencias que puede tener una celda.
+///
+/// Cerrado, y es una decisión: cada una significa algo **distinto para las
+/// reglas** —`LIBRE` cuenta como descanso semanal, `VACACIONES` e `IT` no
+/// cuentan como horas planificadas— así que un tipo inventado por un
+/// centro no tendría semántica en `comprobarCuadrante` y el aviso saldría
+/// mal. Mismo criterio que `TimeEntryCorrectionReason`.
+enum StaffAbsenceKind {
+  /// Día libre. Es el que cuenta como descanso semanal.
+  LIBRE
+  VACACIONES
+  /// Incapacidad temporal.
+  IT
+  ASUNTOS_PROPIOS
+  PERMISO
+}
+
 /// Quien ficha. Deliberadamente NO es un `User`: un colegio tiene
 /// profesores que no son ni cajeros ni propietarios y que no entran al
 /// panel jamás. Y deliberadamente NO cuelga de `StaffProfile`: eso es la
@@ -5024,10 +5116,20 @@ enum TimeEntryCorrectionReason {
 model Employee {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId      String    @map("tenant_id") @db.Uuid
+  /// El nombre. **No se parte en un backfill**: las 21 fichas de Jardín de
+  /// Gredos se crearon con el nombre completo aquí dentro, y separar
+  /// «María del Carmen Fernández-Escalona» a ciegas no es fiable. La
+  /// importación CSV casa por nombre completo normalizado y, al completar
+  /// la ficha, deja el nombre aquí y los apellidos en `lastName`.
   name          String
   email         String?
   phone         String?
   /// Opcional. Sólo lo tiene quien además entra al panel.
+  ///
+  /// personal-1 (decisión 1) · es el VÍNCULO y nada más. Cuando lo hay, la
+  /// ficha de personal ENSEÑA los roles de cuidado (`CareRoleAssignment`)
+  /// y el perfil de agenda (`StaffProfile`) de ese usuario; no los mueve
+  /// ni los copia. Nada se fusiona.
   userId        String?   @map("user_id") @db.Uuid
   /// La baja DESACTIVA; no borra. Sus fichajes se conservan 4 años, y el
   /// trigger de la migración impide borrarlos aunque alguien lo intente.
@@ -5036,18 +5138,117 @@ model Employee {
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
+  // ── personal-1 · la ficha ──────────────────────────────────────────
+  //
+  // Todo opcional salvo el nombre, que ya lo era. Es la lección de
+  // alta-minima aplicada al personal: la auxiliar ya trabaja aquí y no
+  // saber su nº de afiliación no hace que fiche menos. Lo que falta lo
+  // enumera `datosQueFaltanDePersonal` (paquete puro) y lo cantan la lista
+  // y el panel hasta que esté completo.
+
+  /// Los apellidos. Separados del nombre porque el cuadrante y el PDF de
+  /// la Inspección los ordenan por apellido, no por nombre de pila.
+  lastName        String?   @map("last_name")
+  /// residencia-1b / clinica-7 · **el DNI/NIE, CIFRADO**. No hay columna
+  /// en claro y no la ha habido nunca: nace cifrada, así que aquí no hay
+  /// EXPAND/CONTRACT ni respaldo que vaciar. Sitio:
+  /// `sitioDniDeEmpleado(tenantId, employeeId)`.
+  dniCifrado      String?   @map("dni_cifrado")
+  /// Y el nº de afiliación a la Seguridad Social, ídem.
+  /// `sitioAfiliacionDeEmpleado(tenantId, employeeId)`.
+  nssCifrado      String?   @map("nss_cifrado")
+  /// La categoría profesional, del catálogo del tenant. De ella cuelga
+  /// `countsAsDirectCare`, que es lo que mira la ratio.
+  categoryId      String?   @map("category_id") @db.Uuid
+  /// La jornada contratada, **en MINUTOS a la semana**. 37,5 h = 2 250.
+  /// Entero y no decimal por lo mismo que todo lo que compara jornadas en
+  /// esta casa (`minutesWorked`, `totalMinutes`): el paquete puro del
+  /// cuadrante compara enteros sin convertir nada. El panel pide y enseña
+  /// horas.
+  weeklyMinutes   Int?      @map("weekly_minutes")
+  contractKind    EmployeeContractKind? @map("contract_kind")
+  hiredOn         DateTime? @map("hired_on") @db.Date
+  /// Sólo en los temporales, por CHECK en la base. Un temporal a 15 días
+  /// de esta fecha sale como aviso en el panel: es lo que hoy se olvida.
+  contractEndsOn  DateTime? @map("contract_ends_on") @db.Date
+  /// personal-1 · hasta cuándo ha visto su cuadrante. Lo mueve sólo el
+  /// acuse explícito del móvil (`POST /fichaje/v1/cuadrante/visto`): si lo
+  /// moviera la propia lectura, los cambios marcados desaparecerían al
+  /// recargar la pantalla, que es justo cuando la persona los está
+  /// mirando.
+  scheduleSeenAt  DateTime? @map("schedule_seen_at") @db.Timestamptz()
+
   tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user          User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// `Restrict`: una categoría con gente dentro no se borra; se desactiva.
+  category      EmployeeCategory?      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   devices       EmployeeDevice[]
   pairingTokens EmployeePairingToken[]
   timeEntries   TimeEntry[]
+  /// personal-1 · sus celdas del cuadrante y los cambios que le afectaron.
+  /// `Restrict` a los dos lados (ver los modelos): un cuadrante publicado
+  /// dice quién tenía qué turno, y la baja de una persona DESACTIVA.
+  scheduleCells   StaffScheduleCell[]
+  scheduleChanges StaffScheduleChange[]
 
   /// Un `User` no puede ser dos empleados del mismo tenant. Postgres
   /// permite NULLs repetidos, así que los empleados sin usuario —la
   /// mayoría— no chocan entre sí.
   @@unique([tenantId, userId])
   @@index([tenantId, active])
+  /// personal-1 · «¿a quién se le acaba el contrato este mes?» es la
+  /// pregunta del aviso del panel, y la única consulta nueva de la ficha
+  /// que recorre la tabla.
+  @@index([categoryId])
+  @@index([tenantId, contractEndsOn])
   @@map("employees")
+}
+
+/// personal-1 (decisión 2) · EL CATÁLOGO DE CATEGORÍAS PROFESIONALES.
+///
+/// **Dato, no código**, y por tenant con semilla de serie: mismo criterio
+/// exacto que `CareRole` en residencia-1, y por la misma razón medida allí
+/// (una residencia que invente «fisio de tarde» no puede costar un
+/// despliegue, y «¿cuenta como atención directa?» corre en cada
+/// comprobación del cuadrante y no puede ser una unión).
+///
+/// La columna que importa es `countsAsDirectCare`: es lo que mira la ratio
+/// del Decreto 2/2022 y lo que mira la cobertura mínima de un turno.
+///
+/// Y a diferencia de la categoría de un `CareRole` —que un trigger
+/// congela— ésta es **editable**: qué cuenta como atención directa lo dice
+/// la acreditación de cada centro, no nosotros. Lo que un centro no puede
+/// es borrar una categoría con gente dentro (`Restrict` desde
+/// `Employee.categoryId`); se desactiva.
+///
+/// Los de serie dependen de los módulos encendidos: una residencia recibe
+/// auxiliar/DUE/médico/TO/fisio/limpieza/cocina/dirección/administración;
+/// un colegio recibe los cuatro que tiene un centro sin cuidados. Ver
+/// `CATEGORIAS_DE_SERIE` en `@mipiacetpv/cuadrante`.
+model EmployeeCategory {
+  id                 String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String  @map("tenant_id") @db.Uuid
+  /// `AUXILIAR`, `DUE`, `PROFESOR`… Único por centro.
+  code               String
+  name               String
+  /// **Lo que mira la ratio.** `false` de serie: una categoría nueva no
+  /// cuenta como atención directa hasta que alguien lo diga. Al revés, una
+  /// categoría recién inventada inflaría la ratio sin que nadie la hubiera
+  /// marcado.
+  countsAsDirectCare Boolean @default(false) @map("counts_as_direct_care")
+  isStandard         Boolean @default(false) @map("is_standard")
+  active             Boolean @default(true)
+  sortOrder          Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employees Employee[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, active])
+  @@map("employee_categories")
 }
 
 /// El móvil personal del empleado, emparejado con un enlace de un solo
@@ -5199,6 +5400,208 @@ model TimeEntryCorrection {
   /// siguiente `migrate dev` lo vería como sobrante y lo borraría.
   @@index([txid, timeEntryId, field])
   @@map("time_entry_corrections")
+}
+
+// ══ personal-1 · EL CUADRANTE ══════════════════════════════════════════
+//
+// El cuadrante dice lo que estaba PREVISTO; `time_entries` dice lo que
+// PASÓ. La gracia del bloque es poder comparar los dos — y nada de lo que
+// hay aquí toca ADR-018: ni un camino nuevo para mover una hora.
+//
+// Lo que Prisma NO expresa y vive en
+// `20261027010000_personal_1_cuadrante`:
+//
+//   · `set_staff_schedule_day(...)` — la ÚNICA vía para pintar una celda.
+//     Escribe la traza y después toca las celdas, en la misma transacción.
+//   · `mipiacetpv_staff_schedule_change_exists(...)` — lo que el trigger
+//     consulta (`txid_current()`).
+//   · 4 triggers: append-only del registro de cambios, el guard de las
+//     celdas (una celda no se edita: se sustituye; y en un cuadrante
+//     publicado no se mueve sin motivo), «publicar fija» y «un cuadrante
+//     publicado no se borra».
+//   · los dos índices únicos de la celda, uno de ellos PARCIAL.
+
+/// personal-1 (decisión 6) · LA CABECERA MENSUAL DEL CUADRANTE.
+model StaffSchedule {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  /// «YYYY-MM» de pared del centro. Texto y no `date` por lo mismo que
+  /// `CenterShift.startsAt` es texto: un mes no es un instante, y
+  /// guardarlo como el día 1 a las 00:00 obligaría a elegir un huso cada
+  /// vez que se lee. CHECK de formato en la migración.
+  month    String
+  state    StaffScheduleState  @default(BORRADOR)
+  origin   StaffScheduleOrigin @default(MANUAL)
+
+  publishedAt       DateTime? @map("published_at") @db.Timestamptz()
+  publishedByUserId String?   @map("published_by_user_id") @db.Uuid
+  /// El nombre congelado, como `TimeEntryCorrection.author`: un usuario que
+  /// se borra no puede dejar muda la firma de un cuadrante.
+  publishedBy       String?   @map("published_by")
+  /// Cuántos avisos tenía al publicarse, y cuáles. «Publicar con avisos
+  /// pide confirmarlo y los deja apuntados»: sin esto, a los seis meses
+  /// «¿se publicó sabiendo que el sábado faltaba una auxiliar?» no se
+  /// puede contestar.
+  warningsAtPublish Int?      @map("warnings_at_publish")
+  warningsSnapshot  Json?     @map("warnings_snapshot")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  publishedByUser User?             @relation("StaffSchedulePublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  createdByUser   User?             @relation("StaffScheduleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  cells       StaffScheduleCell[]
+  changes     StaffScheduleChange[]
+
+  @@unique([tenantId, month])
+  @@index([tenantId, state])
+  @@map("staff_schedules")
+}
+
+/// personal-1 (decisión 5) · LA CELDA: persona × día → turno o ausencia.
+///
+/// **Una fila por turno, no una por celda.** Una persona puede tener un
+/// turno partido o dos turnos un día (raro, pero existe), y con una
+/// columna `shiftId` por celda eso no cabe. La pantalla puede dejar el
+/// partido para más adelante; el modelo no puede.
+///
+/// Un turno **o** una ausencia, nunca las dos ni ninguna (CHECK). Y una
+/// celda **no se edita**: se sustituye entera, porque «la celda» no es una
+/// fila cuando el día lleva dos turnos. El trigger rechaza cualquier
+/// `UPDATE` sobre esta tabla, también en borrador.
+model StaffScheduleCell {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  scheduleId    String    @map("schedule_id") @db.Uuid
+  employeeId    String    @map("employee_id") @db.Uuid
+  day           DateTime  @db.Date
+  centerShiftId String?   @map("center_shift_id") @db.Uuid
+  absenceKind   StaffAbsenceKind? @map("absence_kind")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  schedule    StaffSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  /// `Restrict`: un cuadrante publicado dice quién tenía qué turno, y la
+  /// baja de una persona DESACTIVA (F1). Si se pudiera borrar al empleado,
+  /// la cascada se llevaría su cuadrante.
+  employee    Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// Y `Restrict` al turno, por lo mismo que `CareRecord`: borrar «la
+  /// noche» dejaría un cuadrante publicado apuntando a nada.
+  centerShift CenterShift?  @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+
+  /// El mismo turno dos veces el mismo día a la misma persona es un doble
+  /// toque, no un turno partido. Las filas de ausencia tienen
+  /// `centerShiftId` NULL y Postgres considera los NULL distintos, así que
+  /// este único no las toca — de eso se encarga el PARCIAL de la
+  /// migración (`staff_schedule_cells_una_ausencia_por_dia_key`), que es
+  /// la mitad que éste no puede cubrir. Misma lección exacta que
+  /// `care_zone_assignments_one_live_centro_key`.
+  @@unique([scheduleId, employeeId, day, centerShiftId], map: "staff_schedule_cells_un_turno_por_dia_key")
+  @@index([scheduleId, day])
+  @@index([employeeId, day])
+  @@index([tenantId, day])
+  @@map("staff_schedule_cells")
+}
+
+/// personal-1 (decisión 6) · EL REGISTRO DE CAMBIOS TRAS PUBLICAR.
+///
+/// Append-only por trigger, copiando `TimeEntryCorrection` (ADR-018 §3).
+/// Es lo que pide la Inspección cuando un trabajador dice que le cambiaron
+/// el turno sin avisar: qué tenía, qué tiene, quién lo cambió, cuándo y
+/// por qué.
+model StaffScheduleChange {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  scheduleId String   @map("schedule_id") @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  day        DateTime @db.Date
+
+  /// Las ETIQUETAS, no los ids: «N», «VACACIONES», «M+T» cuando el día
+  /// lleva dos turnos. `null` = no había nada / no queda nada. Un id de
+  /// turno borrado deja la traza muda, y la traza es lo que se le enseña a
+  /// quien reclama. Mismo criterio que `author` congelado.
+  beforeLabel String? @map("before_label")
+  afterLabel  String? @map("after_label")
+
+  /// Obligatorio, y en la base. «Editar una celda publicada sin motivo» es
+  /// el sabotaje que esta columna cierra.
+  reason       String
+  author       String
+  authorUserId String? @map("author_user_id") @db.Uuid
+
+  /// `txid_current()` del momento del cambio. Es lo que el trigger de las
+  /// celdas consulta para saber si el cambio y la traza son la MISMA
+  /// transacción. Mismo mecanismo exacto que ADR-018.
+  txid      BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  schedule   StaffSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  employee   Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  authorUser User?         @relation("StaffScheduleChangeAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([scheduleId, createdAt])
+  @@index([tenantId, createdAt])
+  /// Lo consulta el trigger en CADA escritura de celda de un cuadrante
+  /// publicado. El nombre es el que generaría Prisma para este `@@index`:
+  /// si no, el siguiente `migrate dev` lo vería como sobrante.
+  @@index([txid, scheduleId, employeeId, day])
+  @@map("staff_schedule_changes")
+}
+
+/// personal-1 (decisión 7) · LOS PARÁMETROS DE LAS REGLAS, POR TENANT.
+///
+/// **Parámetros, no constantes en el código**, y no por gusto: la ratio de
+/// atención directa cambia por comunidad autónoma y por acreditación (0,20
+/// es el Decreto 2/2022 de Castilla-La Mancha), y el cómputo del descanso
+/// semanal lo permite el art. 37.1 del ET hasta 14 días.
+///
+/// Una fila por tenant, creada la primera vez que alguien abre el
+/// cuadrante. **Si no existe, se leen los defaults**: mismo criterio que
+/// `maxOpenHoursFor`, que falla hacia el default. Un centro sin fila se
+/// comporta como todos los demás.
+///
+/// Y ésta SÍ la toca el cliente (Ajustes), a diferencia de
+/// `Tenant.fichajeMaxOpenHours` y de `Tenant.fichajeShiftMarginHours`: la
+/// ratio de su acreditación la sabe la dirección del centro.
+///
+/// El convenio colectivo **no** está aquí y no es un olvido: sus límites
+/// entrarán como parámetros cuando Matías los confirme. Meterlos en código
+/// sería fijar en el producto lo que cada centro negocia.
+model StaffRuleSettings {
+  tenantId String @id @map("tenant_id") @db.Uuid
+
+  /// La ratio en MILÉSIMAS: 0,20 → 200. Entero y no `Decimal` por dos
+  /// razones: el paquete puro compara enteros sin que Prisma le meta un
+  /// `Decimal` dentro, y el rango del CHECK se lee («entre 0 y 2 000
+  /// milésimas») sin ir a buscar una escala decimal.
+  ratioDirectCarePerMil  Int @default(200) @map("ratio_direct_care_per_mil")
+  /// Art. 34.3 ET: 12 h entre el fin de una jornada y el inicio de la
+  /// siguiente.
+  minRestHours           Int @default(12)  @map("min_rest_hours")
+  /// Art. 37.1 ET: día y medio ininterrumpido = 36 h.
+  weeklyRestHours        Int @default(36)  @map("weekly_rest_hours")
+  /// …computable «por períodos de hasta catorce días». 7 de serie.
+  weeklyRestWindowDays   Int @default(7)   @map("weekly_rest_window_days")
+  /// Cuántos minutos después del inicio de su turno se considera que
+  /// alguien «no ha fichado» (punto 9).
+  noShowToleranceMinutes Int @default(15)  @map("no_show_tolerance_minutes")
+  /// Qué es «una jornada completa» a efectos de la RATIO, en minutos. La
+  /// ratio se mide en jornadas completas equivalentes y no en personas:
+  /// tres auxiliares de cuatro horas no son tres jornadas. 480 (8 h) de
+  /// serie, y parámetro porque una jornada completa de convenio no es la
+  /// misma en todas partes.
+  fullDayMinutes         Int @default(480) @map("full_day_minutes")
+
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz()
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedByUser User?  @relation("StaffRuleSettingsUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("staff_rule_settings")
 }
 
 // V1-verifactu (ADR-019) · EL REGISTRO DE FACTURACIÓN.
@@ -6765,6 +7168,17 @@ model CenterShift {
   endsAt    String @map("ends_at")
   sortOrder Int    @default(0) @map("sort_order")
 
+  /// personal-1 (decisión 4) · **CUÁNTAS PERSONAS DE ATENCIÓN DIRECTA**
+  /// tiene que haber en este turno. Es la primera de las ocho reglas que
+  /// `comprobarCuadrante` mira.
+  ///
+  /// NULLABLE a propósito, y el NULL significa algo: «este centro no ha
+  /// declarado un mínimo para este turno». Los tres turnos que residencia-1
+  /// sembró en Jardín de Gredos no lo tienen, y ponerles un 0 haría que la
+  /// regla dijera «cumple» de todos ellos — que es peor que no decir nada.
+  /// Con NULL la regla no se evalúa y la pantalla lo pide.
+  minCoverage Int? @map("min_coverage")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -6781,6 +7195,9 @@ model CenterShift {
   /// residencia-5 · y el parte de relevo de este turno. `Restrict` por lo
   /// mismo: el turno es la unidad del relevo (D-54, D-58).
   handovers          Handover[]
+  /// personal-1 · y las celdas del cuadrante que lo usan. `Restrict`:
+  /// borrar «la noche» dejaría un cuadrante publicado apuntando a nada.
+  scheduleCells      StaffScheduleCell[]
 
   @@unique([tenantId, code])
   @@index([tenantId])

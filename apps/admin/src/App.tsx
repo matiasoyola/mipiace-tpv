@@ -61,6 +61,16 @@ import { ConfiguracionPage } from "./pages/residencia/ConfiguracionPage.js";
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
 import { RegistroPage } from "./pages/fichaje/RegistroPage.js";
+// personal-1 · la ficha de personal, la importación, el cuadrante, su
+// registro de cambios y las reglas. Las cinco detrás del mismo
+// `FichajeGate` que las tres de F1: esconder la entrada del menú no basta,
+// porque la URL sigue existiendo y alguien la tiene en un marcador.
+import { PersonalPage } from "./pages/fichaje/PersonalPage.js";
+import { FichaPersonalPage } from "./pages/fichaje/FichaPersonalPage.js";
+import { ImportarPersonalPage } from "./pages/fichaje/ImportarPersonalPage.js";
+import { CuadrantePage } from "./pages/fichaje/CuadrantePage.js";
+import { CambiosDelCuadrantePage } from "./pages/fichaje/CambiosDelCuadrantePage.js";
+import { ReglasPage } from "./pages/fichaje/ReglasPage.js";
 import { ContactImportPage } from "./pages/ContactImportPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TagAliasesPage } from "./pages/TagAliasesPage.js";
@@ -259,6 +269,14 @@ export function App() {
         <Route path="/admin/fichaje" element={<FichajeGate title="Control horario"><HoyPage /></FichajeGate>} />
         <Route path="/admin/fichaje/empleados" element={<FichajeGate title="Control horario"><EmpleadosPage /></FichajeGate>} />
         <Route path="/admin/fichaje/registro" element={<FichajeGate title="Control horario"><RegistroPage /></FichajeGate>} />
+        {/* personal-1 · «importar» y «reglas» van ANTES de `/:id` porque
+            si no, el router los tomaría por un id de empleado. */}
+        <Route path="/admin/fichaje/personal" element={<FichajeGate title="Personal"><PersonalPage /></FichajeGate>} />
+        <Route path="/admin/fichaje/personal/importar" element={<FichajeGate title="Importar personal"><ImportarPersonalPage /></FichajeGate>} />
+        <Route path="/admin/fichaje/personal/:id" element={<FichajeGate title="Ficha"><FichaPersonalPage /></FichajeGate>} />
+        <Route path="/admin/fichaje/cuadrante" element={<FichajeGate title="Cuadrante"><CuadrantePage /></FichajeGate>} />
+        <Route path="/admin/fichaje/cuadrante/cambios" element={<FichajeGate title="Cambios del cuadrante"><CambiosDelCuadrantePage /></FichajeGate>} />
+        <Route path="/admin/fichaje/reglas" element={<FichajeGate title="Reglas del cuadrante"><ReglasPage /></FichajeGate>} />
         {/* residencia-1 (D-48) · las tres pantallas del centro, envueltas en
             <ResidenciaGate> por lo mismo que las de fichaje: esconderlas del
             sidebar no basta, la URL sigue existiendo. La puerta de verdad es

@@ -9,7 +9,7 @@
 // toque sin querer; pasados, un cambio ya es una corrección.
 
 import { useEffect, useRef, useState } from "react";
-import { CloudOff, Undo2 } from "lucide-react";
+import { CalendarDays, CloudOff, Undo2 } from "lucide-react";
 
 import {
   flushOutbox,
@@ -20,6 +20,7 @@ import {
   type FicharOutboxItem,
 } from "../lib/outbox.js";
 import { horaLocal, transcurrido } from "../lib/format.js";
+import { MiCuadrante } from "./MiCuadrante.js";
 import { MisFichajes } from "./MisFichajes.js";
 import { CorregirSheet } from "./CorregirSheet.js";
 import type { EntryView, MeResponse } from "../lib/tipos.js";
@@ -44,6 +45,10 @@ export function Fichar({
   const [aviso, setAviso] = useState<string | null>(null);
   // Lo que el empleado acaba de tocar y todavía puede deshacer.
   const [porDeshacer, setPorDeshacer] = useState<FicharOutboxItem | null>(null);
+  // personal-1 · «Mi cuadrante», que es la segunda pantalla de esta app y
+  // la única. No hay router: dos estados y una vuelta, como el resto de
+  // `/fichar`. Un router aquí serían 30 kB para una pantalla.
+  const [viendoCuadrante, setViendoCuadrante] = useState(false);
   const recargar = useRef(onRecargar);
   recargar.current = onRecargar;
 
@@ -138,6 +143,18 @@ export function Fichar({
   const sinRed = typeof navigator !== "undefined" && navigator.onLine === false;
   const hayPendientes = pendientes.length > 0;
 
+  // personal-1 · «Mi cuadrante» sustituye la pantalla entera mientras se
+  // mira. Dos estados y una vuelta, como el resto de `/fichar`: un router
+  // aquí serían 30 kB para una pantalla.
+  if (viendoCuadrante) {
+    return (
+      <MiCuadrante
+        timeZone={me.timeZone}
+        onVolver={() => setViendoCuadrante(false)}
+      />
+    );
+  }
+
   return (
     <div className="mx-auto w-full max-w-md px-5 pb-10 pt-6">
       <header className="mb-8 flex items-baseline justify-between">
@@ -203,6 +220,21 @@ export function Fichar({
           </p>
         )}
       </div>
+
+      {/* personal-1 · la puerta a «Mi cuadrante». Debajo del botón y
+          encima de los fichajes: lo primero es fichar, lo segundo saber
+          qué se tiene, y lo tercero repasar lo que se hizo. */}
+      <button
+        type="button"
+        onClick={() => setViendoCuadrante(true)}
+        className="mb-4 flex h-14 w-full items-center gap-3 rounded-2xl bg-white px-4 text-left"
+      >
+        <CalendarDays className="h-5 w-5 shrink-0 text-slate-400" />
+        <span className="text-[15px] text-mipiace-ink">Mi cuadrante</span>
+        <span className="ml-auto text-[13px] text-slate-400">
+          qué tengo este mes
+        </span>
+      </button>
 
       <MisFichajes
         month={me.month}

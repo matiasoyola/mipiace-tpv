@@ -43,6 +43,12 @@ import { registerDeviceRoutes } from "./devices/routes.js";
 // nativa de la fase 2.
 import { registerFichajeRoutes } from "./fichaje/routes.js";
 import { registerFichajeAdminRoutes } from "./fichaje/admin-routes.js";
+// personal-1 · la ficha de personal, la importación y el cuadrante. En dos
+// ficheros propios y no dentro de `admin-routes`: aquél tiene las tres
+// pantallas de F1, y lo que se añade aquí descifra (la ficha) y escribe
+// por una función del motor (el cuadrante).
+import { registerPersonalRoutes } from "./fichaje/personal-routes.js";
+import { registerCuadranteRoutes } from "./fichaje/cuadrante-routes.js";
 import { registerReleasesRoutes } from "./releases/routes.js";
 import { loadEnv } from "./env.js";
 import { getAppVersion, SERVER_STARTED_AT } from "./version.js";
@@ -302,6 +308,8 @@ async function main() {
   await registerDeviceRoutes(app);
   await registerFichajeRoutes(app);
   await registerFichajeAdminRoutes(app);
+  await registerPersonalRoutes(app);
+  await registerCuadranteRoutes(app);
   // A3-distribución: /super-admin/releases* y el /apk público.
   await registerReleasesRoutes(app);
   await registerCashiersRoutes(app);

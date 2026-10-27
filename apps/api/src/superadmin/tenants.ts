@@ -20,6 +20,10 @@ import {
   MAX_OPEN_HOURS_MAX,
   MAX_OPEN_HOURS_MIN,
 } from "../fichaje/time.js";
+import {
+  MARGEN_DE_TURNO_MAX,
+  MARGEN_DE_TURNO_MIN,
+} from "../fichaje/cuadrante.js";
 import { encryptSecret } from "../crypto.js";
 import { holdedConnectionStatus } from "../holded/connection-status.js";
 import {
@@ -559,6 +563,10 @@ export async function registerSuperAdminTenantsRoutes(
         // detalle enseñe lo que hay antes de que nadie lo cambie. Fuera de
         // `modules` porque no es un interruptor.
         fichajeMaxOpenHours: tenant.fichajeMaxOpenHours,
+        // personal-1 · y el margen sobre el fin del turno planificado, que
+        // va con el mismo trato: entero por tenant, sin pantalla y sólo
+        // desde aquí.
+        fichajeShiftMarginHours: tenant.fichajeShiftMarginHours,
         // catalogo-local (addendum 3) · el interruptor de Holded, para
         // que el detalle pueda pintarlo y moverlo.
         holdedEnabled: tenant.holdedEnabled,
@@ -1081,6 +1089,16 @@ export async function registerSuperAdminTenantsRoutes(
               minimum: MAX_OPEN_HOURS_MIN,
               maximum: MAX_OPEN_HOURS_MAX,
             },
+            // personal-1 · el margen sobre el fin del turno PLANIFICADO.
+            // Hermano del de arriba en todo: el rango vive aquí y en el
+            // CHECK de la base (`tenants_fichaje_shift_margin_hours_check`),
+            // y los dos tienen que coincidir — si no, gana la base y nadie
+            // sabe por qué. 4 de serie.
+            fichajeShiftMarginHours: {
+              type: "integer",
+              minimum: MARGEN_DE_TURNO_MIN,
+              maximum: MARGEN_DE_TURNO_MAX,
+            },
             // catalogo-local (addendum 3) · el interruptor de Holded.
             // Sólo se mueve desde aquí, y apagarlo tiene guarda: ver más
             // abajo el 409.
@@ -1151,6 +1169,7 @@ export async function registerSuperAdminTenantsRoutes(
         agendaEnabled?: boolean;
         fichajeEnabled?: boolean;
         fichajeMaxOpenHours?: number;
+        fichajeShiftMarginHours?: number;
         holdedEnabled?: boolean;
         clinicalRecordsEnabled?: boolean;
         kitchenDisplayEnabled?: boolean;
@@ -1316,6 +1335,22 @@ export async function registerSuperAdminTenantsRoutes(
           after: body.fichajeMaxOpenHours,
         };
         data.fichajeMaxOpenHours = body.fichajeMaxOpenHours;
+      }
+
+      // personal-1 · el margen del turno planificado, con el mismo trato:
+      // fuera de `MODULE_FIELDS` porque no es un interruptor, con su rango
+      // en el schema y en el CHECK, y con su diff en el audit. A los seis
+      // meses, «¿por qué a esta residencia le avisa a las 12:00 y no a las
+      // 14:00?» se contesta mirando el audit.
+      if (
+        body.fichajeShiftMarginHours !== undefined &&
+        body.fichajeShiftMarginHours !== tenant.fichajeShiftMarginHours
+      ) {
+        changes.fichajeShiftMarginHours = {
+          before: tenant.fichajeShiftMarginHours,
+          after: body.fichajeShiftMarginHours,
+        };
+        data.fichajeShiftMarginHours = body.fichajeShiftMarginHours;
       }
 
       // catalogo-local (addendum 3) · EL INTERRUPTOR DE HOLDED.

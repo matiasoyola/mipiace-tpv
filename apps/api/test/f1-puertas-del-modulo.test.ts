@@ -35,6 +35,12 @@ function leer(rel: string): string {
 
 const EMPLEADO = leer("fichaje/routes.ts");
 const PANEL = leer("fichaje/admin-routes.ts");
+// personal-1 · las dos superficies nuevas del panel. Van en ESTE
+// inventario y no en uno propio a propósito: el módulo tiene un solo
+// recuento de puertas, y una lista que se parte en dos es una lista que se
+// olvida de la mitad.
+const FICHA = leer("fichaje/personal-routes.ts");
+const CUADRANTE = leer("fichaje/cuadrante-routes.ts");
 
 /** Las declaraciones de ruta de un fichero: `app.get("…"`, `app.post("…"`. */
 function rutas(src: string): string[] {
@@ -68,6 +74,88 @@ describe("F1 · ninguna ruta del módulo pasa por la puerta de la CAJA", () => {
 
   it("la API del panel, tampoco", () => {
     expect(PANEL).not.toMatch(/ensureCajaEnabled|caja-gate/);
+  });
+
+  it("ni la ficha de personal ni el cuadrante (personal-1)", () => {
+    expect(FICHA).not.toMatch(/ensureCajaEnabled|caja-gate/);
+    expect(CUADRANTE).not.toMatch(/ensureCajaEnabled|caja-gate/);
+  });
+
+  it("y el cuadrante NO pasa por las puertas de la residencia", () => {
+    // Decisión 4: `center_shifts` se reutiliza, pero sus rutas NUEVAS
+    // cuelgan del gate del FICHAJE. Con `ensureResidenciaEnabled` el
+    // colegio de Talavera se quedaría sin cuadrante, que es justo el
+    // cliente para el que el bloque existe. Las rutas de residencia no se
+    // tocan y siguen llevando las suyas.
+    expect(CUADRANTE).not.toMatch(/ensureResidenciaEnabled|ensureClinicaEnabled/);
+    expect(FICHA).not.toMatch(/ensureResidenciaEnabled|ensureClinicaEnabled/);
+  });
+});
+
+describe("personal-1 · las rutas nuevas del panel llevan su puerta", () => {
+  const cabeceras = [...cabecerasDeRuta(FICHA), ...cabecerasDeRuta(CUADRANTE)];
+
+  it("hay rutas que contar, y están las que el bloque promete", () => {
+    expect(cabeceras.length).toBeGreaterThanOrEqual(12);
+    expect([...rutas(FICHA), ...rutas(CUADRANTE)]).toEqual(
+      expect.arrayContaining([
+        "GET /admin/fichaje/categorias",
+        "POST /admin/fichaje/categorias",
+        "GET /admin/fichaje/personal",
+        "GET /admin/fichaje/personal/:id",
+        "PATCH /admin/fichaje/personal/:id",
+        "POST /admin/fichaje/personal/importar/vista-previa",
+        "POST /admin/fichaje/personal/importar",
+        "GET /admin/fichaje/turnos",
+        "POST /admin/fichaje/turnos",
+        "GET /admin/fichaje/reglas",
+        "PATCH /admin/fichaje/reglas",
+        "GET /admin/fichaje/cuadrante",
+        "PUT /admin/fichaje/cuadrante/:month/celdas",
+        "POST /admin/fichaje/cuadrante/:month/copiar-semana",
+        "POST /admin/fichaje/cuadrante/:month/publicar",
+        "GET /admin/fichaje/cuadrante/:month/cambios",
+      ]),
+    );
+  });
+
+  for (const { ruta, cabecera } of cabeceras) {
+    it(`${ruta} lleva el gate`, () => {
+      expect(cabecera).toMatch(/(\.\.\.)?guard\b|ensureFichajeEnabled/);
+    });
+  }
+
+  it("el único DELETE es de una CATEGORÍA, nunca de una ficha ni de un cuadrante", () => {
+    // Una ficha no se borra: la baja desactiva (F1), y el trigger
+    // `employees_delete_guard` lo impide aunque alguien lo añadiera. Un
+    // cuadrante publicado tampoco (`staff_schedules_delete_guard`).
+    const borrados = [...rutas(FICHA), ...rutas(CUADRANTE)].filter((r) =>
+      r.startsWith("DELETE"),
+    );
+    expect(borrados).toEqual(["DELETE /admin/fichaje/categorias/:id"]);
+  });
+
+  it("ni una celda se escribe sin pasar por `set_staff_schedule_day`", () => {
+    // La regla de oro de `cuadrante.ts`. Un `create` o un `updateMany`
+    // directo sobre `staffScheduleCell` reventaría contra el trigger en un
+    // cuadrante publicado — pero en borrador pasaría, y entonces habría
+    // dos caminos para pintar una celda y uno de los dos no validaría el
+    // mes. Esto lo pone rojo antes.
+    const CAPA = leer("fichaje/cuadrante.ts");
+    for (const src of [CAPA, CUADRANTE, FICHA]) {
+      expect(src).not.toMatch(/staffScheduleCell\.(create|createMany|update|updateMany|upsert|delete|deleteMany)/);
+    }
+    expect(CAPA).toMatch(/set_staff_schedule_day/);
+  });
+
+  it("y el registro de cambios no se escribe desde la aplicación", () => {
+    // Lo escribe `set_staff_schedule_day`, dentro de la misma transacción
+    // que mueve la celda. Si una ruta lo insertara por su cuenta, la traza
+    // y el cambio volverían a ser dos escrituras — que es exactamente lo
+    // que ADR-018 §3 existe para impedir.
+    for (const src of [leer("fichaje/cuadrante.ts"), CUADRANTE, FICHA]) {
+      expect(src).not.toMatch(/staffScheduleChange\.(create|createMany|upsert)/);
+    }
   });
 });
 
@@ -129,5 +217,29 @@ describe("F1 · la API del empleado", () => {
   it("y ninguna es un DELETE: un fichaje no se borra, se corrige", () => {
     expect(rutas(EMPLEADO).filter((r) => r.startsWith("DELETE"))).toEqual([]);
     expect(rutas(PANEL).filter((r) => r.startsWith("DELETE"))).toEqual([]);
+  });
+
+  it("personal-1 · «mi cuadrante» y su acuse llevan las dos puertas", () => {
+    const cuadrante = cabeceras.filter((c) =>
+      c.ruta.includes("/fichaje/v1/cuadrante"),
+    );
+    expect(cuadrante.map((c) => c.ruta).sort()).toEqual([
+      "GET /fichaje/v1/cuadrante",
+      "POST /fichaje/v1/cuadrante/visto",
+    ]);
+    for (const c of cuadrante) {
+      expect(c.cabecera).toMatch(/requireEmployeeDevice/);
+      expect(c.cabecera).toMatch(/ensureFichajeEnabled/);
+    }
+  });
+
+  it("y «mi cuadrante» filtra por SU empleado y por SU tenant", () => {
+    // El sabotaje «ver el cuadrante de otra empresa desde /fichaje/v1».
+    // El token identifica a una persona; la consulta tiene que decirlo
+    // también, porque un `scheduleId` adivinado no es imposible de
+    // adivinar.
+    const cuerpo = EMPLEADO.slice(EMPLEADO.indexOf("/fichaje/v1/cuadrante"));
+    expect(cuerpo).toMatch(/employeeId: ctx\.employeeId/);
+    expect(cuerpo).toMatch(/tenantId: ctx\.tenantId/);
   });
 });
