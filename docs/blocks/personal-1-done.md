@@ -539,9 +539,9 @@ Lo que la IA del cuadrante va a usar, y está hecho:
 | `9a18c8e` | F6-F7 · el panel y «Mi cuadrante» en el móvil |
 | `6a31137` | F8 · el e2e contra Postgres real |
 | `d5634d4` | El bucle visual · 17 capturas y cinco arreglos |
-| _(el siguiente)_ | la medida de toques y este documento |
+| `a4d935f` | el done, y la medida de los toques |
 
 ## 15 · La rama
 
-Rama `personal-1`, **pusheada**, con **PR contra `master`**. Ni merges ni despliegues: el merge lo
+Rama `personal-1`, pusheada, con **PR #50 contra `master`**. Ni merges ni despliegues: el merge lo
 hace Matías cuando la CI del PR esté verde.
