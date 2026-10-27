@@ -81,9 +81,17 @@ export interface InviteEmailParams {
   enlace: string;
   caducaEl: Date;
   marca: MarcaDelCorreo;
-  /** El PIN de caja de los comercios con caja. Decisión 7: fuera de este
-   *  bloque, se sigue mandando como hoy. `null` sin caja. */
-  ownerPin?: string | null;
+  /** pin-1 (punto 4) · **el PIN ya no viaja en el correo.** Lo que viaja
+   *  es dónde elegirlo, y sólo si esta cuenta tiene caja: en una
+   *  residencia o un colegio no hay TPV al que entrar, así que hablarle
+   *  de un PIN sería el primer paso en falso de su primer día (misma
+   *  razón que `expectsHolded`).
+   *
+   *  Antes aquí venía `ownerPin` con cuatro cifras generadas y, debajo,
+   *  «Puedes cambiar tu PIN en cualquier momento desde el panel». Eso
+   *  era mentira: no existía la pantalla. Ahora existe, y es lo que el
+   *  correo cuenta. */
+  eligePinEnElPanel?: boolean;
   /** Si tiene que conectar Holded tras entrar. `false` en la empresa que
    *  no lo usa — mandarla a conectarlo era un primer paso en falso. */
   expectsHolded?: boolean;
@@ -116,14 +124,13 @@ export async function sendOwnerInviteEmail(
     `página puedes pedir otro.`,
     ``,
     `Tu usuario es ${params.ownerEmail}.`,
-    ...(params.ownerPin
+    ...(params.eligePinEnElPanel === true
       ? [
           ``,
-          `Acceso al TPV (caja):`,
-          `  · Email: ${params.ownerEmail}`,
-          `  · PIN: ${params.ownerPin}`,
-          ``,
-          `Puedes cambiar tu PIN en cualquier momento desde el panel.`,
+          `Para entrar al TPV (la caja) necesitas un PIN, y lo eliges tú:`,
+          `dentro del panel, en "Mi cuenta" → "Elegir PIN". Son cuatro a ocho`,
+          `cifras, las que quieras, y puedes cambiarlo cuando quieras desde`,
+          `el mismo sitio o desde el propio TPV.`,
         ]
       : []),
     ...(params.expectsHolded === true
@@ -138,14 +145,13 @@ export async function sendOwnerInviteEmail(
     `— ${marca.firma}`,
   ].join("\n");
 
-  const pinBlock = params.ownerPin
-    ? `<p style="margin:24px 0 8px"><strong>Acceso al TPV (caja):</strong></p>
-  <ul>
-    <li>Email: <code>${escape(params.ownerEmail)}</code></li>
-    <li>PIN: <code>${escape(params.ownerPin)}</code></li>
-  </ul>
-  <p>Puedes cambiar tu PIN en cualquier momento desde el panel.</p>`
-    : "";
+  const pinBlock =
+    params.eligePinEnElPanel === true
+      ? `<p style="margin:24px 0 8px"><strong>Tu PIN del TPV lo eliges tú</strong></p>
+  <p style="font-size: 13px;">Para entrar a la caja necesitas un PIN. Dentro del panel,
+  en <strong>«Mi cuenta» → «Elegir PIN»</strong>: de cuatro a ocho cifras, las que
+  quieras. Puedes cambiarlo cuando quieras desde ahí o desde el propio TPV.</p>`
+      : "";
 
   const html = `<!DOCTYPE html>
 <html lang="es">

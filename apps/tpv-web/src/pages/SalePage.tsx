@@ -31,6 +31,7 @@ import {
   HeartPulse,
   Stethoscope,
   Syringe,
+  KeyRound,
   LayoutGrid,
   Loader2,
   FileText,
@@ -63,6 +64,7 @@ import {
 } from "lucide-react";
 
 import { ApiError } from "../api.js";
+import { CambiarPinSheet } from "../components/CambiarPinSheet.js";
 import { ConfirmSheet } from "../components/ConfirmSheet.js";
 import {
   MotivoVaciadoSheet,
@@ -600,6 +602,13 @@ export function SalePage(props: SalePageProps) {
   // pulsar Esc o al pulsar cualquier acción del drawer. No persiste:
   // el estado por defecto es cerrado.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // pin-1 (punto 1) · «Cambiar mi PIN», desde el cajón del TPV.
+  //
+  // El estado vive AQUÍ y no en `App` a propósito: la hoja no necesita
+  // nada que esta pantalla no tenga (el nombre de quien está dentro), y
+  // subirlo habría significado un prop nuevo cruzando cuatro capas de
+  // componentes para encender un booleano.
+  const [cambiandoPin, setCambiandoPin] = useState(false);
   // A3-distribución · Frente 2: qué versión tiene este terminal. Va al pie
   // del drawer porque es el único menú al que el cajero llega desde
   // cualquier punto de la venta.
@@ -3873,6 +3882,17 @@ export function SalePage(props: SalePageProps) {
           }}
         />
       )}
+      {/* pin-1 (punto 1) · la hoja de cambiar el PIN. Se monta sólo al
+          abrirla: mientras está cerrada no existe, igual que el modal de
+          la cámara. */}
+      {cambiandoPin && (
+        <CambiarPinSheet
+          contexto={{ modo: "cambiar" }}
+          nombre={props.cashierLabel}
+          onHecho={() => setCambiandoPin(false)}
+          onCancelar={() => setCambiandoPin(false)}
+        />
+      )}
       {showCloseShift && (
         <CloseShiftModal
           shiftId={props.shiftId}
@@ -4285,6 +4305,25 @@ export function SalePage(props: SalePageProps) {
                 strokeWidth={2.1}
               />
               <span>Cerrar turno</span>
+            </button>
+            {/* pin-1 (punto 1) · el PIN se cambia desde donde se usa.
+                Va justo encima de «Bloquear» porque son las dos cosas
+                que uno hace con su propia sesión, y porque es donde el
+                cajero ya mira cuando termina su turno. */}
+            <button
+              data-testid="cajon-cambiar-mi-pin"
+              onClick={() => {
+                setDrawerOpen(false);
+                setCambiandoPin(true);
+              }}
+              title="Cambiar mi PIN"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <KeyRound
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span>Cambiar mi PIN</span>
             </button>
             <button
               onClick={() => {

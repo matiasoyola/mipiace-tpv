@@ -1,4 +1,3 @@
-import { randomInt } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
 
@@ -3114,22 +3113,28 @@ export async function registerSuperAdminTenantsRoutes(
         });
       }
 
-      // v1.3-piloto-feedback · Lote 1: el OWNER también se loguea en el
-      // TPV como cajero por defecto, así que generamos el pinHash en el
-      // mismo activate y devolvemos el PIN en plano una vez para que el
-      // super-admin lo enseñe offline si el email tarda. El propio
-      // `/auth/login` ya regenera el pinHash si no existe, pero generarlo
-      // aquí evita la primera vuelta admin-login antes de poder usar el TPV.
+      // ── pin-1 (punto 4) · LA ACTIVACIÓN YA NO GENERA NINGÚN PIN ────
       //
-      // H1 · el PIN de cajero SÓLO tiene sentido con caja. Sin caja no
-      // hay TPV al que entrar, así que no se genera, no se persiste y no
-      // se enseña — ni en la respuesta ni en el email. Y la respuesta lo
-      // DICE (`cashierPinIssued`), en vez de dejar un `null` mudo que el
-      // implantador tenga que interpretar.
+      // Aquí se generaban cuatro cifras al azar que iban a la respuesta
+      // («PIN del OWNER», con su botón de Copiar) y al correo. Se va: el
+      // PIN lo elige la propietaria desde «Mi cuenta» → «Elegir PIN» en
+      // cuanto entra, y el correo de invitación se lo dice.
+      //
+      // Lo que se gana no es una línea menos: es que deja de haber un
+      // número al azar que sólo se enseña una vez y que, cuando se
+      // pierde —dos veces en la mañana del 27-10— hay que ir a
+      // super-admin a regenerar.
+      //
+      // `cashierPinIssued` se queda en la respuesta y en la auditoría
+      // porque la pregunta que contesta sigue siendo útil, sólo que
+      // ahora contesta otra cosa: ya no es «¿le hemos dado un PIN?» sino
+      // «¿esta cuenta TIENE caja, o sea, tiene un PIN que elegir?». Es
+      // lo que el implantador necesita saber con el cliente delante, y
+      // lo que decide si el correo habla de PIN (H1 · en una residencia
+      // no hay TPV al que entrar).
       const issueCashierPin = tenant.cajaEnabled !== false;
       const tenantHasHolded = tenant.holdedApiKeyCiphertext != null;
-      const ownerPin = issueCashierPin ? generateOwnerCashierPin() : null;
-      const pinHash = ownerPin ? await hashPassword(ownerPin) : null;
+      const pinHash = null;
       const signals = extractRequestSignals(request);
 
       // v1.9.7 · La activación no debe abortar por la limpieza de datos
@@ -3162,6 +3167,7 @@ export async function registerSuperAdminTenantsRoutes(
             alias: body.ownerName.trim(),
             // Sin contraseña utilizable: se entra con la invitación.
             passwordHash: null,
+            // pin-1 · nace SIN PIN. Lo elige ella en «Mi cuenta».
             pinHash,
             role: "OWNER",
             mustChangePasswordAt: null,
@@ -3232,9 +3238,12 @@ export async function registerSuperAdminTenantsRoutes(
             nombreDeLaCuenta: tenant.name,
           }),
           // H1 · sin caja el email no habla de PIN ni de TPV; sin Holded
-          // no le pide al propietario que lo conecte. Decisión 7: el PIN
-          // de caja se sigue mandando como hoy.
-          ownerPin,
+          // no le pide al propietario que lo conecte.
+          //
+          // pin-1 (punto 4) · y con caja, lo que el correo lleva no es un
+          // PIN: es dónde elegirlo. Lo que dice es verdad desde este
+          // bloque, que era el punto.
+          eligePinEnElPanel: issueCashierPin,
           expectsHolded: tenantHasHolded,
         });
       } catch (err) {
@@ -3265,13 +3274,17 @@ export async function registerSuperAdminTenantsRoutes(
           enlace: activated.invitacion.enlace,
           caducaEl: activated.invitacion.caducaEl.toISOString(),
         },
-        // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero. Una
-        // sola vez en la respuesta; el OWNER puede regenerarlo desde
-        // `/auth/me/regenerate-owner-pin` si lo pierde.
+        // pin-1 (punto 4) · `ownerPin` se queda en el contrato y se queda
+        // SIEMPRE a `null`: ya no hay PIN generado que enseñar. No se
+        // quita el campo para no romper una consola super-admin abierta
+        // en otra pestaña a mitad de despliegue — lo que lee es `null`,
+        // que es la rama que ya sabía pintar («esta empresa no tiene
+        // PIN que enseñar»).
         //
-        // H1 · `null` + `cashierPinIssued: false` cuando la empresa no
-        // tiene caja.
-        ownerPin,
+        // `cashierPinIssued` ahora significa «esta cuenta tiene caja, así
+        // que su propietaria tendrá que elegir PIN». Ver la nota de
+        // arriba.
+        ownerPin: null,
         cashierPinIssued: issueCashierPin,
         purge,
       });
@@ -3655,15 +3668,6 @@ export async function registerSuperAdminTenantsRoutes(
       };
     },
   );
-}
-
-// v1.3-piloto-feedback · Lote 1: PIN numérico de 4 dígitos para que el
-// OWNER se loguee en el TPV como cajero por defecto. Mismo esquema que
-// `generateOwnerPin` en auth/routes.ts (4 dígitos, sin sesgo de modulo),
-// duplicado aquí para no introducir un import cruzado entre módulos de
-// auth y superadmin.
-function generateOwnerCashierPin(): string {
-  return randomInt(0, 10_000).toString().padStart(4, "0");
 }
 
 // Parsea un TTL estilo JWT ("15m", "30m", "1h") a segundos. Defensivo:

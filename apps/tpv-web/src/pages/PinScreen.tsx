@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ChevronRight, CircleAlert, Delete, Eye, EyeOff, Loader2, Plus } from "lucide-react";
 
 import { apiWithDevice, ApiError } from "../api.js";
+import { CambiarPinSheet } from "../components/CambiarPinSheet.js";
 import { setCachedEnsayo } from "../lib/catalog.js";
 import { Logo } from "../Logo.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
@@ -72,6 +73,16 @@ interface CashierLoginResponse {
   pin?: string;
 }
 
+// pin-1 (punto 3) · lo que contesta el login cuando el PIN es PRESTADO.
+// No hay `sessionToken`: no se emite sesión hasta que esa persona elija
+// el suyo. Es una respuesta 200 y no un error porque no lo es — el PIN
+// era correcto.
+interface MustChoosePinResponse {
+  mustChoosePin: true;
+  pendingPinChangeToken: string;
+  user: { id: string; email: string; alias: string | null };
+}
+
 export function PinScreen({
   registerName,
   onLoggedIn,
@@ -115,6 +126,13 @@ export function PinScreen({
   // en paralelo como siempre, que es lo que ven los quince terminales de
   // 10" y 15" en producción.
   const [pasoCompacto, setPasoCompacto] = useState<"cajero" | "pin">("cajero");
+  // pin-1 (punto 3) · el login acertó pero el PIN era prestado: en vez de
+  // entrar, esta pantalla se pone encima y pide el PIN propio. Al
+  // guardarlo, se reintenta el login con él — sin pedir nada otra vez,
+  // que es lo que «mínimos clics» quiere decir aquí.
+  const [eligiendoPin, setEligiendoPin] = useState<MustChoosePinResponse | null>(
+    null,
+  );
 
   useEffect(() => {
     setRecent(getRecentCashiers());
@@ -157,15 +175,34 @@ export function PinScreen({
   const canSubmit =
     !isLocked && activeEmail.length > 0 && pin.length >= PIN_LENGTH_TARGET;
 
-  async function submit() {
+  function submit() {
     if (!canSubmit || busy) return;
+    return entrarCon(pin);
+  }
+
+  // pin-1 · el login, con el PIN que se le pase. Era `submit()` leyendo
+  // el `pin` del estado; se parametriza porque después de elegir un PIN
+  // propio hay que reintentar con el NUEVO, y leer el estado desde ahí
+  // habría dependido de que el `setPin` ya hubiera repintado.
+  async function entrarCon(pinQueSeTeclea: string) {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await apiWithDevice<CashierLoginResponse>(
+      const res = await apiWithDevice<CashierLoginResponse | MustChoosePinResponse>(
         "/shift/cashier-login",
-        { method: "POST", body: { email: activeEmail, pin } },
+        { method: "POST", body: { email: activeEmail, pin: pinQueSeTeclea } },
       );
+      // pin-1 · la bifurcación va ANTES de tocar nada: sin esto, el
+      // `setCashierSession` de abajo guardaría un `sessionToken`
+      // indefinido y el TPV se quedaría con una sesión que no existe.
+      if ("mustChoosePin" in res) {
+        setAttemptsRemaining(null);
+        setLockedUntilMs(null);
+        setPin("");
+        setEligiendoPin(res);
+        return;
+      }
       // puesta-en-marcha (ADR-021) · ANTES de dar la sesión por buena. La
       // banda tiene que estar puesta antes de que la pantalla de venta
       // pueda pintarse: si esto se hiciera después, habría un instante en
@@ -219,7 +256,7 @@ export function PinScreen({
       } else {
         // Sin red (fetch lanza TypeError, no ApiError): intentamos el
         // login offline contra el paquete cacheado.
-        await tryOfflineLogin();
+        await tryOfflineLogin(pinQueSeTeclea);
       }
     } finally {
       setBusy(false);
@@ -229,8 +266,8 @@ export function PinScreen({
   // v1.10-offline-un-terminal §2: verificación del PIN en local cuando
   // no hay red. Reutiliza el mismo aviso de intentos/bloqueo que el
   // camino online (attemptsRemaining / lockedUntilMs).
-  async function tryOfflineLogin() {
-    const res = await offlineLogin(activeEmail, pin);
+  async function tryOfflineLogin(pinQueSeTeclea: string) {
+    const res = await offlineLogin(activeEmail, pinQueSeTeclea);
     if (res.ok) {
       rememberCashier({
         email: res.user.email,
@@ -251,7 +288,7 @@ export function PinScreen({
         },
         shiftState: res.shiftState as OfflineShiftState,
         offline: true,
-        pin,
+        pin: pinQueSeTeclea,
       });
       return;
     }
@@ -294,6 +331,32 @@ export function PinScreen({
   }
   function pressBack() {
     setPin(pin.slice(0, -1));
+  }
+
+  // pin-1 (punto 3) · la pantalla de elegir PIN se pone ENCIMA del login
+  // y se queda hasta que esa persona elija el suyo o se vuelva atrás. Es
+  // un `return` temprano y no un overlay a propósito: no hay nada que
+  // mirar detrás, y así no se puede teclear en el login de debajo.
+  if (eligiendoPin) {
+    return (
+      <CambiarPinSheet
+        contexto={{
+          modo: "elegir",
+          pendingPinChangeToken: eligiendoPin.pendingPinChangeToken,
+        }}
+        nombre={eligiendoPin.user.alias ?? eligiendoPin.user.email}
+        onHecho={(pinNuevo) => {
+          setEligiendoPin(null);
+          // Y adentro, con el PIN que acaba de elegir. No se le vuelve a
+          // pedir: ya lo ha tecleado dos veces.
+          void entrarCon(pinNuevo);
+        }}
+        onCancelar={() => {
+          setEligiendoPin(null);
+          setPin("");
+        }}
+      />
+    );
   }
 
   return (

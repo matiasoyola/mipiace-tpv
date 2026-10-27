@@ -11,7 +11,7 @@
 // día— antes de pedir el fondo de caja del turno nuevo.
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Lock } from "lucide-react";
+import { KeyRound, Loader2, Lock } from "lucide-react";
 
 import {
   apiWithCashier,
@@ -19,6 +19,7 @@ import {
   ApiError,
   registerSessionExpiredHandler,
 } from "./api.js";
+import { CambiarPinSheet } from "./components/CambiarPinSheet.js";
 import { ReloginPinModal } from "./components/ReloginPinModal.js";
 import { EnsayoBanner } from "./components/EnsayoBanner.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
@@ -502,6 +503,20 @@ export function App() {
           clearCashierSession();
           setCashier({ kind: "needsLogin" });
         }}
+        // ── pin-1 (punto 1) · EL SANITARIO TAMBIÉN CAMBIA SU PIN ──────
+        //
+        // Su TPV es la agenda y nada más: no tiene el cajón de la venta,
+        // que es donde está «Cambiar mi PIN» para todos los demás. Sin
+        // esto, la única persona que entra con PIN y no puede cambiarlo
+        // sería justo la que no tiene otra puerta — al panel no entra
+        // (`CASHIER_NOT_ALLOWED_IN_ADMIN`).
+        //
+        // Va como un botón flotante de `LoggedInWrapper` y no dentro de
+        // la agenda por una razón de propiedad: la agenda la pinta
+        // `AgendaPage`, y el PIN no es de la agenda. Es de la sesión,
+        // igual que el chip del outbox y la banda del ensayo, que ya
+        // viven en este mismo wrapper por lo mismo.
+        conCambiarMiPin={cashierDisplayLabel(cashier.cashier)}
       >
         <AgendaPage
           // B-reservas-8 · la palabra del centro para los bonos. El
@@ -674,12 +689,18 @@ function LoggedInWrapper({
   autoLogoutMinutes,
   onAutoLogout,
   children,
+  conCambiarMiPin,
 }: {
   autoLogoutMinutes: number;
   onAutoLogout: () => void;
   children: React.ReactNode;
+  /** pin-1 · el nombre de quien está dentro, cuando esta pantalla tiene
+   *  que ofrecer «Cambiar mi PIN» por su cuenta. Sólo lo pasa la rama
+   *  del sanitario: el resto lo tiene en el cajón de la venta. */
+  conCambiarMiPin?: string;
 }) {
   useInactivityLogout(true, autoLogoutMinutes, onAutoLogout);
+  const [cambiandoPin, setCambiandoPin] = useState(false);
   // puesta-en-marcha (ADR-021) · la banda del ensayo, encima de TODAS las
   // pantallas con cajero dentro: venta, mapa de sala, apertura y cierre de
   // turno, agenda. Va aquí y no en cada pantalla por lo mismo que el chip
@@ -703,6 +724,31 @@ function LoggedInWrapper({
         children
       )}
       <OutboxChip />
+      {/* pin-1 · abajo a la IZQUIERDA. El chip del outbox vive abajo a la
+          derecha (`bottom-3 right-3`) y lo único que la agenda pinta
+          abajo es un aviso centrado, así que este rincón está libre. El
+          z-index sube por encima del `z-40` de la agenda, que es lo que
+          lo hace alcanzable desde ella. */}
+      {conCambiarMiPin !== undefined && (
+        <button
+          type="button"
+          data-testid="sanitario-cambiar-mi-pin"
+          onClick={() => setCambiandoPin(true)}
+          title="Cambiar mi PIN"
+          className="fixed bottom-3 left-3 z-[45] h-11 px-3.5 rounded-full bg-white border border-slate-200 shadow-lg text-[12.5px] font-medium text-slate-600 flex items-center gap-2"
+        >
+          <KeyRound className="w-4 h-4 shrink-0" strokeWidth={2.1} />
+          Mi PIN
+        </button>
+      )}
+      {cambiandoPin && (
+        <CambiarPinSheet
+          contexto={{ modo: "cambiar" }}
+          nombre={conCambiarMiPin ?? ""}
+          onHecho={() => setCambiandoPin(false)}
+          onCancelar={() => setCambiandoPin(false)}
+        />
+      )}
     </>
   );
 }

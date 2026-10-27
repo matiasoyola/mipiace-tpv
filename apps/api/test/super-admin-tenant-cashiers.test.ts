@@ -235,10 +235,22 @@ describe("GET /super-admin/tenants/:id/cashiers · el PIN no viaja", () => {
       }
     })(res.json());
     expect(keys.length).toBeGreaterThan(0);
-    expect(keys.filter((k) => /pin/i.test(k))).toEqual([]);
+    // pin-1 · la lista de claves que PUEDEN hablar de PIN crece con los
+    // bloques; lo que no baja es lo que se prohíbe. `pinProvisional` es
+    // un booleano derivado —como `canOpenTpv`— que dice si el PIN que
+    // tiene puesto se lo pusieron. Lo que sigue sin poder salir es el
+    // hash, el PIN, o cualquier trozo de cualquiera de los dos.
+    //
+    // Se enumera a mano y no con un `includes` laxo a propósito: añadir
+    // `pinHash` a la respuesta tiene que poner esto rojo.
+    const CLAVES_DE_PIN_PERMITIDAS = ["pinProvisional"];
+    expect(
+      [...new Set(keys.filter((k) => /pin/i.test(k)))].sort(),
+    ).toEqual(CLAVES_DE_PIN_PERMITIDAS);
 
     // 3. Lo que sí viaja es el booleano derivado.
     expect(res.json().cashiers[0].canOpenTpv).toBe(true);
+    expect(res.json().cashiers[0].pinProvisional).toBe(false);
     await app.close();
   });
 

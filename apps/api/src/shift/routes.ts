@@ -905,6 +905,10 @@ async function executeShiftClose(args: {
           { role: { in: ["MANAGER", "OWNER"] } },
         ],
         pinHash: { not: null },
+        // pin-1 (punto 3) · un PIN PROVISIONAL no autoriza un cierre con
+        // incidencia, ni siquiera el del propio cajero: ver la nota en
+        // `admin/manager-authorize.ts`.
+        pinProvisionalAt: null,
         // clinica-9 (6) · ver el mismo filtro en `tables/routes.ts`: el
         // actor de sistema no autoriza un cierre de caja, y no se confía
         // en que el CHECK de la base sea lo único que lo impida.

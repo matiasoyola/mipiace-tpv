@@ -7,7 +7,13 @@ import {
   registerFailure,
   reset,
 } from "../auth/rate-limit.js";
-import { verifyPassword } from "../auth/passwords.js";
+import { verifyPassword, hashPassword } from "../auth/passwords.js";
+import { PIN_FORMAT, errorPinTrivial, motivoPinTrivial } from "../auth/pin.js";
+import { escribirPinYRegistrarlo } from "../auth/pin-registro.js";
+import {
+  signPinEleccionToken,
+  verifyPinEleccionToken,
+} from "../auth/pin-eleccion.js";
 import { requireDeviceToken } from "../devices/auth.js";
 import { signCashierSession, requireCashierSession } from "./cashier-session.js";
 import { getShiftStateForLogin } from "./state.js";
@@ -93,6 +99,12 @@ export async function registerCashierAuthRoutes(
           id: true,
           role: true,
           pinHash: true,
+          // pin-1 (punto 3) · si el PIN es PRESTADO. Se lee aquí y se
+          // decide tres bloques más abajo, DESPUÉS de comprobar el PIN:
+          // contestar «tienes que elegir uno» antes de saber si el PIN
+          // es correcto le diría a cualquiera que ese email existe y que
+          // acaban de reponerle el PIN.
+          pinProvisionalAt: true,
           email: true,
           alias: true,
           // clinica-2 · LA MARCA sanitaria, no el rol. La pantalla del TPV
@@ -122,6 +134,38 @@ export async function registerCashierAuthRoutes(
       }
 
       await reset(rlKey);
+
+      // ── pin-1 (punto 3) · EL PIN PRESTADO NO ABRE LA CAJA ───────────
+      //
+      // El PIN es correcto, pero no es suyo: se lo puso la propietaria
+      // desde Cajeros, o Mi Piace con «Regenerar PIN». Así que **no se
+      // emite sesión**. Se devuelve un token que no vale más que para
+      // `POST /shift/cashier-pin`, la pantalla donde elige el suyo.
+      //
+      // Va ANTES de `lastLoginAt` a propósito: esto no es un acceso
+      // todavía. «Último acceso» en la lista de Cajeros tiene que seguir
+      // queriendo decir «entró», y quien se queda en la pantalla de
+      // elegir PIN no ha entrado.
+      //
+      // Y va antes de leer el tenant y de firmar nada: la negativa es la
+      // emisión de la sesión, no una pantalla que se pueda saltar.
+      if (user.pinProvisionalAt != null) {
+        return reply.code(200).send({
+          mustChoosePin: true,
+          pendingPinChangeToken: signPinEleccionToken({
+            sub: user.id,
+            tid: ctx.tenantId,
+            did: ctx.deviceId,
+          }),
+          // El nombre, para que la pantalla pueda decir «Hola Marta,
+          // elige tu PIN» y no «elige tu PIN» a secas. El email viaja por
+          // lo mismo que en el login normal: es la credencial, y la
+          // pantalla reintenta el login con ella en cuanto el PIN nuevo
+          // está puesto.
+          user: { id: user.id, email: user.email, alias: user.alias },
+        });
+      }
+
       await prisma.user.update({
         where: { id: user.id },
         data: { lastLoginAt: new Date() },
@@ -172,6 +216,111 @@ export async function registerCashierAuthRoutes(
         },
         shiftState,
       });
+    },
+  );
+
+  // ── pin-1 (punto 3) · DONDE SE ELIGE EL PIN PROPIO ─────────────────
+  //
+  // La segunda mitad del login con PIN provisional: llega el token que
+  // emitió el login y el PIN que esa persona acaba de elegir. Al salir
+  // de aquí su PIN es PROPIO y la pantalla reintenta el login normal con
+  // él — no se emite sesión desde esta ruta.
+  //
+  // **Por qué no devuelve la sesión directamente**, que sería un viaje
+  // menos: porque emitir una sesión de cajero es montar el turno, el
+  // ensayo, el TTL del tenant y el `shiftState`, y eso ya está escrito
+  // una vez en `/shift/cashier-login`. Duplicarlo aquí sería el segundo
+  // sitio donde acordarse de cada cosa que se añada al arranque del TPV.
+  // El viaje de más cuesta 200 ms y lo paga una vez en la vida de cada
+  // persona.
+  //
+  // Sin `ensureCajaEnabled` por la misma razón que `cashier-logout`: aquí
+  // no hay sesión ni rol que mirar (sólo el device y el token), y el
+  // sanitario sin caja tiene que poder elegir su PIN igual que todo el
+  // mundo — `ensureCajaEnabled` rechaza a un `CLINICIAN` por diseño. La
+  // puerta de la caja ya la pasó el login que emitió este token.
+  app.post(
+    "/shift/cashier-pin",
+    {
+      preHandler: requireDeviceToken,
+      schema: {
+        body: {
+          type: "object",
+          required: ["pendingPinChangeToken", "newPin"],
+          additionalProperties: false,
+          properties: {
+            pendingPinChangeToken: { type: "string", minLength: 1 },
+            newPin: { type: "string", pattern: PIN_FORMAT },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const ctx = request.device!;
+      const { pendingPinChangeToken, newPin } = request.body as {
+        pendingPinChangeToken: string;
+        newPin: string;
+      };
+      let payload;
+      try {
+        payload = verifyPinEleccionToken(pendingPinChangeToken);
+      } catch {
+        return reply.code(401).send({
+          error: "PIN_ELECCION_CADUCADA",
+          code: "PIN_ELECCION_CADUCADA",
+          message:
+            "Se ha agotado el tiempo para elegir el PIN. Vuelve a teclear el PIN que te dieron y elige otra vez.",
+        });
+      }
+      // El token nació en ESTE terminal y en ESTA empresa. No es la
+      // frontera principal —quien tiene el token tiene el PIN
+      // provisional— pero un token copiado a otra caja no sirve.
+      if (payload.tid !== ctx.tenantId || payload.did !== ctx.deviceId) {
+        return reply.code(401).send({
+          error: "PIN_ELECCION_CADUCADA",
+          code: "PIN_ELECCION_CADUCADA",
+          message:
+            "Se ha agotado el tiempo para elegir el PIN. Vuelve a teclear el PIN que te dieron y elige otra vez.",
+        });
+      }
+      const prisma = getPrisma();
+      const user = await prisma.user.findFirst({
+        where: { id: payload.sub, tenantId: ctx.tenantId, deletedAt: null },
+        select: { id: true, pinProvisionalAt: true },
+      });
+      if (!user) {
+        return reply
+          .code(404)
+          .send({ error: "USER_NOT_FOUND", message: "Usuario no encontrado" });
+      }
+      // Que el PIN SIGA siendo provisional, leído de la base y no del
+      // token. Es lo que hace que este token no sea un pase para cambiar
+      // el PIN cuando a uno le apetezca: en cuanto su dueña elige el
+      // suyo, el token que sobró no vale para nada. Para cambiarlo
+      // después está `/auth/me/pin`, que pide el actual.
+      if (user.pinProvisionalAt == null) {
+        return reply.code(409).send({
+          error: "PIN_YA_ELEGIDO",
+          code: "PIN_YA_ELEGIDO",
+          message: "Ese PIN ya se eligió. Entra con él.",
+        });
+      }
+      const motivo = motivoPinTrivial(newPin);
+      if (motivo) return reply.code(400).send(errorPinTrivial(motivo));
+      await escribirPinYRegistrarlo({
+        targetUserId: user.id,
+        tenantId: ctx.tenantId,
+        // Lo elige ella, así que el actor es ella misma.
+        actorUserId: user.id,
+        pinHash: await hashPassword(newPin),
+        kind: "PROPIO",
+        source: "TPV",
+      });
+      request.log.info(
+        { event: "pin.elegido_tras_provisional", userId: user.id, tenantId: ctx.tenantId },
+        "PIN propio elegido tras un PIN provisional",
+      );
+      return reply.code(200).send({ ok: true });
     },
   );
 
@@ -353,6 +502,19 @@ export async function registerCashierAuthRoutes(
             // sin red tiene que poder entrar a ver su agenda cacheada.
             role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
             pinHash: { not: null },
+            // pin-1 (punto 3) · **el PIN prestado no viaja al terminal.**
+            //
+            // El roster offline es lo que deja entrar SIN RED, y elegir
+            // un PIN necesita servidor. Si un PIN provisional viajara
+            // aquí, bastaría con quitar la wifi para saltarse la pantalla
+            // que obliga a elegirlo — que es justo la única puerta que
+            // tiene el punto 3.
+            //
+            // Consecuencia aceptada y dicha en el `-done`: alguien con
+            // PIN recién repuesto no puede entrar en un terminal sin red
+            // hasta que elija el suyo con red una vez. Es correcto: su
+            // PIN todavía lo saben dos personas.
+            pinProvisionalAt: null,
           },
           select: { id: true, email: true, alias: true, role: true, pinHash: true },
         }),

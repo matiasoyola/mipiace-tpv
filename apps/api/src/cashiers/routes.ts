@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import type { UserRole } from "@mipiacetpv/db";
+import type { Prisma, UserRole } from "@mipiacetpv/db";
 
 import { getPrisma } from "../context.js";
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { hashPassword } from "../auth/passwords.js";
+import { PIN_FORMAT, errorPinTrivial, motivoPinTrivial } from "../auth/pin.js";
+import { escribirPinYRegistrarlo } from "../auth/pin-registro.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import { escribirElNombre } from "../lib/un-solo-nombre.js";
 
@@ -36,7 +38,12 @@ import { escribirElNombre } from "../lib/un-solo-nombre.js";
 // se debe poder crear por la API.
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
-const pinFormat = "^[0-9]{4,8}$";
+// pin-1 · el formato vive ahora en `auth/pin.ts`, junto a las reglas de
+// qué PIN es demasiado fácil. Sigue siendo 4-8 cifras: el bloque no lo
+// cambia. Lo que se gana es que el formato y el filtro de triviales no
+// puedan separarse — las cuatro rutas que guardan un PIN importan los
+// dos del mismo sitio.
+const pinFormat = PIN_FORMAT;
 
 // ── clinica-8 · QUIÉN ES PERSONAL DE LA CAJA DE ESTE COMERCIO ────────
 //
@@ -229,16 +236,47 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         });
       }
 
+      // pin-1 (puntos 1 y 4) · el PIN del alta es PROVISIONAL.
+      //
+      // El propietario teclea uno y se lo dice a la persona por teléfono.
+      // Eso sigue igual — lo que cambia es que ese PIN sólo sirve para
+      // entrar UNA vez: en el primer login del TPV, la pantalla le obliga
+      // a elegir el suyo antes de pasar. Es el «primer acceso» del punto
+      // 4 para el personal, y es lo que hace que un PIN dicho por
+      // teléfono deje de valer en cuanto llega su dueña.
+      //
+      // Y pasa por el filtro de triviales igual que los demás: entre el
+      // alta y el primer turno pueden pasar días, y durante esos días
+      // «1234» es un PIN que entra al TPV.
+      const motivo = motivoPinTrivial(pin);
+      if (motivo) return reply.code(400).send(errorPinTrivial(motivo));
       const pinHash = await hashPassword(pin);
-      const created = await prisma.user.create({
-        data: {
-          tenantId: auth.tenantId,
-          email: lowerEmail,
-          alias: trimmedAlias,
-          pinHash,
-          role,
-        },
-        select: { id: true, email: true, alias: true, role: true, createdAt: true },
+      // El alta y su fila de registro, en una transacción. Mismo criterio
+      // que `escribirPinYRegistrarlo` (que no sirve aquí porque esto es
+      // un `create` y no un `update`): o se crea la persona CON el
+      // registro de quién le puso el PIN, o no se crea.
+      const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const nuevo = await tx.user.create({
+          data: {
+            tenantId: auth.tenantId,
+            email: lowerEmail,
+            alias: trimmedAlias,
+            pinHash,
+            pinProvisionalAt: new Date(),
+            role,
+          },
+          select: { id: true, email: true, alias: true, role: true, createdAt: true },
+        });
+        await tx.pinChange.create({
+          data: {
+            tenantId: auth.tenantId,
+            targetUserId: nuevo.id,
+            actorUserId: auth.userId,
+            kind: "PROVISIONAL",
+            source: "PERSONAL",
+          },
+        });
+        return nuevo;
       });
       return reply.code(201).send({
         cashier: {
@@ -362,11 +400,27 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
           .code(404)
           .send({ error: "CASHIER_NOT_FOUND", message: "Cajero no encontrado" });
       }
-      await prisma.user.update({
-        where: { id: target.id },
-        data: { pinHash: await hashPassword(pin) },
+      // pin-1 (punto 3) · OLVIDÉ MI PIN, EL PERSONAL.
+      //
+      // Esta pantalla sigue siendo la de siempre y el gesto no cambia: la
+      // propietaria (o el encargado) le pone un PIN a quien lo ha
+      // olvidado. Lo que cambia es QUÉ queda puesto — uno PROVISIONAL,
+      // que sólo sirve para que esa persona entre al TPV y elija el suyo.
+      //
+      // Es lo que convierte «te pongo 5050, cámbialo luego» en algo que
+      // se cumple: hasta hoy, el PIN que ponía la dueña se quedaba de por
+      // vida, y la dueña lo sabía.
+      const motivo = motivoPinTrivial(pin);
+      if (motivo) return reply.code(400).send(errorPinTrivial(motivo));
+      await escribirPinYRegistrarlo({
+        targetUserId: target.id,
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        pinHash: await hashPassword(pin),
+        kind: "PROVISIONAL",
+        source: "PERSONAL",
       });
-      return reply.code(200).send({ ok: true });
+      return reply.code(200).send({ ok: true, provisional: true });
     },
   );
 
@@ -403,6 +457,12 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         where: { id: target.id },
         data: {
           pinHash: null,
+          // pin-1 · y la marca de provisional se va con el PIN. No es
+          // cosmética: el CHECK `users_pin_provisional_exige_pin` prohíbe
+          // la marca sin PIN, así que sin esta línea revocar a alguien
+          // con PIN provisional —que es TODO el personal recién dado de
+          // alta— reventaría contra la base.
+          pinProvisionalAt: null,
           email: sentinel,
           tokenVersion: { increment: 1 },
         },

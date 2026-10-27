@@ -34,12 +34,15 @@ function errToHuman(err: unknown): string {
 
 const CASHIER_STATUS_LABEL: Record<CashierAccessStatus, string> = {
   ACTIVE: "Puede entrar",
+  // pin-1 · dice las dos mitades: tiene PIN, y no entra con él.
+  PIN_PROVISIONAL: "PIN provisional",
   NO_PIN: "Sin PIN",
   REVOKED: "Dado de baja",
 };
 
 const CASHIER_STATUS_CLS: Record<CashierAccessStatus, string> = {
   ACTIVE: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  PIN_PROVISIONAL: "bg-amber-50 text-amber-900 border-amber-200",
   NO_PIN: "bg-amber-50 text-amber-900 border-amber-200",
   REVOKED: "bg-slate-100 text-slate-500 border-slate-200",
 };

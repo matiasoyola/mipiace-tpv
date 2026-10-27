@@ -99,7 +99,15 @@ export function CashiersPage() {
         Cajeros (rol CASHIER) y encargados (rol MANAGER) que operan el TPV.
         {isOwner
           ? " Sólo tú creas y revocas estos accesos."
-          : " Sólo el propietario crea o revoca accesos. Los encargados podéis cambiar PINs."}
+          : " Sólo el propietario crea o revoca accesos. Los encargados podéis poner PINs provisionales."}
+      </p>
+      {/* pin-1 (punto 3) · la regla de la pantalla, dicha una vez arriba
+          en vez de repetida en cada botón: lo que se pone desde aquí es
+          provisional, y la persona elige el suyo. */}
+      <p className="text-[12.5px] text-slate-400 mb-5 -mt-3">
+        El PIN que pongas desde aquí es provisional: sirve para que esa
+        persona entre al TPV y elija el suyo, y con él no puede autorizar
+        descuentos ni cierres.
       </p>
 
       {success && <SuccessBanner message={success} />}
@@ -177,7 +185,13 @@ export function CashiersPage() {
           onClose={() => setResetting(null)}
           onReset={() => {
             setResetting(null);
-            setSuccess("PIN actualizado. Comunícaselo al cajero.");
+            setSuccess(
+              // pin-1 (punto 3) · el mensaje dice lo que de verdad pasa
+              // ahora: es provisional. Sin esto, la dueña sigue creyendo
+              // que le ha dejado el PIN definitivo y no entiende por qué
+              // a la cajera le pide elegir otro.
+              "PIN provisional puesto. Comunícaselo: al teclearlo en el TPV, el sistema le pedirá elegir el suyo.",
+            );
           }}
         />
       )}
@@ -238,7 +252,7 @@ function CashierCard({
         </OutlineButton>
       )}
       <OutlineButton onClick={onResetPin} className="!h-9 !text-[12.5px]">
-        Cambiar PIN
+        PIN provisional
       </OutlineButton>
       {canRevoke && (
         <OutlineButton
@@ -310,7 +324,8 @@ function CreateCashierModal({
           {clinicaEncendida ? "Añadir personal" : "Añadir cajero"}
         </h2>
         <p className="text-[13px] text-slate-500 mb-5">
-          Comunica el PIN inicial al cajero por canal seguro. Podrás
+          Comunica el PIN inicial al cajero por canal seguro: le vale para
+          entrar la primera vez y elegir el suyo. Podrás
           cambiárselo cuando quieras desde esta misma pantalla.
           {clinicaEncendida && (
             <>
@@ -503,16 +518,18 @@ function ResetPinModal({
         className="bg-white w-full max-w-md rounded-3xl border border-slate-200 p-6 md:p-7"
       >
         <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1">
-          Cambiar PIN
+          Poner un PIN provisional
         </h2>
         <p className="text-[13px] text-slate-500 mb-5">
-          Asigna un PIN nuevo para {displayName(cashier)}. El anterior queda
-          inservible inmediatamente.
+          Para {displayName(cashier)}, que ha olvidado el suyo. El anterior
+          queda inservible inmediatamente. Es un PIN{" "}
+          <strong>provisional</strong>: le sirve para entrar al TPV una vez y
+          elegir el suyo, y con él no puede autorizar descuentos ni cierres.
         </p>
         <form onSubmit={onSubmit} className="space-y-4">
           <TextField
             id="newPin"
-            label="Nuevo PIN (4-8 dígitos)"
+            label="PIN provisional (4-8 dígitos)"
             value={pin}
             onChange={setPin}
             required

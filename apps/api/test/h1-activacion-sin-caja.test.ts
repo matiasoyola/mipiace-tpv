@@ -7,6 +7,12 @@
 //   2. Sin caja NO se genera PIN de cajero: ni `pinHash` en el User, ni
 //      `ownerPin` en la respuesta, ni PIN en el email. Y la respuesta lo
 //      DICE con `cashierPinIssued: false`, en vez de un null mudo.
+//
+//      pin-1 (punto 4) · desde este bloque NO SE GENERA PIN NUNCA, ni
+//      con caja: lo elige la propietaria en «Mi cuenta». Lo que H1
+//      guardaba sigue en pie y más fuerte, y `cashierPinIssued` pasa a
+//      contestar «¿esta cuenta tiene un PIN que elegir?» — que es lo que
+//      decide si el correo habla de PIN o no.
 //   3. Sin Holded el email no le pide al propietario que lo conecte.
 //   4. Con caja, todo exactamente como en master.
 //   5. La purga best-effort y la auditoría siguen sin poder revertir una
@@ -326,16 +332,35 @@ describe("H1 · activar SIN caja", () => {
   });
 });
 
-describe("H1 · activar CON caja: sin cambios respecto a master", () => {
-  it("genera el PIN de 4 dígitos, lo persiste y lo manda por email", async () => {
+describe("H1 · activar CON caja", () => {
+  // pin-1 (punto 4) · **TAMPOCO CON CAJA SE GENERA UN PIN.**
+  //
+  // Aquí vivía «genera el PIN de 4 dígitos, lo persiste y lo manda por
+  // email». Lo que H1 guardaba —que sin caja no se genera— se queda y
+  // sale reforzado: ahora no se genera en ningún caso, y lo que cambia
+  // con la caja es lo que el correo CUENTA.
+  it("con caja, el OWNER nace sin PIN y nadie se lo enseña", async () => {
     seed({ cajaEnabled: true, holdedApiKeyCiphertext: "v1:cipher" });
     const app = await buildApp();
     const body = (await activate(app)).json();
-    expect(body.ownerPin).toMatch(/^\d{4}$/);
-    expect(body.cashierPinIssued).toBe(true);
+    expect(body.ownerPin).toBeNull();
     const owner = [...users.values()].find((u) => u.role === "OWNER")!;
-    expect(owner.pinHash).toBeTruthy();
-    expect(sentEmails[0]!.text).toContain(body.ownerPin);
+    expect(owner.pinHash).toBeNull();
+    // Ni cuatro cifras sueltas en el correo. El sabotaje que esto pone
+    // en rojo es volver a meter un PIN generado en la invitación.
+    expect(sentEmails[0]!.text).not.toMatch(/PIN: ?\d/);
+  });
+
+  // `cashierPinIssued` cambia de significado y se queda: ya no es «le
+  // hemos dado un PIN» sino «esta cuenta tiene caja, así que tiene un
+  // PIN que elegir». Es lo que decide si el correo habla de PIN.
+  it("con caja, el correo dice DÓNDE elige su PIN — y es verdad", async () => {
+    seed({ cajaEnabled: true, holdedApiKeyCiphertext: "v1:cipher" });
+    const app = await buildApp();
+    const body = (await activate(app)).json();
+    expect(body.cashierPinIssued).toBe(true);
+    expect(sentEmails[0]!.text).toMatch(/Mi cuenta/);
+    expect(sentEmails[0]!.text).toMatch(/Elegir PIN/);
   });
 
   it("con Holded, el email sigue pidiendo conectarlo", async () => {
@@ -345,11 +370,12 @@ describe("H1 · activar CON caja: sin cambios respecto a master", () => {
     expect(sentEmails[0]!.text).toMatch(/Holded/);
   });
 
-  it("con caja y sin Holded (caja local) el PIN se genera igual", async () => {
+  it("con caja y sin Holded (caja local), lo mismo", async () => {
     seed({ cajaEnabled: true, holdedApiKeyCiphertext: null });
     const app = await buildApp();
     const body = (await activate(app)).json();
-    expect(body.ownerPin).toMatch(/^\d{4}$/);
+    expect(body.ownerPin).toBeNull();
+    expect(body.cashierPinIssued).toBe(true);
   });
 });
 

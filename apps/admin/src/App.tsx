@@ -116,6 +116,18 @@ interface MeResponse {
     role: string;
     twoFactorEnabled?: boolean;
     recoveryCodesRemaining?: number;
+    // pin-1 · el estado del PIN del TPV, para que «Mi cuenta» escriba el
+    // rótulo correcto. Opcionales por lo mismo que los módulos: si el
+    // panel va por delante de la API, `undefined` se comporta como el
+    // master de siempre.
+    //
+    //   · `hasPin: false` → «Elige tu PIN» (lo que ve una propietaria el
+    //     primer día: desde pin-1 el sistema ya no le genera ninguno);
+    //   · `pinProvisional: true` → tiene uno PRESTADO y con él no entra
+    //     al TPV sin elegir el suyo. Hay que decírselo AQUÍ, que es donde
+    //     puede arreglarlo, y no cuando esté delante de la caja.
+    hasPin?: boolean;
+    pinProvisional?: boolean;
   };
   tenant: {
     id: string;
@@ -482,13 +494,6 @@ function LoginPage() {
   // Paso 2 cuando el backend pide código TOTP / recovery code.
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState("");
-  // B7 §9: si el OWNER no tenía PIN, el backend lo auto-genera y lo
-  // devuelve UNA VEZ en el login response. Lo mostramos en un modal
-  // antes de navegar; el cajero pega el PIN en el TPV para autorizar.
-  const [ownerPinJustGenerated, setOwnerPinJustGenerated] = useState<
-    string | null
-  >(null);
-
   // Banner verde post-reset, si venimos de `/admin/reset?token=...` OK.
   const justReset = location.state && (location.state as { justReset?: boolean }).justReset;
   // Venimos de /change-password-initial con un token ya inválido: pedimos
@@ -502,11 +507,7 @@ function LoginPage() {
     setBusy(true);
     try {
       const res = await api<
-        | {
-            accessToken: string;
-            refreshToken: string;
-            ownerPinGenerated?: string;
-          }
+        | { accessToken: string; refreshToken: string }
         | { requires2fa: true; pendingToken: string }
         | { mustChangePassword: true; pendingPasswordChangeToken: string }
       >("/auth/login", {
@@ -526,19 +527,16 @@ function LoginPage() {
         setPendingToken(res.pendingToken);
         return;
       }
-      const tokens = res as {
-        accessToken: string;
-        refreshToken: string;
-        ownerPinGenerated?: string;
-      };
+      // pin-1 · aquí se leía `ownerPinGenerated` y se pintaba la pantalla
+      // «Tu PIN de respaldo es 4817, apúntalo, sólo se muestra una vez».
+      // El login ya no genera ningún PIN: lo elige la persona en «Mi
+      // cuenta» → «Elige tu PIN del TPV», que es la sección que la
+      // espera dentro.
+      const tokens = res as { accessToken: string; refreshToken: string };
       storeTokens(
         { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
         { remember },
       );
-      if (tokens.ownerPinGenerated) {
-        setOwnerPinJustGenerated(tokens.ownerPinGenerated);
-        return;
-      }
       navigate("/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
@@ -570,38 +568,6 @@ function LoginPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  if (ownerPinJustGenerated) {
-    return (
-      <CenteredCard>
-        <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
-          Tu PIN de respaldo
-        </h1>
-        <p className="text-[13.5px] text-slate-500 mt-1 mb-6">
-          Como propietario, te hemos asignado un PIN de respaldo de 4
-          dígitos. Lo usarás para autorizar descuentos o cierres con
-          incidencia desde el TPV cuando no haya encargado disponible.
-          Apúntalo: <strong>sólo se muestra una vez</strong>. Si lo
-          pierdes, puedes regenerarlo en "Mi cuenta".
-        </p>
-        <div className="rounded-2xl bg-mipiace-stone py-6 mb-5 text-center">
-          <div className="text-[44px] font-semibold tracking-[0.3em] text-mipiace-ink tabular-nums">
-            {ownerPinJustGenerated}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setOwnerPinJustGenerated(null);
-            navigate("/", { replace: true });
-          }}
-          className="w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14.5px] font-medium"
-        >
-          He apuntado mi PIN, continuar
-        </button>
-      </CenteredCard>
-    );
   }
 
   if (pendingToken) {
@@ -1243,9 +1209,30 @@ export function AccountPage() {
       </section>
       )}
 
-      {/* H1 · el PIN de respaldo autoriza descuentos y cierres EN EL TPV.
-          Sin caja no hay TPV, y el propio `activate` ya no lo genera. */}
-      {canEdit && cajaEnabled && <OwnerPinSection />}
+      {/* H1 · el PIN es para entrar al TPV y autorizar descuentos y
+          cierres ahí. Sin caja no hay TPV, así que no hay PIN.
+
+          pin-1 · `impersonationMode` decide QUÉ sección se pinta. La
+          propietaria de verdad elige su PIN; Mi Piace, desde «Configurar
+          como OWNER», sólo puede dejar uno provisional. Son dos cosas
+          distintas y por eso son dos secciones, no una con un `if`
+          dentro: lo que cambia no es el botón, es lo que queda puesto. */}
+      {canEdit && cajaEnabled && (
+        readEffectiveAuth().impersonationMode === "full" ? (
+          <PinDeSoporteSection />
+        ) : (
+          <MiPinSection
+            hasPin={me.user.hasPin !== false}
+            pinProvisional={me.user.pinProvisional === true}
+            onCambiado={() =>
+              setMe({
+                ...me,
+                user: { ...me.user, hasPin: true, pinProvisional: false },
+              })
+            }
+          />
+        )
+      )}
 
       {showRotateModal && (
         <RotateKeyModal
@@ -1263,7 +1250,195 @@ export function AccountPage() {
   );
 }
 
-function OwnerPinSection() {
+// ── pin-1 (puntos 1 y 2) · MI PIN, EN MI CUENTA ─────────────────────
+//
+// Dos acciones en una sección, y la segunda sólo cuando hace falta:
+//
+//   · **Cambiar mi PIN** — actual, nuevo, repetir. Es el camino normal.
+//   · **Elegir PIN** — sin el actual, para cuando lo ha olvidado. No es
+//     un atajo: para ver esta pantalla ha entrado con su email y su
+//     contraseña (y su 2FA si lo tiene), así que ya está identificada.
+//     Pedirle el PIN que acaba de olvidar sería pedirle lo que no tiene.
+//
+// Aquí vivía «Regenerar PIN», que daba cuatro cifras al azar y las
+// enseñaba una vez. Se va: es lo que hizo perder el PIN de la
+// propietaria dos veces en la mañana del 27-10.
+//
+// ── Una pantalla, no un modal encadenado ────────────────────────────
+//
+// Decisión del bloque («mínimos clics»): los campos están en la propia
+// sección de Mi cuenta, a la vista, sin abrir nada. Cambiar el PIN son
+// tres campos y un botón.
+function MiPinSection({
+  hasPin,
+  pinProvisional,
+  onCambiado,
+}: {
+  hasPin: boolean;
+  pinProvisional: boolean;
+  onCambiado: () => void;
+}) {
+  // Sin PIN puesto no hay «PIN actual» que teclear: la única forma es
+  // elegirlo. Igual que con el provisional — el que tiene no es suyo, y
+  // obligarla a teclearlo para cambiarlo sería un paso de más.
+  const [olvidado, setOlvidado] = useState(!hasPin || pinProvisional);
+  const [actual, setActual] = useState("");
+  const [nuevo, setNuevo] = useState("");
+  const [repetido, setRepetido] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hecho, setHecho] = useState<string | null>(null);
+
+  // La repetición se comprueba AQUÍ y no en el servidor: existe para
+  // cazar una errata que no se ve, y el servidor no puede verla mejor
+  // que esta pantalla. Lo que sí viaja es el PIN nuevo, una vez.
+  const noCoinciden = repetido.length > 0 && nuevo !== repetido;
+  const puedeGuardar =
+    nuevo.length >= 4 &&
+    nuevo === repetido &&
+    (olvidado || actual.length >= 4);
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!puedeGuardar || busy) return;
+    setBusy(true);
+    setError(null);
+    setHecho(null);
+    try {
+      if (olvidado) {
+        await api("/auth/me/pin/elegir", { method: "POST", body: { newPin: nuevo } });
+      } else {
+        await api("/auth/me/pin", {
+          method: "POST",
+          body: { currentPin: actual, newPin: nuevo },
+        });
+      }
+      setActual("");
+      setNuevo("");
+      setRepetido("");
+      setOlvidado(false);
+      setHecho("PIN guardado. Es el que usarás para entrar al TPV.");
+      onCambiado();
+    } catch (err) {
+      // El mensaje del servidor es el que explica POR QUÉ (el PIN actual
+      // no es correcto, el PIN elegido es demasiado fácil y por qué, o
+      // cuántos minutos queda de bloqueo). No se reescribe aquí.
+      if (err instanceof ApiError) setError(err.message);
+      else setError("Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
+      <h2 className="text-[17px] font-semibold text-mipiace-ink tracking-tight">
+        {hasPin ? "Mi PIN del TPV" : "Elige tu PIN del TPV"}
+      </h2>
+      <p className="text-[13px] text-slate-500 mt-1 mb-5 max-w-xl">
+        {hasPin
+          ? "Es el que tecleas para entrar al TPV y para autorizar descuentos o cierres con incidencia. De 4 a 8 cifras, las que tú quieras."
+          : "Para entrar al TPV necesitas un PIN, y lo eliges tú: de 4 a 8 cifras. Podrás cambiarlo cuando quieras desde aquí o desde el propio TPV."}
+      </p>
+
+      {/* El aviso del PIN prestado. Va arriba y en ámbar porque es lo
+          que explica que no pueda entrar en la caja: el PIN que tiene se
+          lo puso otra persona. */}
+      {pinProvisional && (
+        <div
+          data-testid="mi-pin-provisional"
+          className="mb-5 flex items-start gap-2 text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5"
+        >
+          <span>
+            El PIN que tienes ahora te lo pusieron desde soporte y sólo vale
+            para elegir el tuyo. <strong>Elige uno aquí</strong> y entrarás al
+            TPV con él.
+          </span>
+        </div>
+      )}
+
+      <form onSubmit={guardar} className="space-y-4 max-w-sm">
+        {!olvidado && (
+          <TextField
+            id="pinActual"
+            label="PIN actual"
+            value={actual}
+            onChange={setActual}
+            inputMode="numeric"
+            autoComplete="off"
+          />
+        )}
+        <TextField
+          id="pinNuevo"
+          label="PIN nuevo (4-8 cifras)"
+          value={nuevo}
+          onChange={setNuevo}
+          inputMode="numeric"
+          autoComplete="off"
+        />
+        <TextField
+          id="pinRepetido"
+          label="Repite el PIN nuevo"
+          value={repetido}
+          onChange={setRepetido}
+          inputMode="numeric"
+          autoComplete="off"
+        />
+        {noCoinciden && (
+          <p data-testid="mi-pin-no-coinciden" className="text-[12.5px] text-red-600">
+            Los dos PIN no son iguales.
+          </p>
+        )}
+        <div className="flex items-center gap-3">
+          <PrimaryButton busy={busy} disabled={!puedeGuardar}>
+            Guardar PIN
+          </PrimaryButton>
+          {/* «Lo he olvidado» es lo que SUSTITUYE a «Regenerar PIN». No
+              esconde nada: quita el campo del PIN actual, que es lo único
+              que la bloquea, y el servidor la identifica por la sesión
+              del panel (email + contraseña). */}
+          {hasPin && !olvidado && (
+            <button
+              type="button"
+              data-testid="mi-pin-olvidado"
+              onClick={() => {
+                setOlvidado(true);
+                setActual("");
+                setError(null);
+              }}
+              className="text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
+            >
+              He olvidado mi PIN
+            </button>
+          )}
+          {olvidado && hasPin && !pinProvisional && (
+            <button
+              type="button"
+              onClick={() => setOlvidado(false)}
+              className="text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
+            >
+              Sí me acuerdo, pedírmelo
+            </button>
+          )}
+        </div>
+        {hecho && <SuccessBanner message={hecho} />}
+        <FieldError message={error} />
+      </form>
+    </section>
+  );
+}
+
+// ── pin-1 (punto 5) · EL ÚLTIMO RECURSO, Y SÓLO PARA MI PIACE ───────
+//
+// Esto es lo que ve un super-admin dentro de «Configurar como OWNER», y
+// sólo él: la propietaria ve `MiPinSection`. Lo que genera es un PIN al
+// azar que queda **PROVISIONAL** — en cuanto ella lo teclee en el TPV,
+// la pantalla le obliga a elegir el suyo.
+//
+// Que el botón no se le pinte a la dueña no es lo que lo cierra: la
+// ruta contesta 403 a cualquiera que no venga de una sesión de soporte.
+// Esconder no es gatear; esto es sólo no ofrecer lo que no es suyo.
+function PinDeSoporteSection() {
   const [busy, setBusy] = useState(false);
   const [newPin, setNewPin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1271,7 +1446,7 @@ function OwnerPinSection() {
   async function regenerate() {
     if (
       !window.confirm(
-        "¿Generar un PIN de respaldo nuevo? El anterior dejará de funcionar.",
+        "¿Generar un PIN provisional? El anterior dejará de funcionar y el propietario tendrá que elegir uno propio la primera vez que lo teclee en el TPV.",
       )
     ) {
       return;
@@ -1297,13 +1472,13 @@ function OwnerPinSection() {
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
           <h2 className="text-[17px] font-semibold text-mipiace-ink tracking-tight">
-            PIN de respaldo del propietario
+            PIN provisional del propietario
           </h2>
           <p className="text-[13px] text-slate-500 mt-1 max-w-xl">
-            Sirve para autorizar descuentos y cierres con incidencia
-            desde el TPV cuando no hay encargado. Generamos uno
-            automáticamente al primer login. Si lo olvidas, regenéralo
-            aquí — el anterior dejará de funcionar.
+            Último recurso de soporte: genera un PIN al azar para dárselo
+            por teléfono a quien no puede entrar. Es <strong>provisional</strong> —
+            al teclearlo en el TPV, el sistema le obliga a elegir el suyo
+            antes de entrar, y no sirve para autorizar nada.
           </p>
         </div>
         <OutlineButton onClick={regenerate} busy={busy} className="!h-9">
@@ -1313,10 +1488,13 @@ function OwnerPinSection() {
       {newPin && (
         <div className="rounded-2xl bg-mipiace-stone py-5 mt-4 text-center">
           <div className="text-[12px] uppercase tracking-wider text-slate-500 mb-1">
-            Nuevo PIN (sólo se muestra una vez)
+            PIN provisional (sólo se muestra una vez)
           </div>
           <div className="text-[34px] font-semibold tracking-[0.25em] text-mipiace-ink tabular-nums">
             {newPin}
+          </div>
+          <div className="text-[12px] text-slate-500 mt-2 px-6">
+            Al teclearlo en el TPV tendrá que elegir su PIN propio.
           </div>
         </div>
       )}

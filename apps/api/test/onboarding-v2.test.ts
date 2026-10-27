@@ -1051,9 +1051,11 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     expect(body.tempPassword).toBeUndefined();
     expect(body.invitacion.email).toBe("owner@thalia.es");
     expect(body.invitacion.enlace).toContain("/bienvenida?token=");
-    // v1.3-piloto-feedback · Lote 1: PIN del OWNER en la respuesta y
-    // pinHash persistido. 4 dígitos numéricos.
-    expect(body.ownerPin).toMatch(/^\d{4}$/);
+    // pin-1 (punto 4) · ya NO se genera ningún PIN al activar. El campo
+    // sigue en el contrato (una consola abierta en otra pestaña lo sigue
+    // leyendo) y vale `null` siempre: el PIN lo elige la propietaria
+    // desde «Mi cuenta» → «Elegir PIN», y el correo se lo dice.
+    expect(body.ownerPin).toBeNull();
 
     // Tenant transicionado.
     expect(tenants.get(TENANT_ID)!.onboardingState).toBe("ACTIVE");
@@ -1075,19 +1077,20 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
       (invites[0]!.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
     expect(dias).toBeGreaterThan(6.9);
     expect(dias).toBeLessThan(7.1);
-    // v1.3-piloto-feedback · Lote 1: el OWNER nace con pinHash ya
-    // poblado, así que puede entrar al TPV sin pasar por la pantalla
-    // admin antes.
-    expect(owner!.pinHash).toBeTruthy();
+    // pin-1 · y nace SIN PIN, igual que nace sin contraseña: las dos
+    // las elige ella. El sabotaje que esto pone en rojo es volver a
+    // generarle cuatro cifras al azar en el alta.
+    expect(owner!.pinHash).toBeNull();
     // Ticket TEST purgado.
     expect(tickets.size).toBe(0);
     // Cashier técnico soft-deleted.
     expect(users.get("u-test")!.deletedAt).not.toBeNull();
-    // Email enviado con el ENLACE y con el PIN (decisión 7), y sin
-    // ninguna contraseña dentro.
+    // Email enviado con el ENLACE, sin ninguna contraseña dentro y
+    // —pin-1— sin ningún PIN: lo que lleva es dónde elegirlo.
     expect(sentEmails).toHaveLength(1);
     expect(sentEmails[0]!.text).toContain(body.invitacion.enlace);
-    expect(sentEmails[0]!.text).toContain(body.ownerPin);
+    expect(sentEmails[0]!.text).not.toMatch(/PIN: ?\d/);
+    expect(sentEmails[0]!.text).toMatch(/Elegir PIN/);
     expect(sentEmails[0]!.text).not.toContain("Contraseña temporal");
     // Audit log activate_tenant.
     expect(audits.some((a) => a.action === "activate_tenant")).toBe(true);
