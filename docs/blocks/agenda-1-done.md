@@ -1,6 +1,7 @@
 # Bloque agenda-1 · la agenda que se entiende y la cita en dos toques
 
-Rama `agenda-1-se-entiende`, desde `origin/master` (`43d0a8c`). Prompt:
+Rama `agenda-1-se-entiende`, rebasada sobre `origin/master` (`503354a`, con
+clinica-10 / PR #49 y personal-1 / PR #50 dentro). Prompt:
 `docs/code-prompts/bloque-agenda-1-se-entiende.md`. Diseño:
 `docs/mockups/agenda-nueva/` (cuatro tableros `.dc.html`). Punto de partida:
 `docs/qa/2026-10-27-clinica-9/PASADA.md`.
@@ -316,18 +317,21 @@ Pasada del 27-10: «en Historia de paciente, el **atrás** de Android no hace
 nada». Con la tablet en la mano eso es un botón roto — la única salida era el
 «Volver» de la cabecera.
 
-El mecanismo es de **clinica-10 (PR #49)**: tres capas de `useBackGuard` dentro
-de `HistoriaViva`, y un `onCerrar` opcional porque **salir de la historia es
-volver a la pantalla de la que se vino, y eso sólo lo sabe quien la pintó**. Lo
-que agenda-1 pone es justamente eso: `onCerrar={() => setHistoriaDe(null)}`
-donde la agenda la monta.
+**Esto lo hizo clinica-10 entero, no agenda-1.** PR #49: tres capas de
+`useBackGuard` dentro de `HistoriaViva`, un `onCerrar` opcional porque salir de
+la historia es volver a la pantalla de la que se vino —y eso sólo lo sabe quien
+la pintó—, **y el `onCerrar={() => setHistoriaDe(null)}` en la propia agenda**.
 
-**Ojo al mergear.** Cuando esto se escribió, #49 estaba ABIERTO y su cambio no
-estaba ni en master ni en esta rama, así que sin él la rama no compilaba. Los
-hunks de `HistoriaViva.tsx` están **copiados de #49 tal cual, comentarios
-incluidos**, para que las dos ramas digan lo mismo y el conflicto se resuelva
-quedándose con una de las dos copias, que son idénticas. El que mergee segundo
-rebasa, como dice el prompt del bloque.
+Lo que pasó aquí, dicho como fue: cuando se pidió, #49 estaba ABIERTO y su
+cambio no estaba ni en master ni en esta rama, así que agenda-1 escribió las dos
+mitades para poder compilar. Al mergear #49 y rebasar, **las dos eran
+redundantes** y se han resuelto quedándose con las de master: `HistoriaViva.tsx`
+queda byte a byte como master, y el `onCerrar` de `AgendaPage.tsx` es el de
+clinica-10 con su comentario.
+
+Lo único que agenda-1 aporta de esto es **el test**: que el Atrás cierre la
+historia *abierta desde la agenda* y devuelva a la lista del día. Ese camino no
+lo cubría nadie, y los sabotajes 14 y 15 lo demuestran.
 
 ### Volver al día en el que se estaba
 
@@ -581,7 +585,7 @@ pantalla reventaba al mirar el día de la cita.
 
 ## 13 · Verde
 
-- **Suite entera desde la raíz**: `pnpm vitest run` → **478 ficheros, 6973
+- **Suite entera desde la raíz**: `pnpm vitest run` → **492 ficheros, 7322
   tests, 10 saltados, 0 rojos.**
 - **`tsc` paquete a paquete**: `apps/tpv-web` y `apps/api`, los dos limpios.
 - **e2e contra Postgres real**: hicieron falta **dos pasadas rojas** y las dos
@@ -641,10 +645,8 @@ Qué mirar en hierro, en este orden:
   dos veces en la misma mañana.
 - **H5** (el servicio reservado no llega al cobro), **H1**, **H2**, **H9**,
   **H10** y los dos fallos del guion (33 y 38): son de clinica-10.
-- **H3 · sólo la mitad.** El Atrás cierra la historia **abierta desde la
-  agenda** (§7). El mecanismo es de clinica-10; lo que falta —la historia
-  abierta desde Clientes, y las demás pantallas sin guardia— sigue siendo
-  suyo.
+- **H3 · nada: lo hizo clinica-10 (#49) entero.** De aquí sale sólo el test del
+  camino agenda → historia → Atrás (§7).
 - **Reserva online**, y las sugerencias de venta y el cheque regalo del spa:
   preparados en `proponer()` como configuración del centro, sin pantalla.
 - **La pasada en hierro.** La hace Matías con Claude en la Lenovo, junto con
