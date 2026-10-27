@@ -74,6 +74,7 @@ import {
   type BookingEngine,
   type HoldFailureReason,
 } from "./engine.js";
+import { cobradoPorCitaDe } from "./cobrado.js";
 import { buildAgendaDays } from "./day-view.js";
 import { resolveBookingNow, systemClock, type Clock } from "./floor.js";
 import { runAgendaHealth } from "./health.js";
@@ -273,6 +274,16 @@ export async function registerAgendaRoutes(
         hasta: to,
         tz: CENTER_TZ,
       });
+      // agenda-1 · LO COBRADO DE CADA CITA, para la fila «Cobrada · 25 €»
+      // y para la cifra del día de la columna izquierda. Sale del TICKET y
+      // no del catálogo: ver `cobrado.ts`. Una consulta, sin clínica de
+      // por medio — esto vale igual en la peluquería de Sole, que es de
+      // quien más se pinta esta pantalla.
+      const cobradoPorCita = await cobradoPorCitaDe(prismaFor(), {
+        tenantId: auth.tenantId,
+        desde: from,
+        hasta: to,
+      });
       // B-reservas-7a · la rejilla deja de ser ciega. Los cuatro campos de
       // antes siguen ahí y con el mismo nombre: quien no lea los nuevos no
       // se entera de que existen. Todo esto viaja a la caché offline del
@@ -307,6 +318,7 @@ export async function registerAgendaRoutes(
         valoracionesPendientes,
         sesionesPorCobrar,
         proximasCitas,
+        cobradoPorCita,
         ...(esSanitario === null ? {} : { esSanitario }),
       };
     },
