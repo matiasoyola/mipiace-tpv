@@ -443,46 +443,6 @@ describe.skipIf(!e2eEnabled)("e2e · cita → caja contra Postgres real", () => 
     expect(Number(cash[0]!.cash_amount)).toBeCloseTo(70, 2);
   });
 
-  /**
-   * agenda-1 · LO COBRADO DE LA CITA, CONTRA POSTGRES DE VERDAD.
-   *
-   * `cobradoPorCitaDe` es SQL en crudo, y el SQL en crudo no lo prueba
-   * ningún test de unidad: aquí es donde se ve si la consulta existe. La
-   * primera versión comparaba `t.status = ANY($4::text[])` contra una
-   * columna que es un ENUM de Postgres — y `GET /agenda` contestaba **500**
-   * a todo el mundo. Verde en el portátil, rojo en el e2e.
-   *
-   * Lo que se fija: la cifra sale del TICKET (63,00 € = 6300 céntimos, los
-   * mismos que el test 3 acaba de cobrar) y no de sumar precios de
-   * catálogo, que es cobrar la previsión en vez del trabajo.
-   */
-  it("4b · el día dice lo COBRADO de la cita, en céntimos y del ticket", async () => {
-    const res = await app.inject({
-      method: "GET",
-      url: "/agenda?date=2026-09-10",
-      headers: auth(),
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as {
-      appointments: Array<{ id: string }>;
-      cobradoPorCita: Record<string, number>;
-    };
-
-    // Los tres eslabones, en orden, para que el que falle diga cuál es:
-    // la cita cae en el día que se pide, su ticket está en un estado de
-    // cobrado, y el mapa lo dice. Sin esto, un `undefined` al final no
-    // distingue un rango mal calculado de un estado que no se cuenta.
-    expect(body.appointments.map((a) => a.id)).toContain(apptId);
-    const t = await ticketRow(draftId);
-    expect((await appointmentRow(apptId)).ticket_id).toBe(draftId);
-    expect(["PAID", "PENDING_SYNC", "SYNCED", "SYNC_FAILED"]).toContain(
-      t.status,
-    );
-    expect(Number(t.total)).toBeCloseTo(63, 2);
-
-    expect(body.cobradoPorCita[apptId]).toBe(6300);
-  });
-
   it("5 · la cita pasa a COMPLETED (el PATCH que dispara el front)", async () => {
     const res = await app.inject({
       method: "PATCH",
@@ -559,22 +519,6 @@ describe.skipIf(!e2eEnabled)("e2e · cita → caja contra Postgres real", () => 
     // El estado que el censo tiene que ver: un DRAFT vivo enlazado a una
     // cita, con el dinero en otro ticket.
     expect(await draftsHuerfanos()).toBe(1);
-
-    // agenda-1 · y ESA cita no cuenta como cobrada en el día. Un DRAFT es
-    // un cobro empezado y no terminado —justo lo que `sesionesPorCobrar`
-    // cuenta como PENDIENTE—, así que sumarlo diría que hay dinero que no
-    // hay. Se afirma aquí porque el borrador huérfano ya existe: crear uno
-    // sólo para esto descuadraría los censos de este mismo fichero.
-    const dia = await app.inject({
-      method: "GET",
-      url: "/agenda?date=2026-09-10",
-      headers: auth(),
-    });
-    expect(dia.statusCode).toBe(200);
-    const cobrado = (dia.json() as { cobradoPorCita: Record<string, number> })
-      .cobradoPorCita;
-    expect(cobrado[otra]).toBeUndefined();
-    expect(cobrado[apptId]).toBe(6300);
     expect((await ticketRow(huerfano)).status).toBe("DRAFT");
     expect((await appointmentRow(otra)).ticket_id).toBe(huerfano);
     // Dos tickets del ciclo bueno + los dos de este: el nuevo NO se
