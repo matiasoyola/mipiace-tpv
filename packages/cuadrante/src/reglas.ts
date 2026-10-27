@@ -84,8 +84,8 @@ export function comprobarCuadrante(
   avisos.push(...ratio(cuadrante, intervalos, persona, reglas));
   avisos.push(...descansoDiario(intervalos, persona, reglas));
   avisos.push(...dosSitiosALaVez(intervalos, persona));
-  avisos.push(...descansoSemanal(cuadrante, intervalos, persona, reglas));
-  avisos.push(...horasContratadas(cuadrante, intervalos, persona, reglas));
+  avisos.push(...descansoSemanal(cuadrante, intervalos, reglas));
+  avisos.push(...horasContratadas(cuadrante, intervalos, reglas));
   avisos.push(...fueraDeContrato(cuadrante, porId, persona));
 
   return avisos.sort(ordenDeAvisos);
@@ -365,7 +365,6 @@ function dosSitiosALaVez(
 function descansoSemanal(
   cuadrante: Cuadrante,
   intervalos: IntervaloPlanificado[],
-  persona: Map<string, PersonaDelCuadrante>,
   reglas: ReglasDelCuadrante,
 ): AvisoDelCuadrante[] {
   const bloques = bloquesDe(cuadrante.mes, reglas.diasComputoSemanal);
@@ -448,7 +447,6 @@ function descansoSemanal(
 function horasContratadas(
   cuadrante: Cuadrante,
   intervalos: IntervaloPlanificado[],
-  persona: Map<string, PersonaDelCuadrante>,
   reglas: ReglasDelCuadrante,
 ): AvisoDelCuadrante[] {
   const fuera: AvisoDelCuadrante[] = [];

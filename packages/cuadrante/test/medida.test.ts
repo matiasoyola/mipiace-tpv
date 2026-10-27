@@ -4,16 +4,23 @@
 // cada toque mientras alguien pinta el mes, así que lo que importa no es
 // que termine: es que termine **dentro de un fotograma**.
 //
-// El presupuesto es 20 ms **en frío** y 10 **en caliente**, por debajo del
-// criterio de 50 ms que clinica-7 se puso para una historia clínica
-// entera. Lo medido de verdad va en el done; aquí se fija el techo, que es
-// lo que impide que una regla nueva lo convierta en una pantalla que se
-// arrastra.
+// ── LOS DOS PRESUPUESTOS, Y POR QUÉ SON TAN DISTINTOS ───────────────
 //
-// Y se mide en las dos temperaturas a propósito: la memoria de
-// `instanteDePared` es lo que bajó la primera medida de 24 ms a 5, y un
-// test que sólo midiera en caliente dejaría pasar el día que alguien la
-// quite.
+// **En caliente, 10 ms**, que es el que de verdad guarda algo: es lo que
+// la pantalla paga en cada toque, y es donde se vería una regla nueva que
+// recorra el mes otra vez. Medido a solas da 3 ms y en medio de la suite
+// 5-6; diez deja margen y sigue siendo un techo.
+//
+// **En frío, 60 ms**, deliberadamente holgado. La primera pasada la domina
+// la inicialización de `Intl`, que bajo la carga de 482 ficheros de test
+// repartidos por los núcleos da entre 8 y 16 ms sin que el código haya
+// cambiado nada. Un presupuesto ajustado ahí es un test que se pone rojo
+// según lo que corra al lado — y ya pasó una vez.
+//
+// Lo que esto significa y conviene no esconder: **el presupuesto en frío
+// casi no guarda nada**. Lo que cubre el caso que importa —que alguien
+// quite la memoria de `instanteDePared`— es el de caliente: sin ella las
+// dos medidas se van a 24 ms, y el de 10 lo caza.
 
 import { describe, expect, it } from "vitest";
 
@@ -112,7 +119,7 @@ describe("la medida de comprobarCuadrante", () => {
     console.log(
       `comprobarCuadrante · 21 × 31 · frío ${enFrio.toFixed(2)} ms · caliente ${enCaliente.toFixed(2)} ms (mínimo de 5 y de 20)`,
     );
-    expect(enFrio).toBeLessThan(20);
+    expect(enFrio).toBeLessThan(60);
     expect(enCaliente).toBeLessThan(10);
     // Y que devuelve algo: una medida sobre una función que no hace nada
     // es una medida que no dice nada.
