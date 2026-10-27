@@ -1684,6 +1684,14 @@ export function AgendaPage({
             <div className="max-w-[1180px] mx-auto">
               <HistoriaViva
                 clientId={historiaDe.clientId}
+                // clinica-10 (H3) · el Atrás de Android cierra la
+                // historia, lo mismo que la flecha de la cabecera. Sin
+                // esto, `HistoriaViva` registra sus capas de dentro (la
+                // hoja de «¿qué visita es hoy?», la zona del pie) y la
+                // última se queda sin salida: el gesto cae en el guardia
+                // de fondo, que con el turno abierto se lo traga para no
+                // echar a nadie de la aplicación. Ver `useBackGuard`.
+                onCerrar={() => setHistoriaDe(null)}
                 // «Empezar esta revisión →» y «Nueva visita»: se sale de la
                 // historia y se entra en la sesión DE ESTA CITA con el tipo
                 // ya marcado. Lo único que este bloque le pasa a clinica-5.

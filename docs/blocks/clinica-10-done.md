@@ -10,7 +10,7 @@ día.
 
 Los seis puntos están hechos. Lo que **no** está es la pasada en hierro: hace
 falta la APK de esta rama y la cuenta de producción, y el prompt deja fuera el
-merge y el despliegue. El guion está en §7 para poder hacerla de un tirón.
+merge y el despliegue. El guion está en §13 para poder hacerla de un tirón.
 
 ---
 
@@ -256,7 +256,7 @@ alguien cambiara una por otra en una ruta clínica, ahí se ve.
 | Qué | Dónde |
 |---|---|
 | **Al firmar el consentimiento de fotos se vuelve a Fotos** (19b). El botón que lo pide está EN Fotos, y firmarlo dejaba a la podóloga en Consentimientos con la cámara en la mano. Se recuerda de dónde se vino; tocar otra pestaña por el camino **cancela la vuelta** (si no, se le movería la pantalla bajo el dedo), y entrando por la pestaña firmar no mueve a nadie: ahí es el final del recado, no el medio. | `SesionPodologia.tsx` |
-| **El «atrás» de Android sale de la Historia** (H3). No hacía nada: esta pantalla no registraba ninguna capa, así que el gesto caía en el guardia de fondo —que con el turno abierto se lo traga para no echar a nadie de la aplicación— y para quien tiene la tablet en la mano eso es un botón roto. Ahora son **tres capas**: la hoja de «¿qué visita es hoy?», la zona del pie abierta, y la historia entera. | `HistoriaViva.tsx`, `ClientsPage.tsx` |
+| **El «atrás» de Android sale de la Historia** (H3). No hacía nada: esta pantalla no registraba ninguna capa, así que el gesto caía en el guardia de fondo —que con el turno abierto se lo traga para no echar a nadie de la aplicación— y para quien tiene la tablet en la mano eso es un botón roto. Ahora son **tres capas**: la hoja de «¿qué visita es hoy?», la zona del pie abierta, y la historia entera. Desde los **dos** sitios que la montan: Clientes → ficha → Historia, y la cita de la agenda. | `HistoriaViva.tsx`, `ClientsPage.tsx`, `AgendaPage.tsx` |
 | **Cajeros no pide crear uno «para poder entrar»**. Decía «Crea al menos un cajero para que pueda iniciar sesión en el TPV con su PIN», y en una clínica de una persona eso es falso y además da miedo: Rosario entra con SU PIN —sale en «Cajeros recientes», la pasada lo vio en el paso 1—. Lo que esa lista tiene es gente **distinta del propietario**; vacía significa que no la hay. | `CashiersPage.tsx` |
 
 ---
@@ -373,6 +373,13 @@ reales, copiados de la salida.
 | 15 | la historia no registra su capa del Atrás | `HistoriaViva.tsx` | `clinica-historia-pantalla` | 🔴 2 | `expected +0 to be 1` |
 | 16 | al firmar no se vuelve a Fotos | `SesionPodologia.tsx` | `clinica-10-sesion-reservado` | 🔴 1 | `expected 'Consentimientos' to be 'Fotos'` |
 | 17 | Cajeros vuelve a pedir que se cree uno | `CashiersPage.tsx` | `clinica-10-panel` | 🔴 2 | `… not to contain 'Crea al menos un cajero'` |
+| 18 | **la historia abierta desde la AGENDA se queda sin salida** | `AgendaPage.tsx` | `clinica-8-agenda` | 🔴 1 | `expected true to be false` (la historia sigue abierta tras el Atrás) |
+
+**El sabotaje 18 es el que `clinica-historia-pantalla` NO puede dar.** Ese
+banco monta `HistoriaViva` suelta y le pasa el `onCerrar` él mismo, así que
+estaría probando el test. Por eso el 18 vive en el banco de la AGENDA, que es
+quien de verdad tiene que pasar la prop — y con la línea quitada sigue verde
+todo lo demás, incluido el banco de la historia.
 
 **El sabotaje 10 merece una nota**: es el que vigila que relajar la puerta de
 §5b no se extienda. Puso rojo también `clinica-7-contrato-rutas`, que no es de
@@ -394,7 +401,7 @@ rojo el banco de pantalla, uno de los dos estaría probando lo que no es suyo.
   rojos por día de pared (clinica-9 §8).
 - **Typecheck paquete a paquete** (`tsc --noEmit`): `apps/api`, `apps/tpv-web`,
   `apps/admin`, `packages/ticket-model`, `packages/clinica-sesion` — limpio.
-- **17 sabotajes**, todos rojos (§9), cada uno contra el fichero que de verdad
+- **18 sabotajes**, todos rojos (§9), cada uno contra el fichero que de verdad
   ejecuta la línea.
 - **Bucle visual** del paso 33 a 1280 × 800, con el antes y el después medidos
   en el navegador (§2).
@@ -402,7 +409,7 @@ rojo el banco de pantalla, uno de los dos estaría probando lo que no es suyo.
   `clinica-10-tipos-de-visita` (API), `clinica-10-sesion-reservado`,
   `clinica-10-puras`, `clinica-10-emparejar` (TPV), `clinica-10-panel` (panel).
   Ampliados: `clinica-sesion-rutas`, `clinica-historia-pantalla`,
-  `sale-rail-categorias`, `clinica-8b-panel`.
+  `clinica-8-agenda`, `sale-rail-categorias`, `clinica-8b-panel`.
 
 ---
 
@@ -419,18 +426,15 @@ Lo del prompt, sin cambios:
 - **Config de Rosario** (H9, el servicio del pie de riesgo; H10, el texto del
   consentimiento): se deciden con ella.
 
-Y una cosa que **este bloque deja a medias a propósito, y hay que saberlo**:
-
-> **El Atrás de la historia abierta DESDE LA AGENDA todavía no sale.**
->
-> `HistoriaViva` ya registra su capa y la cierra bien, pero necesita que quien
-> la monta le pase `onCerrar`. Está puesto en `ClientsPage` (Clientes → ficha →
-> Historia, que es un camino de verdad y por donde se puede ver en el aparato) y
-> **no** en `AgendaPage`, que este bloque tiene prohibido tocar. Es **una línea**
-> —`onCerrar={() => setHistoriaDe(null)}` junto al `<HistoriaViva>` de
-> `AgendaPage.tsx`— y le toca al bloque común de agenda. Dentro de la historia
-> abierta desde la agenda, el Atrás ya cierra la hoja y la zona; lo que falta es
-> el último peldaño.
+**Una excepción al «no toca `AgendaPage.tsx`», y es de Matías (27-10).** El
+Atrás de la historia abierta desde la agenda quedó fuera por la prohibición del
+prompt, y se cerró después con autorización expresa: **una línea**,
+`onCerrar={() => setHistoriaDe(null)}` junto al `<HistoriaViva>` de
+`AgendaPage.tsx`, más su test y su sabotaje (el 18). Es todo lo que este bloque
+toca de ese fichero — ni una línea más —, y se eligió esa forma precisamente
+para que el bloque común de agenda la pueda mover de sitio sin leer nada: si la
+pantalla nueva monta la historia de otra manera, lo que tiene que seguir
+pasando es que el Atrás tenga salida, y el sabotaje 18 lo dice.
 
 ---
 
@@ -503,7 +507,8 @@ APK de este bloque, y `adb` para las capturas, que van a
 | 12 | Lo mismo entrando con la cuenta de la dueña | igual | 5 |
 | 13 | Panel › Cajeros, en la cuenta de una sola persona | **no** dice «Crea al menos un cajero para que pueda iniciar sesión» | 6 |
 | 14 | En la sesión: pestaña Fotos → «Firmar consentimiento de fotos» → firmar | **vuelve solo a Fotos**, con la cámara a un toque | 6 |
-| 15 | Abrir Clientes → una ficha → Historia, y pulsar el **Atrás de Android** | **sale de la historia**. (Desde la agenda todavía no: ver §11) | 6 |
+| 15 | Abrir Clientes → una ficha → Historia, y pulsar el **Atrás de Android** | **sale de la historia** | 6 |
+| 15b | Lo mismo desde una **cita de la agenda** («Historia del paciente» → Atrás) | **sale de la historia y deja la agenda donde estaba** — no se sale del TPV | 6 |
 | 16 | **Contar los toques** de la primera visita, de abrir la sesión al cobro | el número de §7 | — |
 
 ### Lo que hay que apuntar aunque salga bien
