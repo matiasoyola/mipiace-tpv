@@ -39,6 +39,7 @@ import {
   type CorrectableField,
   type CorrectionReason,
 } from "./corrections.js";
+import { turnoDelTramo, turnosDelTenant } from "./cuadrante.js";
 import { maxOpenHoursFor } from "./max-open.js";
 import {
   esSalidaOlvidada,
@@ -272,13 +273,21 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
       // Por DURACIÓN y no por calendario (hotfix-fichaje-medianoche): a las
       // 01:00, el turno que empezó a las 20:00 no es un olvido, es la
       // jornada de quien está a punto de irse a casa. Ver `esSalidaOlvidada`.
+      //
+      // personal-1 · y además, **si tenía turno publicado**, el fin de su
+      // turno más el margen. La auxiliar de noche que sale a las 08:00 y a
+      // las 13:00 sigue dentro ve la pregunta a las 12:00 en vez de a las
+      // 14:00. Sin cuadrante, exactamente lo de antes.
+      const planificado = open
+        ? await turnoDelTramo(ctx.tenantId, open, localDate(open.startedAt))
+        : null;
       let pendingExit: {
         entryId: string;
         startedAt: string;
         date: string;
         suggestedEndAt: string | null;
       } | null = null;
-      if (open && esSalidaOlvidada(open, now, maxHoras)) {
+      if (open && esSalidaOlvidada(open, now, maxHoras, planificado)) {
         const desde = new Date(now.getTime() - EXIT_HISTORY_DAYS * 86_400_000);
         const historial = await prisma.timeEntry.findMany({
           where: {
@@ -490,7 +499,16 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
       // el calendario, y por eso quien entraba a las 20:00 y salía a la
       // 01:00 no podía fichar su salida: un turno de noche entero tratado
       // como un olvido. Pasar de medianoche no es olvidarse.
-      if (esSalidaOlvidada(entry, now, maxHoras)) {
+      //
+      // personal-1 · y el turno publicado aprieta ese límite, nunca lo
+      // afloja. La noche de 22:00 a 08:00 sigue cerrándose de un toque a
+      // las 07:58: su límite son las 12:00.
+      const planificado = await turnoDelTramo(
+        ctx.tenantId,
+        entry,
+        localDate(entry.startedAt),
+      );
+      if (esSalidaOlvidada(entry, now, maxHoras, planificado)) {
         return reply.code(409).send({
           error: "PENDING_EXIT_REQUIRES_REASON",
           message:
@@ -703,6 +721,175 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
           createdAt: c.createdAt.toISOString(),
         })),
       });
+    },
+  );
+  // ── personal-1 (punto 10) · MI CUADRANTE ─────────────────────────────
+  //
+  // «Cada persona ve su cuadrante en su móvil, en la misma PWA de
+  // `/fichar`, sólo lectura: el mes publicado y los cambios desde la
+  // última vez que lo abrió, marcados.»
+  //
+  // Deja de preguntarse por WhatsApp «¿qué tengo el sábado?», que es la
+  // mitad del valor de este bloque para la gente que trabaja — la otra
+  // mitad es que la dirección deje de contestarlo.
+  //
+  // Tres cosas de esta ruta son decisiones:
+  //
+  //   1. **Sólo el PUBLICADO.** Un borrador es lo que la dirección está
+  //      pintando ahora mismo, con medio mes en blanco. Enseñárselo sería
+  //      decirle a alguien que el sábado libra cuando todavía nadie lo ha
+  //      decidido. Si el mes no está publicado, se dice: «el cuadrante de
+  //      noviembre todavía no está publicado».
+  //
+  //   2. **Sólo lo suyo.** Ni los turnos de sus compañeros ni cuánta gente
+  //      hay en la noche. El token del móvil identifica a UNA persona
+  //      (`requireEmployeeDevice`) y la consulta filtra por su
+  //      `employeeId` Y por su tenant, como todas las de este fichero. Es
+  //      el sabotaje «ver el cuadrante de otra empresa desde
+  //      `/fichaje/v1`».
+  //
+  //   3. **Los cambios NO se marcan como vistos al leer.** Si la lectura
+  //      moviera `scheduleSeenAt`, recargar la pantalla —que es lo que uno
+  //      hace para mirarlos otra vez— los borraría. Los mueve el acuse
+  //      explícito de abajo.
+
+  app.get(
+    "/fichaje/v1/cuadrante",
+    {
+      preHandler: [requireEmployeeDevice, ensureFichajeEnabled],
+      schema: {
+        querystring: {
+          type: "object",
+          properties: { month: { type: "string", pattern: "^\\d{4}-\\d{2}$" } },
+        },
+      },
+    },
+    async (request) => {
+      const ctx = request.employee!;
+      const { month } = request.query as { month?: string };
+      const mes = month ?? localDate(new Date()).slice(0, 7);
+      const prisma = getPrisma();
+
+      const [cabecera, empleado] = await Promise.all([
+        prisma.staffSchedule.findUnique({
+          where: { tenantId_month: { tenantId: ctx.tenantId, month: mes } },
+          select: { id: true, state: true, publishedAt: true },
+        }),
+        prisma.employee.findUniqueOrThrow({
+          where: { id: ctx.employeeId },
+          select: { scheduleSeenAt: true },
+        }),
+      ]);
+
+      if (!cabecera || cabecera.state !== "PUBLICADO") {
+        return {
+          month: mes,
+          timeZone: FICHAJE_TZ,
+          publicado: false,
+          dias: [],
+          cambios: [],
+          vistoHasta: empleado.scheduleSeenAt?.toISOString() ?? null,
+        };
+      }
+
+      const [celdas, turnos, cambios] = await Promise.all([
+        prisma.staffScheduleCell.findMany({
+          where: {
+            scheduleId: cabecera.id,
+            employeeId: ctx.employeeId,
+            tenantId: ctx.tenantId,
+          },
+          select: { day: true, centerShiftId: true, absenceKind: true },
+          orderBy: { day: "asc" },
+        }),
+        turnosDelTenant(ctx.tenantId, prisma),
+        prisma.staffScheduleChange.findMany({
+          where: {
+            scheduleId: cabecera.id,
+            employeeId: ctx.employeeId,
+            tenantId: ctx.tenantId,
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            day: true,
+            beforeLabel: true,
+            afterLabel: true,
+            reason: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+      const porId = new Map(turnos.map((t) => [t.id, t]));
+
+      // Un día puede llevar dos turnos (un partido), así que se agrupa.
+      const porDia = new Map<
+        string,
+        { dia: string; turnos: Array<{ code: string; name: string; startsAt: string; endsAt: string }>; ausencia: string | null }
+      >();
+      for (const c of celdas) {
+        const dia = c.day.toISOString().slice(0, 10);
+        const ya = porDia.get(dia) ?? { dia, turnos: [], ausencia: null };
+        if (c.absenceKind != null) ya.ausencia = c.absenceKind;
+        else if (c.centerShiftId != null) {
+          const t = porId.get(c.centerShiftId);
+          if (t) {
+            ya.turnos.push({
+              code: t.code,
+              name: t.name,
+              startsAt: t.startsAt,
+              endsAt: t.endsAt,
+            });
+          }
+        }
+        porDia.set(dia, ya);
+      }
+
+      const visto = empleado.scheduleSeenAt;
+      return {
+        month: mes,
+        timeZone: FICHAJE_TZ,
+        publicado: true,
+        publishedAt: cabecera.publishedAt?.toISOString() ?? null,
+        dias: [...porDia.values()].sort((a, b) => a.dia.localeCompare(b.dia)),
+        // Los cambios que le afectan, con el motivo que la empresa
+        // escribió. Y marcados: `nuevo` es lo que ha pasado desde la
+        // última vez que dijo «entendido».
+        cambios: cambios.map((c) => ({
+          id: c.id,
+          dia: c.day.toISOString().slice(0, 10),
+          antes: c.beforeLabel,
+          despues: c.afterLabel,
+          motivo: c.reason,
+          cuando: c.createdAt.toISOString(),
+          nuevo: visto == null || c.createdAt.getTime() > visto.getTime(),
+        })),
+        vistoHasta: visto?.toISOString() ?? null,
+      };
+    },
+  );
+
+  /**
+   * «Entendido».
+   *
+   * Mueve `scheduleSeenAt` y con eso apaga las marcas de «nuevo». Es un
+   * acto explícito y no un efecto de la lectura, por lo dicho arriba.
+   *
+   * No lleva cuerpo: la marca es siempre «ahora». Mandar un instante
+   * dejaría que un reloj adelantado se apagara avisos que todavía no ha
+   * visto.
+   */
+  app.post(
+    "/fichaje/v1/cuadrante/visto",
+    { preHandler: [requireEmployeeDevice, ensureFichajeEnabled] },
+    async (request) => {
+      const ctx = request.employee!;
+      const ahora = new Date();
+      await getPrisma().employee.update({
+        where: { id: ctx.employeeId },
+        data: { scheduleSeenAt: ahora },
+      });
+      return { vistoHasta: ahora.toISOString() };
     },
   );
 }

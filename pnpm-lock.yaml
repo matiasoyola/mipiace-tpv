@@ -102,6 +102,9 @@ importers:
       '@mipiacetpv/contrato-encargado':
         specifier: workspace:*
         version: link:../../packages/contrato-encargado
+      '@mipiacetpv/cuadrante':
+        specifier: workspace:*
+        version: link:../../packages/cuadrante
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db

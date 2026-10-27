@@ -19,6 +19,12 @@
 
 import type { FastifyInstance } from "fastify";
 
+import {
+  minutosDeTurno,
+  planificadoDelDia,
+  planificadoVsFichado,
+} from "@mipiacetpv/cuadrante";
+
 import { getPrisma } from "../context.js";
 import { loadEnv } from "../env.js";
 import { requireOwnerOrManager } from "../auth/middleware.js";
@@ -35,6 +41,12 @@ import {
   type CorrectableField,
   type CorrectionReason,
 } from "./corrections.js";
+import {
+  finesPlanificadosDe,
+  margenDeTurnoFor,
+  toleranciaDelTenant,
+  turnosDelTenant,
+} from "./cuadrante.js";
 import { entrySentOffline } from "./offline.js";
 import { isInFuture } from "./routes.js";
 import { maxOpenHoursFor } from "./max-open.js";
@@ -419,12 +431,37 @@ export async function registerFichajeAdminRoutes(
     const counts = new Map(correcciones.map((c) => [c.timeEntryId, c._count._all]));
     const nombre = new Map(employees.map((e) => [e.id, e.name]));
 
+    // personal-1 · el turno PUBLICADO de cada tramo abierto, en una
+    // consulta por mes y no una por tramo. Lo mismo que el móvil usa, para
+    // que un tramo no pueda estar «dentro» en el panel y «olvidado» en el
+    // teléfono de su autor.
+    const abiertos = entries.filter((e) => e.endedAt === null);
+    const [margenHoras, finesPlanificados] = await Promise.all([
+      margenDeTurnoFor(auth.tenantId),
+      finesPlanificadosDe(
+        auth.tenantId,
+        abiertos.map((e) => ({
+          employeeId: e.employeeId,
+          startedAt: e.startedAt,
+          dia: localDate(e.startedAt),
+        })),
+      ),
+    ]);
+    const planDe = (e: { employeeId: string; startedAt: Date }) => {
+      const finAt = finesPlanificados.get(
+        `${e.employeeId}|${localDate(e.startedAt)}`,
+      );
+      return finAt ? { finAt, margenHoras } : null;
+    };
+
     // DENTRO: todo tramo abierto que todavía no es una salida olvidada,
     // empezara el día que empezara (hotfix-fichaje-medianoche). A las 02:00,
     // quien entró ayer a las 22:00 está dentro —se le ve trabajar— y antes
     // no salía aquí porque su tramo "no era de hoy".
     const dentro = entries
-      .filter((e) => e.endedAt === null && !esSalidaOlvidada(e, now, maxHoras))
+      .filter(
+        (e) => e.endedAt === null && !esSalidaOlvidada(e, now, maxHoras, planDe(e)),
+      )
       .map((e) => ({
         employeeId: e.employeeId,
         employeeName: nombre.get(e.employeeId) ?? "—",
@@ -451,11 +488,83 @@ export async function registerFichajeAdminRoutes(
         .map((e) => e.employeeId),
     ]);
 
+    // ── personal-1 (punto 9) · PLANIFICADO FRENTE A FICHADO ──────────
+    //
+    // Las tres preguntas que hasta hoy no se podían contestar, porque no
+    // había jornada teórica contra la que comparar (`fichaje-1-done` §10,
+    // punto 1). Sólo cuenta el cuadrante PUBLICADO: ver `finPlanificadoDe`.
+    const turnosDelCentro = await turnosDelTenant(auth.tenantId);
+    const cabeceraDeHoy = await prisma.staffSchedule.findUnique({
+      where: { tenantId_month: { tenantId: auth.tenantId, month: hoy.slice(0, 7) } },
+      select: { id: true, state: true },
+    });
+    const celdasDeHoy =
+      cabeceraDeHoy?.state === "PUBLICADO"
+        ? await prisma.staffScheduleCell.findMany({
+            where: {
+              scheduleId: cabeceraDeHoy.id,
+              day: new Date(`${hoy}T12:00:00Z`),
+              centerShiftId: { not: null },
+            },
+            select: { employeeId: true, centerShiftId: true },
+          })
+        : [];
+    const tolerancia = await toleranciaDelTenant(auth.tenantId);
+    const activos = new Set(employees.map((e) => e.id));
+    const plan = planificadoVsFichado({
+      ahora: now,
+      planificado: planificadoDelDia(
+        hoy,
+        // Quien ya no está de alta no se le reclama un turno.
+        celdasDeHoy
+          .filter((c) => activos.has(c.employeeId))
+          .map((c) => ({ employeeId: c.employeeId, turnoId: c.centerShiftId })),
+        turnosDelCentro,
+      ),
+      fichado: entries.map((e) => ({
+        entryId: e.id,
+        employeeId: e.employeeId,
+        inicioAt: e.startedAt,
+        finAt: e.endedAt,
+        dia: localDate(e.startedAt),
+      })),
+      dias: [hoy],
+      toleranciaMinutos: tolerancia,
+      margenHoras,
+    });
+    const conNombre = <T extends { employeeId: string }>(x: T) => ({
+      ...x,
+      employeeName: nombre.get(x.employeeId) ?? "—",
+    });
+
     return {
       date: hoy,
       timeZone: FICHAJE_TZ,
       serverNow: now.toISOString(),
       inside: dentro,
+      // `null` cuando el mes no está publicado: la pantalla dice «publica
+      // el cuadrante para poder comparar» en vez de pintar tres listas
+      // vacías que parecen «todo en orden».
+      planned:
+        cabeceraDeHoy?.state === "PUBLICADO"
+          ? {
+              toleranceMinutes: tolerancia,
+              marginHours: margenHoras,
+              withoutClockIn: plan.sinFichar.map((s) => ({
+                ...conNombre(s),
+                inicioAt: s.inicioAt.toISOString(),
+              })),
+              withoutShift: plan.sinTurno.map((s) => ({
+                ...conNombre(s),
+                inicioAt: s.inicioAt.toISOString(),
+              })),
+              pastTheirHour: plan.dentroPasadaSuHora.map((s) => ({
+                ...conNombre(s),
+                inicioAt: s.inicioAt.toISOString(),
+                finPlanificadoAt: s.finPlanificadoAt.toISOString(),
+              })),
+            }
+          : null,
       // Quién NO ha fichado hoy. Sin jornada teórica todavía (eso es F2),
       // así que esto es "no ha aparecido", no "falta al trabajo".
       notClockedIn: employees
@@ -468,7 +577,7 @@ export async function registerFichajeAdminRoutes(
         // pantalla del empleado: un tramo no puede estar "dentro" en una
         // columna y "olvidado" en la de al lado.
         missingExit: entries
-          .filter((e) => esSalidaOlvidada(e, now, maxHoras))
+          .filter((e) => esSalidaOlvidada(e, now, maxHoras, planDe(e)))
           .map((e) => ({
             entryId: e.id,
             employeeId: e.employeeId,
@@ -515,6 +624,10 @@ export async function registerFichajeAdminRoutes(
     totalMinutes: number;
     from: Date;
     to: Date;
+    /** personal-1 · si el mes tiene cuadrante publicado contra el que
+     *  comparar. `false` deja la columna de planificado fuera del CSV y
+     *  del PDF: una columna de ceros se lee como «no tenía que trabajar». */
+    hayCuadrantePublicado: boolean;
   }> {
     const { from, to } = monthRange(month);
     const prisma = getPrisma();
@@ -550,6 +663,48 @@ export async function registerFichajeAdminRoutes(
       if (l) l.push(r);
       else porEmpleado.set(r.employeeId, [r]);
     }
+    // ── personal-1 (punto 9) · lo PLANIFICADO del mes, por persona ──
+    //
+    // Sólo del cuadrante **publicado**: un borrador es lo que la dirección
+    // está pintando ahora, y comparar las horas reales contra un mes a
+    // medio pintar diría que todo el mundo trabajó de más.
+    //
+    // Y en la misma consulta que el registro, por lo mismo que `blocks`
+    // vive en esta función y no en el handler: si el PDF cogiera el
+    // planificado de otra lectura, el día que discrepen ganaría el PDF
+    // —que es el que se firma— y nadie sabría por qué.
+    const planificadoPorPersona = new Map<string, number>();
+    let hayCuadrantePublicado = false;
+    const cabecera = await prisma.staffSchedule.findUnique({
+      where: { tenantId_month: { tenantId, month } },
+      select: { id: true, state: true },
+    });
+    if (cabecera?.state === "PUBLICADO") {
+      hayCuadrantePublicado = true;
+      const [turnos, celdas] = await Promise.all([
+        turnosDelTenant(tenantId, prisma),
+        prisma.staffScheduleCell.findMany({
+          where: {
+            scheduleId: cabecera.id,
+            centerShiftId: { not: null },
+            ...(employeeId ? { employeeId } : {}),
+          },
+          select: { employeeId: true, day: true, centerShiftId: true },
+        }),
+      ]);
+      const porId = new Map(turnos.map((t) => [t.id, t]));
+      for (const c of celdas) {
+        const turno = porId.get(c.centerShiftId!);
+        if (!turno) continue;
+        const dia = c.day.toISOString().slice(0, 10);
+        planificadoPorPersona.set(
+          c.employeeId,
+          (planificadoPorPersona.get(c.employeeId) ?? 0) +
+            minutosDeTurno(dia, turno),
+        );
+      }
+    }
+
     const blocks: ExportBlock[] = [...porEmpleado.entries()]
       .map(([id, list]) => {
         const days = groupByDay(
@@ -560,6 +715,11 @@ export async function registerFichajeAdminRoutes(
           employeeName: nombre.get(id) ?? "—",
           days,
           totalMinutes: totalMinutes(days),
+          // `null` y no 0 cuando no hay cuadrante publicado: son dos cosas
+          // distintas y la columna sólo se pinta en el primer caso.
+          plannedMinutes: hayCuadrantePublicado
+            ? (planificadoPorPersona.get(id) ?? 0)
+            : null,
         };
       })
       .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
@@ -570,6 +730,7 @@ export async function registerFichajeAdminRoutes(
       totalMinutes: blocks.reduce((a, b) => a + b.totalMinutes, 0),
       from,
       to,
+      hayCuadrantePublicado,
     };
   }
 
@@ -606,6 +767,15 @@ export async function registerFichajeAdminRoutes(
         employees: r.employees,
         blocks: r.blocks,
         totalMinutes: r.totalMinutes,
+        // personal-1 (punto 9) · horas planificadas, horas fichadas y
+        // diferencia, por persona. `null` en las tres cuando el mes no
+        // tiene cuadrante publicado: la pantalla no pinta la columna.
+        cuadrante: {
+          publicado: r.hayCuadrantePublicado,
+          plannedTotalMinutes: r.hayCuadrantePublicado
+            ? r.blocks.reduce((a, b) => a + (b.plannedMinutes ?? 0), 0)
+            : null,
+        },
       };
     },
   );

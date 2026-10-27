@@ -14,6 +14,11 @@
 // decirlo.
 
 import {
+  MARGEN_DE_TURNO_POR_DEFECTO,
+  limiteDeSalidaOlvidada,
+} from "@mipiacetpv/cuadrante";
+
+import {
   CENTER_TZ,
   utcToWallDate,
   utcToWallTime,
@@ -178,22 +183,76 @@ export interface OpenEntry {
   endedAt?: Date | null;
 }
 
+// ── personal-1 · Y AHORA TAMBIÉN EL TURNO PLANIFICADO ────────────────
+//
+// #45 dejó esto decidido por DURACIÓN, con el máximo del tenant. Lo que
+// personal-1 añade es que, **cuando la persona tiene turno en el
+// cuadrante**, el límite sea además «el fin de su turno más un margen».
+//
+// El caso: la auxiliar de noche sale a las 08:00. Si a las 13:00 sigue
+// «dentro», con el máximo a secas nadie se enteraba hasta las 14:00. Con
+// el turno, a las 12:00.
+//
+// **SE AMPLÍA ESTA MISMA FUNCIÓN, no se añade un segundo criterio en otra
+// ruta.** Es la lección entera de #45: el bug que aquel hotfix arregló
+// existía porque tres superficies comparaban `localDate` cada una por su
+// cuenta. Las tres siguen llamando aquí, y el cuarto argumento es
+// opcional: sin cuadrante, el comportamiento es **exactamente** el de
+// hoy — ni una rama nueva se ejecuta.
+//
+// Por qué el límite es el MENOR de los dos y no el del turno, por qué un
+// fin de turno anterior a la entrada se ignora, y por qué el turno aprieta
+// y nunca afloja: está argumentado en la cabecera de `fichado.ts` del
+// paquete, que es donde vive el cálculo. Aquí se decide; allí se calcula.
+
+/** El turno planificado de ese día, si lo hay. */
+export interface TurnoPlanificado {
+  /** Cuándo acaba el turno que le tocaba, como instante. */
+  finAt: Date;
+  /** El margen del tenant (`Tenant.fichajeShiftMarginHours`). */
+  margenHoras: number;
+}
+
 /**
  * ¿Este tramo es una salida OLVIDADA?
  *
- * `true` sólo cuando sigue abierto Y lleva abierto **más** del máximo. El
- * límite exacto NO es olvido: con 16 h de máximo, un tramo de 16 h clavadas
- * todavía se cierra con un toque; a los 16 h y un minuto, se pregunta.
+ * `true` sólo cuando sigue abierto Y ha pasado su límite. El límite exacto
+ * NO es olvido: con 16 h de máximo, un tramo de 16 h clavadas todavía se
+ * cierra con un toque; a los 16 h y un minuto, se pregunta.
  *
  * Un tramo ya cerrado nunca es una salida olvidada, aunque durara treinta
  * horas: eso es una jornada larga, y ya tiene su hora de salida.
+ *
+ * **Con `planificado`**, el límite es el menor de los dos: el máximo del
+ * tenant y el fin del turno más el margen. **Sin él**, exactamente lo de
+ * #45.
  */
 export function esSalidaOlvidada(
   entry: OpenEntry,
   now: Date,
   maxHoras: number = MAX_OPEN_HOURS_DEFAULT,
+  planificado: TurnoPlanificado | null = null,
 ): boolean {
   if (entry.endedAt != null) return false;
-  const abierto = now.getTime() - entry.startedAt.getTime();
-  return abierto > normalizeMaxOpenHours(maxHoras) * 3_600_000;
+  const limite = limiteDeSalidaOlvidada({
+    entradaAt: entry.startedAt,
+    maxHoras: normalizeMaxOpenHours(maxHoras),
+    finPlanificadoAt: planificado?.finAt ?? null,
+    margenHoras: planificado?.margenHoras ?? MARGEN_DE_TURNO_POR_DEFECTO,
+  });
+  return now.getTime() > limite.getTime();
+}
+
+/** El instante del límite, para que el panel pueda decir «a las 12:00». */
+export function limiteDelTramo(
+  entry: OpenEntry,
+  maxHoras: number = MAX_OPEN_HOURS_DEFAULT,
+  planificado: TurnoPlanificado | null = null,
+): Date {
+  return limiteDeSalidaOlvidada({
+    entradaAt: entry.startedAt,
+    maxHoras: normalizeMaxOpenHours(maxHoras),
+    finPlanificadoAt: planificado?.finAt ?? null,
+    margenHoras: planificado?.margenHoras ?? MARGEN_DE_TURNO_POR_DEFECTO,
+  });
 }
