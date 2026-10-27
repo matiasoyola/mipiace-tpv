@@ -218,7 +218,11 @@ export function CuadrantePage() {
       );
       // Y la verdad del servidor manda: si rechazó algo, la rejilla vuelve
       // a lo que hay de verdad en vez de quedarse con lo que se pintó.
-      setData((d) => (d ? { ...d, celdas: r.celdas } : d));
+      // `?? d.celdas`: una respuesta sin celdas dejaría la rejilla en
+      // `undefined` y `comprobarCuadrante` reventaría al recorrerla — o
+      // sea, pantalla en blanco por un campo que faltó. Lo enseñó la
+      // medida de toques, cuyo doble del servidor no lo devolvía.
+      setData((d) => (d ? { ...d, celdas: r.celdas ?? d.celdas } : d));
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado");
@@ -244,7 +248,7 @@ export function CuadrantePage() {
           body: { desde, hasta, dias: 7, ...(motivo ? { motivo } : {}) },
         },
       );
-      setData((d) => (d ? { ...d, celdas: r.celdas } : d));
+      setData((d) => (d ? { ...d, celdas: r.celdas ?? d.celdas } : d));
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado");

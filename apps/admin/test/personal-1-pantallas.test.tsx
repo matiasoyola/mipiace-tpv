@@ -283,6 +283,19 @@ beforeEach(() => {
         if (path.endsWith("/importar")) {
           return { creadas: 0, completadas: 1, sinCambios: 0, errores: [] };
         }
+        if (path.includes("copiar-semana")) {
+          // Lo que el servidor devuelve de verdad: el cuadrante entero
+          // recalculado. Un doble que devuelva `{}` no es «más simple»,
+          // es otro contrato.
+          return {
+            celdasTocadas: 147,
+            cambiosRegistrados: 0,
+            cabecera: cuadrante.cabecera,
+            celdas: cuadrante.celdas,
+            avisos: [],
+            resumen: cuadrante.resumen,
+          };
+        }
         return {};
       }
       if (path === "/admin/fichaje/personal") return PERSONAL;
@@ -688,5 +701,101 @@ describe("personal-1 · el cuadrante", () => {
     const lunes = cabeceras.find((th) => th.id === "col-2026-11-02")!;
     expect(lunes.className).not.toContain("bg-mipiace-stone");
     expect(sabado.textContent).toContain("S");
+  });
+});
+
+// ── 5 · LA MEDIDA DE LOS TOQUES ───────────────────────────────────────
+//
+// «Medido: toques para pintar un mes de 21 personas a partir de copiar la
+// semana anterior» (el prompt).
+//
+// Se mide sobre la pantalla de verdad y contando los gestos que una
+// persona hace: cada toque en la paleta y cada toque en una celda. No es
+// una estimación — el test pinta y cuenta.
+
+describe("personal-1 · cuántos toques cuesta un mes", () => {
+  /** Un mes de 28 días y 21 personas: cuatro semanas clavadas. */
+  function cuadranteDe21(): ReturnType<typeof cuadranteDe> {
+    const base = cuadranteDe([]);
+    return {
+      ...base,
+      dias: Array.from(
+        { length: 28 },
+        (_, i) => `2026-11-${String(i + 1).padStart(2, "0")}`,
+      ),
+      personas: Array.from({ length: 21 }, (_, i) => ({
+        employeeId: `e-${i}`,
+        nombre: `Persona ${String(i).padStart(2, "0")}`,
+        atencionDirecta: true,
+        minutosContratados: null,
+        altaEl: null,
+        finEl: null,
+        active: true,
+        categoria: "Gerocultora / auxiliar",
+      })),
+    };
+  }
+
+  // Margen de sobra sobre los ~1,3 s que tarda: cada `act` repinta una
+  // tabla de 588 celdas en jsdom, y en medio de la suite eso se estira.
+  it("150 toques la primera semana (147 celdas), y TRES el resto del mes", { timeout: 30_000 }, async () => {
+    cuadrante = cuadranteDe21();
+    enElMesDePrueba();
+    await pintar(<CuadrantePage />);
+
+    let toques = 0;
+    // La rotación de un centro de 24 h: M, T, N y libre, y cada persona
+    // entra en el ciclo un día más tarde. Es la que Jardín de Gredos
+    // tiene en su Excel.
+    const pinceles = ["M08:00–15:00", "N22:00–08:00", "Libre"];
+    const queLeToca = (d: number, p: number) => pinceles[(d + p) % 3]!;
+
+    // **Así se pinta de verdad**: se elige un turno y se pintan TODAS las
+    // celdas de la semana que lo llevan, y después el siguiente. La
+    // paleta se queda puesta — que es justo para lo que está — y nadie
+    // cambia de pincel ciento cuarenta y siete veces.
+    for (const pincel of pinceles) {
+      await tocar(boton(pincel));
+      toques += 1;
+      // Las celdas de un mismo pincel, en un `act`: lo que se mide son
+      // los TOQUES, no cuántas veces React repinta. Con un `act` por
+      // toque, repintar una rejilla de 588 celdas ciento cincuenta veces
+      // mide la carga de la máquina y no la pantalla.
+      await act(async () => {
+        for (let d = 1; d <= 7; d += 1) {
+          const dia = `2026-11-${String(d).padStart(2, "0")}`;
+          for (let p = 0; p < 21; p += 1) {
+            if (queLeToca(d, p) !== pincel) continue;
+            container
+              .querySelector(`#celda-e-${p}-${dia}`)!
+              .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+            toques += 1;
+          }
+        }
+        await Promise.resolve();
+      });
+    }
+
+    // 3 toques de paleta + 147 de celda (21 personas × 7 días).
+    expect(toques).toBe(150);
+    // Y el servidor recibió una celda por toque de celda.
+    expect(puts).toHaveLength(147);
+
+    // ── y el resto del mes, con «copiar la semana» ──────────────────
+    const antes = puts.length;
+    const copiar = [...container.querySelectorAll("button")].filter((b) =>
+      /^\d+ → \d+$/.test((b.textContent ?? "").trim()),
+    );
+    // Tres botones: 2→9, 9→16, 16→23. El mes empieza en domingo, así que
+    // el primer lunes es el día 2.
+    expect(copiar).toHaveLength(3);
+    for (const b of copiar) await tocar(b);
+    expect(puts.length - antes).toBe(0); // copiar no manda celdas: manda una orden
+    expect(posts.filter((p) => p.path.includes("copiar-semana"))).toHaveLength(3);
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `cuadrante · 21 personas × 28 días · ${toques} toques la primera semana (${puts.length} celdas) + 3 para el resto del mes`,
+    );
   });
 });
