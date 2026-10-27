@@ -481,6 +481,24 @@ function SesionPodologiaDentro(props: {
     void cargar();
   }, [cargar]);
 
+  /**
+   * agenda-1 · H6 · ¿es HOY la cita de esta sesión?
+   *
+   * Pasada del 27-10, hallazgo H6: con la cita del jueves abierta desde la
+   * agenda del martes, la pantalla decía «Sesión en curso» arriba, «Hoy
+   * toca…» en la banda y dejaba teclear el dolor, que se pintaba en la
+   * gráfica como el punto de hoy. clinica-9 (4) ya había puesto la franja
+   * que lo explica («Puedes mirar la historia y la exploración; lo de hoy
+   * se anota en la cita de hoy») y había apagado el botón de cerrar — pero
+   * el resto de la pantalla seguía hablando en presente.
+   *
+   * Lo decide el SERVIDOR, con la misma función que rechaza el cierre
+   * (`sePuedeCerrarLaSesion`): el front no vuelve a calcular qué día es.
+   * Ausente —un servidor anterior a clinica-9— se lee como «sí», que es
+   * cómo se comportaba antes.
+   */
+  const citaEsDeHoy = vista?.dia?.esHoy !== false;
+
   // ── Lo derivado, con las funciones puras del paquete ─────────────
 
   const catalogo = useMemo<ServicioDeSesion[]>(() => {
@@ -1036,6 +1054,8 @@ function SesionPodologiaDentro(props: {
             pendientes={pendientes}
             mapaVersion={vista.listas.mapa.version}
             onMarcar={marcarPendienteAMano}
+            // agenda-1 · H6 · la cita de otro día no dice «Hoy toca».
+            esDeHoy={citaEsDeHoy}
           />
         </>
       )}
@@ -1148,7 +1168,13 @@ function SesionPodologiaDentro(props: {
                 titulo="Dolor, sesión a sesión"
                 sub="Lo que marca el paciente al empezar."
               >
-                <GraficaDolor historico={vista.dolorHistorico} hoy={dolor} />
+                {/* agenda-1 · H6 · el punto de HOY sólo si la cita es de
+                    hoy. Pintar un dolor tecleado el martes como el punto
+                    del jueves es dibujar una línea que no pasó. */}
+                <GraficaDolor
+                  historico={vista.dolorHistorico}
+                  hoy={citaEsDeHoy ? dolor : null}
+                />
               </Tarjeta>
             </div>
 
@@ -1300,6 +1326,9 @@ function SesionPodologiaDentro(props: {
 
               <ComunDeLaSesion
                 listas={vista.listas}
+                // agenda-1 · H6 · fuera del día de la cita no se anota
+                // nada «de hoy».
+                esDeHoy={citaEsDeHoy}
                 dolor={dolor}
                 evolucion={evolucion}
                 consejos={consejos}
@@ -1854,8 +1883,21 @@ function Cabecera(props: { vista: VistaDeLaSesion }) {
             )}
           </div>
         </div>
-        <span className="shrink-0 inline-flex rounded-xl px-3 py-1.5 text-[12.5px] font-medium bg-mipiace-coral-soft text-mipiace-coral-dark">
-          Sesión en curso
+        {/* agenda-1 · H6 · «Sesión en curso» SÓLO si la cita es de hoy.
+            La del jueves, abierta el martes, no está en curso: se está
+            mirando. Y lo que la chapa dice es justo lo que se puede
+            hacer. */}
+        <span
+          data-test="chapa-de-la-sesion"
+          className={`shrink-0 inline-flex rounded-xl px-3 py-1.5 text-[12.5px] font-medium ${
+            props.vista.dia && !props.vista.dia.esHoy
+              ? "bg-mipiace-stone text-slate-600"
+              : "bg-mipiace-coral-soft text-mipiace-coral-dark"
+          }`}
+        >
+          {props.vista.dia && !props.vista.dia.esHoy
+            ? "Sólo se puede mirar"
+            : "Sesión en curso"}
         </span>
       </div>
       <FranjaRoja alertas={c.alertas} />
@@ -2085,6 +2127,8 @@ function ComunDeLaSesion(props: {
   hayAnterior: boolean;
   onRepetir: () => void;
   onDolor: (n: number) => void;
+  /** agenda-1 · H6 · fuera del día de la cita no se anota nada «de hoy». */
+  esDeHoy?: boolean;
   onEvolucion: (e: Evolucion) => void;
   onConsejo: (id: string) => void;
   onProximaCita: (p: ProximaCita) => void;
@@ -2110,7 +2154,27 @@ function ComunDeLaSesion(props: {
         </button>
       )}
 
-      <Seccion titulo="Dolor hoy (0 = nada · 10 = el peor)">
+      <Seccion
+        titulo={
+          props.esDeHoy === false
+            ? "Dolor del día de la cita"
+            : "Dolor hoy (0 = nada · 10 = el peor)"
+        }
+      >
+        {/* agenda-1 · H6 · el dolor se anota EL DÍA DE LA CITA.
+            Pasada del 27-10: con la cita de pasado mañana abierta, la
+            escala dejaba teclear un dolor que la gráfica pintaba como el
+            punto de hoy. No es un botón apagado y mudo: la frase dice
+            dónde se hace, que es lo que hay que entender. */}
+        {props.esDeHoy === false && (
+          <p
+            data-test="dolor-fuera-del-dia"
+            className="text-[13.5px] text-slate-600 leading-snug"
+          >
+            El dolor lo marca el paciente al empezar su visita, así que se
+            anota el día de la cita.
+          </p>
+        )}
         {/* clinica-8 (fase B, 13) · EL «10» YA NO CAE SOLO EN OTRA FILA.
             Auditoría del 18-10, punto 16. Era `flex-wrap` con
             `min-w-touch` (48 px) y `gap-1` (4): once teclas necesitan
@@ -2131,6 +2195,7 @@ function ComunDeLaSesion(props: {
             a propósito: es el final de la escala y se lee como tal.
             Rellenarlo estirando el «10» a doble ancho le daría un peso
             que la escala no tiene. */}
+        {props.esDeHoy !== false && (
         <div className="grid grid-cols-6 gap-1" data-test="escala-de-dolor">
           {Array.from({ length: 11 }, (_, i) => (
             <button
@@ -2148,6 +2213,7 @@ function ComunDeLaSesion(props: {
             </button>
           ))}
         </div>
+        )}
       </Seccion>
 
       {/* clinica-8 (fase B, 13) · EN LA PRIMERA VISITA NO SE PREGUNTA

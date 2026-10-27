@@ -45,7 +45,22 @@ export function BandaDeHoyToca(props: {
   pendientes: readonly PendienteEnPantalla[];
   mapaVersion: number;
   onMarcar: (p: PendienteCreado) => void;
+  /**
+   * agenda-1 · H6 · ¿es HOY la cita de esta sesión?
+   *
+   * Pasada en hierro del 27-10, hallazgo H6: abriendo la cita del jueves
+   * desde la agenda del martes, la pantalla decía «Hoy toca: revisar la
+   * uña» — de una visita que es pasado mañana. El pendiente existe, pero
+   * NO toca hoy, y marcarlo hecho sería apuntar en la sesión del jueves
+   * algo que se hizo (o no) el martes.
+   *
+   * Con `false` la banda sigue diciendo QUÉ hay pendiente —es lo que la
+   * sanitaria necesita leer antes de la visita— y deja de prometer que es
+   * de hoy y de dejarse marcar.
+   */
+  esDeHoy?: boolean;
 }) {
+  const esDeHoy = props.esDeHoy !== false;
   if (props.pendientes.length === 0) return null;
   return (
     <div className="space-y-2" data-test="hoy-toca">
@@ -58,8 +73,9 @@ export function BandaDeHoyToca(props: {
             type="button"
             aria-pressed={hecho}
             // Lo cerrado SOLO no se puede desmarcar: ver la cabecera.
-            disabled={x.solo != null}
-            onClick={() => props.onMarcar(x.pendiente)}
+            // Y fuera del día de la cita no se marca nada: ver `esDeHoy`.
+            disabled={x.solo != null || !esDeHoy}
+            onClick={() => esDeHoy && props.onMarcar(x.pendiente)}
             className={`w-full text-left flex items-center gap-3 rounded-[18px] px-4 py-3 ${
               hecho
                 ? "bg-emerald-50 text-emerald-800"
@@ -87,7 +103,11 @@ export function BandaDeHoyToca(props: {
             </span>
             <span className="min-w-0">
               <b className="block text-[16px] font-semibold">
-                {hecho ? `Hecho: ${l.titulo.toLowerCase()}` : `Hoy toca: ${l.titulo}`}
+                {hecho
+                  ? `Hecho: ${l.titulo.toLowerCase()}`
+                  : esDeHoy
+                    ? `Hoy toca: ${l.titulo}`
+                    : `Pendiente: ${l.titulo}`}
               </b>
               <span className="block text-[13px] opacity-90">
                 {hecho
@@ -96,6 +116,7 @@ export function BandaDeHoyToca(props: {
                       l.zona,
                       l.nota,
                       `apuntado ${cuantoHace(l.desde)}`,
+                      esDeHoy ? null : "se marca el día de la cita",
                     ]
                       .filter(Boolean)
                       .join(" · ")}
