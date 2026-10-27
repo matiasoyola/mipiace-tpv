@@ -58,6 +58,10 @@
 //         `GET /contacts/search` para el selector de cliente;
 //       · pantalla `clientes` (la sección Clientes con su ficha), donde vive
 //         la fecha de nacimiento con máscara.
+//   clinica-10: `venta-clinica` — los 17 servicios y las cinco categorías
+//     del CSV de Rosario, que es la captura 33 de la pasada del 27-10. A
+//     1280 de ancho la rejilla es de cinco columnas y ahí es donde
+//     «biomecánica» se salía de la tarjeta.
 //   catalogo-local: `?sin-holded=1` apaga el interruptor de Holded (la venta
 //     del comercio que no lo usa: sin "Cliente" en el menú del ticket y sin
 //     "Fiado" en el cobro) y `?fiado=1` enciende la venta a crédito, que
@@ -240,6 +244,51 @@ const CATALOG = LINES_12.map((l, i) => ({
   tags: [] as string[],
   kind: "PRODUCT" as const,
 }));
+
+// clinica-10 (paso 33) · EL CATÁLOGO DE ROSARIO, TAL CUAL.
+//
+// Los 17 servicios de `docs/implantaciones/rosario/catalogo-tpv.csv` con
+// sus cinco categorías. Es la pantalla de la captura 33 de la pasada del
+// 27-10: a 1280 × 800 (la Lenovo TB311FU, 1920 físicos a densidad 1,5) la
+// rejilla es de cinco columnas y «biomecánica» no cabía — se salía de la
+// tarjeta y la caja la recortaba a mitad de letra.
+//
+// Es la pantalla que el bucle visual mira: los tests de jsdom pueden
+// decir qué cuerpo se elige, pero no si el texto cabe de verdad.
+const CATALOGO_DE_ROSARIO: Array<[string, string, number]> = [
+  ["Consulta diagnóstico", "consulta", 20],
+  ["Quiropodia básica", "quiropodia", 25],
+  ["Quiropodia completa", "quiropodia", 26],
+  ["Quiropodia extra", "quiropodia", 27],
+  ["Quiropodia a domicilio", "quiropodia", 37],
+  ["Cura", "cirugía", 13],
+  ["Sesión papiloma", "quiropodia", 12],
+  ["Exploración biomecánica", "biomecánica", 35],
+  ["Revisión biomecánica adultos", "biomecánica", 28],
+  ["Revisión biomecánica niños", "biomecánica", 0],
+  ["Entrega de órtesis plantares", "biomecánica", 0],
+  ["Órtesis de silicona pequeña", "órtesis", 15],
+  ["Órtesis de silicona mediana", "órtesis", 20],
+  ["Órtesis de silicona grande", "órtesis", 25],
+  ["Cirugía fenol 1 borde", "cirugía", 180],
+  ["Cirugía fenol 2 bordes", "cirugía", 360],
+  ["Avulsión ungueal", "cirugía", 200],
+];
+
+function catalogoDeRosario() {
+  return CATALOGO_DE_ROSARIO.map(([name, tag, precio], i) => ({
+    id: `00000000-0000-0000-0000-0000000020${String(i).padStart(2, "0")}`,
+    holdedProductId: `pod-${i}`,
+    sku: `POD-${String(i + 1).padStart(3, "0")}`,
+    name,
+    basePrice: precio,
+    priceGross: precio,
+    // Exento sanitario: la clínica no lleva IVA (clinica-3).
+    taxRate: 0,
+    tags: [tag],
+    kind: "SERVICE" as const,
+  }));
+}
 
 /** Reparte `tags` entre los productos del catálogo, en bucle. */
 function catalogWithTags(tags: string[]) {
@@ -826,6 +875,7 @@ function benchCatalog() {
   if (isAgendaScreen()) return SOLE_CATALOG;
   if (screen === "venta-20-categorias") return catalogWithTags(TAGS_20);
   if (screen === "venta-retail") return catalogWithTags(TAGS_SIROPE.slice(0, 5));
+  if (screen === "venta-clinica") return catalogoDeRosario();
   const base = catalogWithTags(TAGS_SIROPE);
   // v1.14.1-el-catalogo-manda §1 · el caso "con foto". Marca la mitad de
   // los productos con `imageMime` para que `productImageUrl` devuelva
@@ -857,7 +907,9 @@ function benchLines(): CartLine[] {
 
 function benchBusinessType(): string {
   if (isAgendaScreen()) return "SERVICES";
-  return benchScreen() === "venta-retail" ? "RETAIL" : "HOSPITALITY";
+  const s = benchScreen();
+  if (s === "venta-clinica") return "SERVICES";
+  return s === "venta-retail" ? "RETAIL" : "HOSPITALITY";
 }
 
 // ── B-reservas-9 · el panel de salud del centro de Sole ──────────────
