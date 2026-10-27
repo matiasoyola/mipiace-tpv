@@ -346,8 +346,10 @@ reventaría contra la base. Es S25.
 una CREDENCIAL como `care_pins`, `actor` SET NULL porque dar de baja a la encargada que puso un
 PIN provisional no puede borrar que se puso) y dos índices.
 
-**Lo que no se puede guardar desde la suite**: que el CHECK se cumpla contra Postgres de verdad.
-Eso queda para la pasada en hierro (§9).
+**Contra Postgres de verdad ya corrió**: los dos jobs `e2e` de la CI aplican las migraciones
+sobre una base real antes de los tests, y pasan. O sea que la columna, el CHECK y `pin_changes` se
+CREAN bien. Lo que eso todavía no demuestra es que el CHECK **rechace** la fila sin sentido, que
+es lo que queda para la pasada en hierro (§9).
 
 ---
 
@@ -455,3 +457,7 @@ su razón escrita en el barrido del inventario) y cambiar el formato (4-8 cifras
 | `3003f36` | El inventario de las cinco puertas + el barrido de la sexta |
 | `f2e1275` | El bucle visual: dos columnas en mostrador, cabe en la mano, banco visual del panel, 11 capturas |
 | `9cfb7bf` | Merge de `origin/master` (`503354a`, clinica-10) — suite verde después |
+| `b42d19f` | Este documento |
+
+**PR [#52](https://github.com/matiasoyola/mipiace-tpv/pull/52)**, con la CI en verde: `ci`, `e2e`
+y `smoke` pasan en los dos runs (el del push y el del PR, que mergea el master de ahora).
