@@ -312,8 +312,9 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       //
       // Nueve de clinica-7, seis de residencia-1b (D-63), dos del
       // registro de cuidados (residencia-3), cinco del libro de
-      // incidencias (residencia-4), dos del relevo (residencia-5) y seis
-      // del expediente de una no conformidad (calidad-1). Están
+      // incidencias (residencia-4), dos del relevo (residencia-5), seis
+      // del expediente de una no conformidad (calidad-1) y dos de la ficha
+      // de personal (personal-1). Están
       // aquí a propósito en vez de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
       // motor sostiene cifrado en toda la casa. Partirla en dos habría sido
       // dos listas que pueden dejar de cubrirse, y lo que hace falta saber
@@ -382,6 +383,22 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           "effectiveness_verifications_note_cifrado_formato",
           "non_conformities_cause_cifrado_formato",
           "non_conformities_description_cifrado_formato",
+          // personal-1 · el DNI/NIE y el nº de afiliación a la Seguridad
+          // Social de la FICHA DE PERSONAL. Dos columnas lógicas y no una
+          // «identificación», por lo mismo que las de arriba: con el
+          // mismo nombre lógico, el nº de afiliación se podría copiar a la
+          // columna del DNI y descifraría.
+          //
+          // Y lo que NO está aquí, declarado: la categoría profesional, la
+          // jornada contratada y las fechas de alta y de fin. Van en claro
+          // a propósito — son del puesto, no de la persona, y es lo que
+          // permite que el cuadrante las cuente sin tocar una clave.
+          //
+          // Nótese lo que esto significa: un tenant **sin clínica** que
+          // guarde un DNI de su plantilla tiene desde ese momento una
+          // `clinical_tenant_keys`. Ver el done de personal-1.
+          "employees_dni_cifrado_formato",
+          "employees_nss_cifrado_formato",
         ].sort(),
       );
     });

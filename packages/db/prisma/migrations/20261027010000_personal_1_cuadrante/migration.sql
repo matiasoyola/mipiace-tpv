@@ -271,6 +271,14 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM staff_schedules WHERE id = OLD.schedule_id) THEN
         RETURN OLD;
     END IF;
+    -- ADR-021 §5 · la eliminación de la cuenta entera, que es la ÚNICA
+    -- puerta por la que esto se va. SÓLO borrado: un cambio registrado no
+    -- se reescribe nunca, ni aquí. Mismo texto que
+    -- `mipiacetpv_fiscal_records_append_only`.
+    IF TG_OP = 'DELETE'
+       AND mipiacetpv_eliminando_este_tenant(OLD.tenant_id) THEN
+        RETURN OLD;
+    END IF;
     RAISE EXCEPTION
         'CUADRANTE_VIOLADO: staff_schedule_changes es append-only (intento de % sobre el cambio %)',
         TG_OP, OLD.id
@@ -539,6 +547,11 @@ BEGIN
         END IF;
     END IF;
 
+    -- ADR-021 §5 · la eliminación de la cuenta. Sólo borrado.
+    IF TG_OP = 'DELETE' AND mipiacetpv_eliminando_este_tenant(OLD.tenant_id) THEN
+        RETURN OLD;
+    END IF;
+
     IF v_state = 'PUBLICADO'
        AND NOT mipiacetpv_staff_schedule_change_exists(
                    v_schedule_id, v_employee_id, v_day) THEN
@@ -601,6 +614,16 @@ CREATE FUNCTION mipiacetpv_staff_schedules_delete_guard() RETURNS trigger
 LANGUAGE plpgsql AS $fn$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM tenants WHERE id = OLD.tenant_id) THEN
+        RETURN OLD;
+    END IF;
+    -- ADR-021 §5 · la eliminación de la cuenta entera. Sin esta rama, un
+    -- centro con un cuadrante publicado no se podría eliminar nunca: el
+    -- `DELETE FROM employees` de `eliminarLaCuenta` rebotaría contra
+    -- `staff_schedule_cells_employee_id_fkey`, que es RESTRICT, y la
+    -- cuenta se quedaría a medio borrar. Es la lección de la casa: una
+    -- escapatoria «inalcanzable» no está cerrada hasta que se mide, y
+    -- esta se midió con el e2e.
+    IF mipiacetpv_eliminando_este_tenant(OLD.tenant_id) THEN
         RETURN OLD;
     END IF;
     IF OLD.state <> 'PUBLICADO' THEN

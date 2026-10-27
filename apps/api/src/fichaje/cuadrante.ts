@@ -482,13 +482,7 @@ export async function ponerCelda(
   } catch (err) {
     const texto = String((err as { message?: string }).message ?? err);
     if (texto.includes("CUADRANTE_")) {
-      // La frase de la base, sin el prefijo y sin el ruido de plpgsql: es
-      // una frase escrita para que la lea quien está pintando el mes.
-      const limpio = texto
-        .split("\n")[0]!
-        .replace(/^.*?CUADRANTE_[A-Z_]+: /, "")
-        .trim();
-      throw new CuadranteRechazado(limpio);
+      throw new CuadranteRechazado(fraseDeLaBase(texto));
     }
     throw err;
   }
@@ -642,6 +636,27 @@ export async function finesPlanificadosDe(
     // Falla hacia «sin turno», como la de arriba.
     return fuera;
   }
+}
+
+/**
+ * El mensaje del `RAISE`, sin el ruido que Prisma le cuelga alrededor.
+ *
+ * Copia declarada de `cleanPgMessage` de `corrections.ts`, y con su misma
+ * forma por la misma razón: **el mensaje de Prisma empieza con una línea
+ * vacía**. La primera versión de esto hacía `split("\n")[0]` y devolvía la
+ * cadena vacía, así que la pantalla contestaba un 400 sin frase. Lo
+ * encontró el e2e.
+ *
+ * El `[^\n]*` para el cuerpo y no `.*`: el mensaje de plpgsql acaba en el
+ * salto de línea, y detrás viene el `CONTEXT:` con el nombre de la función
+ * y el número de línea — que no es para quien está pintando el mes.
+ */
+export function fraseDeLaBase(raw: string): string {
+  const m = raw.match(/CUADRANTE_[A-Z_]+:\s*([^\n]*)/);
+  if (!m) return raw;
+  // Y sin la comilla con la que Prisma cierra el `Message:` de su propio
+  // envoltorio.
+  return m[1]!.replace(/`\s*$/, "").trim();
 }
 
 /** La cabecera del mes, creándola en BORRADOR si no existe. */

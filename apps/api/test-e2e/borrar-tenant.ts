@@ -67,6 +67,19 @@ async function borrarDentroDeLaMarca(tx: Tx, id: string): Promise<void> {
   await tx.$executeRawUnsafe(
     `DELETE FROM time_entries WHERE tenant_id = '${id}'`,
   );
+  // personal-1 · el cuadrante va ANTES de los empleados, y no es un
+  // adorno: `staff_schedule_cells.employee_id` y
+  // `staff_schedule_changes.employee_id` son **RESTRICT**, así que
+  // dejarlos para la cascada haría rebotar el `DELETE FROM employees` de
+  // aquí al lado. Mismo caso exacto que los bonos con `clients`.
+  //
+  // Se borra la CABECERA y la cascada se lleva las celdas y los cambios:
+  // los dos triggers que los protegen llevan la escapatoria del «padre
+  // borrado», y la propia cabecera lleva la de la marca de ADR-021 (sin
+  // ella, un cuadrante publicado no se podría borrar nunca).
+  await tx.$executeRawUnsafe(
+    `DELETE FROM staff_schedules WHERE tenant_id = '${id}'`,
+  );
   await tx.$executeRawUnsafe(`DELETE FROM employees WHERE tenant_id = '${id}'`);
   await tx.$executeRawUnsafe(
     `DELETE FROM public_links WHERE tenant_id = '${id}'`,
