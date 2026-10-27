@@ -79,7 +79,14 @@ export async function cobradoPorCitaDe(
   const filas = await prisma.$queryRawUnsafe<
     Array<{ id: string; total_cents: bigint | number }>
   >(
-    `SELECT a.id, round(t.total * 100)::bigint AS total_cents
+    // `a.id::text` y no `a.id`: en esta casa toda columna que se lee en
+    // crudo y se usa como CLAVE sale casteada (`ticketRow` del e2e de
+    // cita→caja hace lo mismo con `id::text` y `status::text`). Un `uuid`
+    // sin castear depende de cómo lo devuelva el driver, y aquí el valor
+    // se usa como clave de un objeto que el front compara contra ids que
+    // vienen del cliente tipado: si no fueran la misma cadena, el mapa
+    // saldría lleno y sin que ninguna cita se reconociera.
+    `SELECT a.id::text AS id, round(t.total * 100)::bigint AS total_cents
        FROM appointments a
        JOIN tickets t ON t.id = a.ticket_id
       WHERE a.tenant_id = $1::uuid
