@@ -75,41 +75,94 @@ falta. La suplente o la DUE nueva aprende quién es quién mirando la lista.
      pulsarla sube o cambia la foto: es el `BloqueDeFoto` actual con otra disposición), nombre,
      edad si hay fecha de nacimiento, habitación · cama · planta, y fichas con plaza, dependencia,
      «En el centro» / «Fuera: hospital desde el martes», y cuánto lleva en el centro. Acciones:
-     Habitación · Sale del centro · Dar de alta.
+     Habitación · Sale del centro · Dar de alta. («Habitación» abre hoy el cambio de habitación que
+     ya existe; `bloque-residencia-ingreso-documentos.md` lo cambia por el selector sobre el plano de
+     la planta.)
    - **Debajo, la franja de alertas de historia-1** (la misma que la puerta, con el detalle del
      admin) y **la banda de lo que falta de alta-minima**, con su enlace por dato y «Completar».
-   - **Pestañas**: Resumen · Datos y familia · Ficha clínica · Plan de cuidados · Lo registrado ·
-     Ausencias · Ingreso y documentos · Historial. («Plaza y pago» la añade el bloque siguiente,
-     `bloque-residencia-plaza-y-pago.md`; deja el hueco previsto entre «Datos y familia» y «Ficha
-     clínica».) **Las pestañas son las páginas que ya existen,
-     montadas dentro de este marco** (rutas anidadas con `Outlet`: `…/:clientId/plan`,
-     `…/registros`, `…/ficha`, `…/ausencias`, `…/ingreso`), no copias: sus rutas y sus tests
-     siguen valiendo, y quien llegue a una por un enlace viejo la ve con la cabecera encima.
-     «Umbrales propios» sigue enlazado desde el plan, como hoy. El mockup enseña cómo debe verse
-     cada una; donde la página actual difiere en disposición (el plan como tabla por grupos y
-     turnos con «cómo va hoy»; lo registrado con filtros de día y «sólo lo no hecho»; ausencias
-     con el mes en días), se ajusta a él.
-   - **Resumen** (lo único de contenido nuevo): tarjetas de Familia (con «Llamar» como enlace
-     `tel:`), Lo clínico en breve (diagnósticos con alerta, alergias o «sin alergias conocidas»,
-     dieta y textura, dispositivos), Hoy (cuántos cuidados del plan hechos y los últimos tres
-     registros), Estancia (ingreso, plaza, habitación actual y anteriores) y Ausencias (ahora y la
-     última). Cada tarjeta abre su pestaña. **Una sola petición nueva**
+   - **Pestañas (revisado el 27-10-2026: de nueve a seis, y una séptima sólo para dirección y
+     administración)**: **Resumen · Cuidados · Salud · Familia y datos · Estancia · Documentos**
+     y **Plaza y pago** (con candado; la añade `bloque-residencia-plaza-y-pago.md`, al final; un rol
+     sin permiso **no ve la pestaña**). Se juntan las que contaban la misma historia por partes:
+     el plan y lo registrado pasan a ser **Cuidados**; ausencias e historial pasan a ser
+     **Estancia**; la ficha clínica se llama **Salud**; ingreso y documentos se llama
+     **Documentos**. **Las páginas que ya existen se montan dentro de este marco** (rutas
+     anidadas con `Outlet`), no se copian: las rutas viejas (`…/plan`, `…/registros`, `…/ficha`,
+     `…/ausencias`, `…/ingreso`) siguen valiendo y redirigen a su pestaña nueva, y quien llegue
+     por un enlace viejo la ve con la cabecera encima. Sus tests siguen valiendo; los de
+     disposición se ajustan al mockup.
+   - **En toda la ficha**: los formularios **se guardan solos** al salir de cada campo (con «se
+     guarda solo · guardado hace un momento» al pie), sin botón «Guardar» que olvidar; corregir
+     algo que se usa poco (resolver un diagnóstico, retirar un consentimiento, quitar un contacto)
+     va en un «⋯» por línea, no a la vista; y nada se repite entre pestañas ni con la cabecera.
+   - **Resumen** (lo único de contenido nuevo; revisado el 27-10-2026). **No es un índice de las
+     pestañas**: contesta «¿cómo está y qué hay que hacer hoy con este residente?». No repite nada
+     de la cabecera (estado, alertas, datos que faltan) y **no enseña nada económico** (plaza y pago
+     vive en su pestaña, sólo para dirección y administración). Tres bloques, como el mockup:
+     - **Pide atención**: una lista corta, ordenada por urgencia, y **cada línea lleva a la pestaña
+       donde se arregla**. Cuidados de hoy (hechos de los del plan y el siguiente pendiente con su
+       hora), un cuidado rechazado o no hecho varios días seguidos, la revisión del plan vencida,
+       las salidas programadas próximas (citas) y los documentos del ingreso sin firmar. Con su
+       cuenta en el título. Si no hay nada, una línea que lo dice.
+     - **Cómo está**: los últimos 7 días sacados de lo registrado y de sus umbrales (los del centro
+       y los propios del residente), y **sólo lo que se aparta de lo normal**: come menos, caídas,
+       cambio de peso, sueño, deposiciones, líquidos. Lo que está bien se agrupa en una línea («como
+       siempre»). Si nada se aparta, una sola línea.
+     - **A quién llamar**: el contacto con el papel «avisar en urgencias» (o el responsable si no
+       hay), con su horario para llamar y **un botón grande de llamar** (`tel:`); debajo el
+       responsable, y si le falta el teléfono, «Anotarlo» lleva a Familia y datos.
+     - Los **diagnósticos y dispositivos** pasan a una línea discreta en la cabecera, bajo la de
+       edad y habitación.
+     Lo que todavía no exista como dato (p. ej. los documentos del ingreso, que llegan con
+     `bloque-residencia-ingreso-documentos.md`, o el peso si no se registra) **no se inventa**: la
+     línea no sale y el done dice qué hueco queda. **Una sola petición nueva**
      (`GET /residencia/residentes/:clientId/resumen`) que junte lo que ya calculan las rutas de
-     cada parte; nada de recalcular en el cliente.
-   - **Datos y familia**: el `FormularioDeCompletar` actual, siempre editable (no sólo cuando
-     falta algo), con el nombre también editable y un número en la pestaña con los datos que
-     faltan. Gana tres datos personales, **ninguno cuenta como pendiente**: sexo, estado civil y
-     domicilio anterior al ingreso. La foto y su consentimiento viven en esta pestaña.
-   - **Varios contactos por residente** (hoy sólo hay un «familiar responsable»): nombre,
-     parentesco, teléfono, email, DNI (opcional) y horario para llamar, cada uno con sus papeles:
-     **responsable**, **recibe las facturas**, **avisar en urgencias**. Hay exactamente un
-     responsable; el actual se migra como tal. Lo que hoy cuenta como pendiente (familiar y su
-     teléfono) sigue contando sobre el responsable.
-   - **Historial**: las habitaciones anteriores (lo que hoy sale al final de la ventana) y el alta
-     si la hubo.
+     cada parte y devuelva las líneas ya decididas; nada de recalcular en el cliente.
+   - **Cuidados** (el plan y lo registrado, en una tabla). Arriba, una línea: «9 de 14 hechos hoy ·
+     el siguiente, cambio postural a las 14:00», y un filtro «Lo que falta hoy (n)». La tabla, por
+     grupos del plan: cada cuidado con cada cuánto toca, sus turnos (M · T · N), **cómo va hoy**
+     (hecho con hora, «2 de 4», «no quiso», la hora a la que toca) y **los últimos 7 días en
+     puntos** (hecho, a medias, no hecho, no tocaba). **Tocar un cuidado lo despliega ahí mismo**
+     con sus últimos registros (hora, quién y el porqué) y dos acciones: «Avisar a la DUE» y
+     «Cambiar este cuidado». Debajo, «Fuera del plan, hoy» (lo anotado que no es un cuidado, como
+     «no está como siempre»). Al pie, sin estorbar: «Añadir un cuidado», «Umbrales propios» e
+     «Imprimir» (lo registrado del día, para una inspección). En el móvil se ocultan los turnos.
+   - **Salud** (la ficha clínica de historia-1). Ordenada por riesgo: **Alergias** y **Dieta**
+     arriba (lo que puede hacer daño hoy), **Diagnósticos** y **Dispositivos** debajo. La dieta en
+     etiquetas grandes, con la textura y el espesante en rojo, y «Cambiar la dieta» (no «nueva
+     versión»; las anteriores en un enlace). Los diagnósticos con alerta primero; los resueltos no
+     salen tachados en medio, se agrupan en «Resueltos (n)». Alergias con «preguntadas por última
+     vez el … · quién» al pie. Corregir («se resolvió», «estaba mal escrito», «ya no lo usa») va en
+     «⋯». Una nota al pie dice quién escribe cada parte (D-90). Lo que todavía no existe
+     (medicación, valoraciones) no se dibuja.
+   - **Familia y datos**. **Primero los contactos** (lo que más se usa): cada uno con su teléfono
+     como botón de llamar (o un campo «Anotar su teléfono» en ámbar si falta), su email y **sus
+     papeles como interruptores de un toque**: **responsable**, **recibe las facturas**, **avisar
+     en urgencias**. Varios contactos por residente (hoy sólo hay un «familiar responsable»):
+     nombre, parentesco, teléfono, email, DNI (opcional, enmascarado) y horario para llamar. Hay
+     exactamente un responsable; el actual se migra como tal. Lo que hoy cuenta como pendiente
+     (familiar y su teléfono) sigue contando sobre el responsable. **Después, «Sus datos»**: la foto
+     grande con su consentimiento al lado («lo dio … el … · retirarlo») y el `FormularioDeCompletar`
+     actual, siempre editable (no sólo cuando falta algo), con el nombre también editable y un
+     número en la pestaña con los datos que faltan. Gana tres datos personales, **ninguno cuenta
+     como pendiente**: sexo, estado civil y domicilio anterior al ingreso. Al pie, «Siguiente ficha
+     incompleta →» (alta-minima) para completar las 43 de un tirón.
+   - **Estancia** (ausencias e historial). Arriba, «en el centro desde … · habitación …» y «Sale del
+     centro». A un lado, **el mes en días** (en el centro, hospital, con la familia, por venir; hoy
+     marcado; flechas de mes; «estos días son los que irán a la factura de la Junta»). Al otro,
+     **una sola línea de tiempo** con todo lo de su estancia, lo más nuevo arriba: salidas
+     programadas, citas, salidas de día, días con la familia, hospital, cambios de habitación,
+     cambios de plaza, ingreso y alta. Los cambios de dieta o de consentimientos **no** van aquí:
+     viven con su dato (Salud, Familia y datos), con sus versiones.
+   - **Documentos** (el ingreso guiado de historia-1). Arriba, «del ingreso: 9 de 11 · faltan 2» y
+     «Subir un documento». **Lo que falta primero**, con su plazo y su acción en la misma línea
+     («Adjuntar»; «Mandar a firmar a …» llega con `bloque-residencia-ingreso-documentos.md`: hasta
+     entonces el botón no sale). **Lo que ya está**, en fichas agrupadas (estancia y plaza,
+     identidad, salud, consentimientos, otros) que se abren con un toque. El mandato SEPA sólo lo
+     ven dirección y administración.
    - **Flechas «anterior / siguiente»** y «3 de 43», en el orden de la lista y respetando el filtro
      o la búsqueda con que se llegó (pasar el orden por estado de navegación, no por la URL).
-     «Guardar y pasar a la siguiente incompleta» (alta-minima) se queda en la pestaña de Datos.
+     «Siguiente ficha incompleta» (alta-minima) se queda al pie de Familia y datos.
 8. **Salidas temporales: el estado del residente se ve siempre** (lo pidió Matías: vacaciones,
    salida de día, cita médica, ingreso en el hospital…). Es la ausencia de historia-1 (D-92), con
    otra cara:
@@ -180,7 +233,7 @@ dirección.
   funcionando; las flechas respetan el orden filtrado; la lista con 43 residentes hace **una**
   petición de miniaturas y deja **una** línea en el registro de accesos.
 - Bucle visual: capturas de la lista (1366 y 390), buscando con el filtro puesto, y de la ficha
-  (Resumen y Datos) en 1366 y 390, en `docs/qa/`, junto al mockup.
+  (cada una de las seis pestañas) en 1366 y 390, en `docs/qa/`, junto al mockup.
 - CI verde (`ci`, `smoke`, `e2e`).
 - `docs/blocks/residencia-ficha-completa-done.md` con la estructura de la metodología. Dice si la
   rama está pusheada y si hay PR.

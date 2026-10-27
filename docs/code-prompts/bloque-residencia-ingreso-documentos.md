@@ -81,8 +81,33 @@ F. **Se guarda solo, se deja a medias y se salta**: «Lo completo después» en 
 G. **Confirmar el ingreso** es lo que hace entrar al residente: aparece en la puerta de su planta, en
    el parte y en el panel, y se le carga el plan de cuidados de su nivel. Lo pendiente no lo frena
    (alta-minima: nada administrativo bloquea la atención).
-H. **Después**, la pestaña «Ingreso y documentos» de la ficha enseña cómo fue y lo que queda (la
-   vista «Cómo va», pantalla 3), con los mismos pasos.
+H. **Después**, la pestaña «Documentos» de la ficha (antes «Ingreso y documentos»; ahí se enciende
+   «Mandar a firmar a …» en cada línea de lo que falta) enseña cómo va (pantalla 3, revisada el
+   27-10-2026): una línea con las condiciones que han formado su guion, las tres fases con su
+   progreso y el siguiente paso con su botón; debajo **sólo lo que falta**, agrupado en «Falta hoy» y
+   «En los primeros 30 días», cada línea con quién lo hace y **su acción en la misma línea**
+   (Preparar, Reenviar, Empezar, Citar); y **lo hecho plegado** («Hecho 12 · Ver»). Sin las
+   etiquetas Dato / Recoger / Firmar a la vista: el icono de cada línea lo dice. **Las firmas
+   pendientes de una misma persona van juntas**: «Mandárselas a su móvil» (un solo enlace con todos
+   sus documentos, uno detrás de otro) o «Firmarlas aquí seguidas». Pasados los 30 días, la pestaña
+   es la de la ficha completa (lo que falta arriba, lo que ya está en fichas agrupadas).
+I. **En el asistente** (revisado el 27-10-2026): en «Su salud al entrar», si quien lo hace no es
+   sanitario, un aviso dice que lo clínico sólo lo confirma una sanitaria y ofrece «Avisar a …
+   (DUE)», que le pone el paso en su panel; en «Las firmas», «Firmar los n seguidos aquí» (uno tras
+   otro, con la lectura completa de cada uno) o «Mandárselos a …».
+J. **La habitación se elige en un plano, no en una lista** (lo pidió Matías el 27-10-2026). El paso
+   «Su habitación» enseña **el plano de la planta**: una pestaña por planta con cuántas camas libres
+   tiene, las habitaciones a los dos lados del pasillo en su orden, y cada cama como un cuadro:
+   ocupada (gris, con las iniciales de quien la ocupa), libre y revisada (verde), libre sin revisar
+   (ámbar punteado: se puede elegir y se avisa a mantenimiento) y **la propuesta del programa ya
+   marcada**, con su porqué debajo («a 8 m del control de enfermería; tiene disfagia y Alzheimer;
+   comparte con alguien de su misma dependencia»). Tocar una cama libre la elige y cambia el porqué.
+   En el pasillo, los hitos que el centro marque (control de enfermería, comedor, ascensor, salida
+   al jardín). **El plano es esquemático y sale solo** de las plantas, habitaciones y camas que ya
+   existen (residencia-1): nadie tiene que dibujarlo; los hitos y el lado del pasillo de cada
+   habitación se ajustan en *Configuración → Edificio*. Dibujar el plano real a escala queda fuera.
+   **El mismo selector** sirve para «Habitación» en la cabecera de la ficha (cambio de habitación),
+   que deja su línea en Estancia.
 
 ### La lectura de documentos: cómo y con qué cuidado
 
@@ -132,7 +157,8 @@ H. **Después**, la pestaña «Ingreso y documentos» de la ficha enseña cómo 
    varios papeles: residente o representante, titular de la cuenta, el centro, el médico, una
    auxiliar). **Versionadas**: cambiar una plantilla crea la versión siguiente y lo firmado conserva
    la suya. Un editor de texto sencillo (párrafos, negrita, listas y huecos), no un procesador de
-   textos.
+   textos. La lista de plantillas (pantalla 8) dice de cada una cuándo se pide, quién firma y su
+   **estado**: «En uso · vN» o «Falta vuestro texto»; toda la fila abre la plantilla.
 7. **Los textos legales son del centro.** No se inventan cláusulas: Mi Piace carga la primera vez los
    Word que use el centro (contrato de estancia, reglamento de régimen interior, autorización de
    imágenes, consentimiento de sujeciones…) convirtiéndolos en plantillas. La siembra trae **sólo**
@@ -148,7 +174,7 @@ H. **Después**, la pestaña «Ingreso y documentos» de la ficha enseña cómo 
    con varios firmantes no cuenta como firmado hasta que firman todos** (el contrato: la familia y
    el centro); cada firma queda con su hora.
 10. **Firma a distancia**: «Enviar para firmar» manda **un enlace por SMS y email** al firmante, de un
-    solo firmante y un solo documento, que caduca (7 días por defecto). La página que abre no pide
+    solo firmante (con uno o varios documentos suyos, que firma uno detrás de otro), que caduca (7 días por defecto). La página que abre no pide
     cuenta, enseña sólo ese documento, obliga a leerlo hasta el final, pide **un código de 6
     dígitos enviado al móvil que consta en la ficha** y recoge la firma con el dedo. Al firmar, la
     familia recibe su copia en PDF por email. El paso del guion pasa de «enviado» a «firmado» solo;

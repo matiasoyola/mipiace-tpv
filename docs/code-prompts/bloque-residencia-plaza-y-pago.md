@@ -4,7 +4,7 @@ Rama `residencia-plaza-y-pago`, worktree
 `~/Developer/Claude/Projects/mipiacetpv-plaza-y-pago`, desde `origin/master`. PR contra `master`.
 Escrito el 24-10-2026 desde el proyecto de Jardín de Gredos. Matías, al ver la ficha completa del
 residente: «me falta tarifa aplicada y forma de pago; si la forma de pago es con recibo domiciliado,
-un campo para el IBAN». **Mockup: `docs/mockups/residencia-residentes-ficha.html`, pestaña «Plaza y
+un campo para el IBAN». **Mockup (revisado el 27-10-2026: arriba si se le puede cobrar o qué falta, tres cifras —paga la Junta, paga el residente, cómo—, el precio pactado sólo tras «Pactar otro precio», se guarda solo y el mandato vive en Documentos): `docs/mockups/residencia-residentes-ficha.html`, pestaña «Plaza y
 pago»** (y su tarjeta en «Resumen»), pendiente de validar con el resto del mockup.
 
 **Ábrelo cuando esté en `master` `residencia-ficha-completa`** (la ficha con pestañas y los
@@ -23,7 +23,7 @@ Lee antes:
    dos regímenes de concesión: **anterior** (% de los ingresos del residente, Tabla I 75/40 y
    Tabla II) y **Decreto** (copago fijo de la resolución). Siembra la tabla JCCM 2026 con esos
    valores; **no copies datos de residentes reales** al repo.
-3. `docs/blocks/residencia-ficha-completa-done.md` y la pestaña de Datos y familia.
+3. `docs/blocks/residencia-ficha-completa-done.md` y la pestaña de Familia y datos.
 
 ## Por qué existe
 
@@ -37,13 +37,13 @@ ni un IBAN.
 
 ## Decisiones de producto ya tomadas — no se re-debaten
 
-1. **Pestaña «Plaza y pago»** en la ficha completa, entre «Datos y familia» y «Ficha clínica», y
+1. **Pestaña «Plaza y pago»** en la ficha completa, la última y con candado (revisado el 27-10-2026), y
    su tarjeta en «Resumen» (plaza, lo que paga el residente, forma de pago, IBAN o «sin anotar»).
    Arriba, la frase: «Datos económicos: sólo los ve dirección y administración. Nunca salen en la
    lista, la puerta ni el relevo». Un rol que no los puede ver **no ve la pestaña**, no una
    pestaña vacía.
 2. **Plaza**, con vigencia (cambiar de privada a concertada cierra una y abre otra; el cambio sale
-   en «Historial»): tipo (Privada · Concertada · Temporal), desde, grado reconocido. En concertada y
+   en «Estancia»): tipo (Privada · Concertada · Temporal), desde, grado reconocido. En concertada y
    temporal, la **concesión**: régimen (Decreto / anterior), nº de resolución, fecha, y según
    régimen, el **copago fijo** (Decreto) o la **tabla** (anterior). Los ingresos del residente del
    régimen anterior **no** entran en este bloque (son de `facturacion-1`, con su acceso aún más
@@ -70,7 +70,7 @@ ni un IBAN.
    - Titular de la cuenta (por defecto, a nombre de quien va la factura) y su NIF.
    - **Mandato SEPA**: referencia única generada por el sistema y fija (`<prefijo del centro>-<nº>`),
      fecha de firma y el PDF firmado, que es un elemento del **ingreso guiado** («Mandato SEPA
-     firmado») y sale en «Ingreso y documentos» sólo cuando la forma de pago es recibo.
+     firmado») y sale en «Documentos» sólo cuando la forma de pago es recibo.
 6. **El IBAN es un dato sensible**: cifrado en reposo con la clave del centro (como el DNI y la
    historia), **enseñado enmascarado** (`ES12 •••• •••• •••• •••• 4567`) salvo que se pulse «Ver»,
    que deja línea en el registro de accesos. Nunca en logs, nunca en la lista, nunca fuera del rol
@@ -78,7 +78,7 @@ ni un IBAN.
    fecha): una remesa ya enviada tiene que poder explicarse.
 7. **Lo que cuenta como pendiente** (alta-minima): la **tarifa aplicada** y la **forma de pago**
    cuentan como datos que faltan; si la forma es recibo, **el IBAN es imprescindible** (rojo) y el
-   mandato firmado, normal. La pestaña lleva su número, como «Datos y familia».
+   mandato firmado, normal. La pestaña lleva su número, como «Familia y datos».
 
 ## Respeta
 
