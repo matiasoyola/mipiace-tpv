@@ -181,6 +181,46 @@ export function ClientForm({
         <Field label="Apellidos" value={lastName} onChange={setLastName} />
       </div>
       <Field label="Teléfono" value={phone} onChange={setPhone} type="tel" />
+      {/* agenda-1 · EL AVISO DE FICHAS PARECIDAS, PEGADO A LOS CAMPOS QUE
+          LO PRODUCEN.
+          Pasada en hierro del 27-10, paso 5: «Con el teclado abierto el
+          aviso queda debajo y no se ve». Y era literal — vivía al final
+          del formulario, detrás del email, la fecha, el RGPD y las notas,
+          así que con el teclado de Android encogiendo la ventana a la
+          mitad el aviso nacía fuera de la pantalla. La recepción teclea
+          «Carmen Prueba», no ve nada, y crea la segunda ficha de una
+          paciente que ya tiene historia.
+          Ahora va justo DEBAJO del teléfono, que es el último de los tres
+          campos que alimentan el parecido (nombre, apellidos, teléfono):
+          `scrollFocusIntoView` trae el campo con el foco a la vista y el
+          aviso es lo siguiente que hay. No es un `position: fixed` ni un
+          toast: es una caja en el flujo, en el sitio donde se mira. */}
+      {parecidos.length > 0 && (
+        <div
+          data-test="paciente-parecido"
+          className="text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2"
+        >
+          <div className="leading-snug">
+            Ya hay{" "}
+            {parecidos.length === 1 ? "una ficha parecida" : "fichas parecidas"}
+            . Si es la misma persona, no hagas otra: su historia está en la
+            suya.
+          </div>
+          {parecidos.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              data-test={`usar-parecido-${p.id}`}
+              onClick={() => onElegirParecido?.(p.id)}
+              disabled={!onElegirParecido}
+              className="w-full text-left min-h-touch px-3 py-2 rounded-xl bg-white border border-amber-300 text-[13.5px] font-medium text-mipiace-ink disabled:opacity-60"
+            >
+              ¿Es {p.nombre}
+              {p.telefono ? `, ${p.telefono}` : ""}?
+            </button>
+          ))}
+        </div>
+      )}
       <Field label="Email" value={email} onChange={setEmail} type="email" />
       {/* B-reservas-mostrador F3 · la fecha de nacimiento NO está en el alta
           rápida: al reservar no permite decidir nada. Y en la ficha deja de
@@ -217,32 +257,6 @@ export function ClientForm({
           className="w-full px-3.5 py-2.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none resize-none"
         />
       </div>
-      {parecidos.length > 0 && (
-        <div
-          data-test="paciente-parecido"
-          className="text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2"
-        >
-          <div className="leading-snug">
-            Ya hay{" "}
-            {parecidos.length === 1 ? "una ficha parecida" : "fichas parecidas"}
-            . Si es la misma persona, no hagas otra: su historia está en la
-            suya.
-          </div>
-          {parecidos.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              data-test={`usar-parecido-${p.id}`}
-              onClick={() => onElegirParecido?.(p.id)}
-              disabled={!onElegirParecido}
-              className="w-full text-left min-h-touch px-3 py-2 rounded-xl bg-white border border-amber-300 text-[13.5px] font-medium text-mipiace-ink disabled:opacity-60"
-            >
-              ¿Es {p.nombre}
-              {p.telefono ? `, ${p.telefono}` : ""}?
-            </button>
-          ))}
-        </div>
-      )}
       {phoneWarning.length > 0 && (
         <div className="text-[12.5px] text-amber-800 bg-amber-50 rounded-xl p-3">
           Ya hay {phoneWarning.length === 1 ? "un cliente" : "clientes"} con

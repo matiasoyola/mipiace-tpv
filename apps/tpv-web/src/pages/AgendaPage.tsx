@@ -37,9 +37,7 @@ import {
   type CatalogProduct,
 } from "../lib/catalog.js";
 import {
-  agruparServiciosDeLaCita,
   apuntarUsoDeServicios,
-  leerUsoDeServicios,
   tenantDelTerminal,
 } from "../lib/servicios-de-la-cita.js";
 import {
@@ -49,6 +47,7 @@ import {
   type ClientRow,
 } from "../lib/clients.js";
 import {
+  AGENDA_TZ,
   ALL_DAY_END,
   ALL_DAY_START,
   centerHHMM,
@@ -60,6 +59,7 @@ import {
   dayInfoOf,
   deleteAbsence,
   fetchAgendaDay,
+  fetchAgendaRange,
   loadAgendaDayFromCache,
   patchAppointment,
   searchAvailability,
@@ -80,16 +80,13 @@ import {
   tinteDeProfesional,
   tonoDeEstado,
 } from "../lib/staffColor.js";
-import { useClientPicker } from "../hooks/useClientPicker.js";
 import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 import {
   fetchAgendaHealth,
   fetchSkillMatrix,
   indexarMatrizPorProfesional,
-  noHaceNingunServicio,
   profesionalesQuePuedenConLaCita,
   readHealthSnapshot,
-  serviciosQueSabeHacer,
   serviciosSinNadie,
   subscribeHealthSnapshot,
 } from "../lib/agenda-health.js";
@@ -106,8 +103,35 @@ import {
   recordarDiaDeLaAgenda,
 } from "../lib/dia-de-la-agenda.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
-// B-reservas-8 · el bono que se ofrece al dar la cita.
-import { BonoDeLaCita } from "./AgendaPage.bono.js";
+// agenda-1 · las tres superficies nuevas del bloque. Van en ficheros
+// hermanos (el patrón de `SalePage.*.tsx`) porque esta pantalla ya tenía
+// 3.700 líneas antes del bloque y meter aquí el día en lista, la semana y
+// el embudo de «Dar cita» la dejaría ilegible.
+import {
+  ColumnaDelDia,
+  DiaEnLista,
+  estadoDeLaFila,
+  libreHastaLas,
+  type EstadoDeLaFila,
+} from "./AgendaPage.dia.js";
+import { SemanaEnColumnas, type DiaDeLaSemana } from "./AgendaPage.semana.js";
+import { PanelDarCita, type DraftBooking } from "./AgendaPage.darCita.js";
+import {
+  ahoraYDespues,
+  cifrasDelDia,
+  duracionHumana,
+  filasDelDia,
+  type FilaHueco,
+} from "../lib/agenda-dia.js";
+import {
+  pendientesDeRecepcion,
+  type PendienteDeRecepcion,
+} from "../lib/agenda-recepcion.js";
+import {
+  lunesDeLaSemana,
+  rotuloDeLaSemana,
+  sieteDias,
+} from "../lib/agenda-semana.js";
 import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
 import { AgendaSkillMatrix } from "./AgendaSkillMatrix.js";
 
@@ -129,7 +153,26 @@ const TZ = "Europe/Madrid";
 const DEFAULT_START_MIN = 8 * 60;
 const DEFAULT_END_MIN = 21 * 60;
 const VISIBLE_MARGIN_MIN = 30;
-const PX_PER_MIN = 1.1;
+// agenda-1 · LA ALTURA MÍNIMA DE TOQUE EN LA REJILLA (tablero 4).
+//
+// 1,1 px por minuto deja una cita de 15 minutos en 16,5 px y una de 10 en
+// 11: rayas. Matías, 27-10: «las citas de 10-20 min son rayas que no se
+// tocan». El estándar de la casa son 48 px (`docs/ux-principles.md` §1.2)
+// y aquí se baja a 44, que es el mínimo de WCAG y lo que el diseño usa en
+// los tableros — por encima de eso un día entero de una retícula de 15 no
+// cabría ni con scroll razonable.
+//
+// Sale de la RETÍCULA del centro y no de una constante: lo que tiene que
+// ser tocable es la franja más pequeña que se puede reservar. Con 30
+// minutos (Sole) son 1,47 px/min; con 15 (el default) 2,93. El suelo de
+// 1,1 se queda para que una retícula grande no apriete la rejilla más de
+// lo que estaba.
+const TOQUE_MIN_PX = 44;
+const PX_POR_MINUTO_SUELO = 1.1;
+
+export function pxPorMinuto(slotMin: number): number {
+  return Math.max(PX_POR_MINUTO_SUELO, TOQUE_MIN_PX / slotMin);
+}
 // B-reservas-5 F8 · alto mínimo para que la tarjeta pueda pintar sus dos
 // líneas enteras: 17 (hora + cliente) + 16 (servicios) + 8 de padding.
 // Por debajo de esto se pinta sólo la primera.
@@ -293,20 +336,8 @@ function tzOffsetMs(date: Date): number {
   return asUtc - date.getTime();
 }
 
-// ── Estado de la superficie de alta ────────────────────────────────────
-
-interface DraftBooking {
-  clientId: string | null;
-  clientName: string | null;
-  serviceIds: string[]; // servicios encadenados en orden
-  staffUserId: string | null; // fijado en slot-first
-  start: string | null; // ISO; null hasta elegir hueco
-  // B-reservas-8 · el BONO del que se apartará una sesión al guardar.
-  // `null` = cita normal. Lo elige (o lo suelta) `<BonoDeLaCita>`, y el
-  // servidor lo aparta DENTRO de la transacción de la cita: o las dos o
-  // ninguna.
-  voucherId?: string | null;
-}
+// agenda-1 · `DraftBooking` se fue a `AgendaPage.darCita.tsx`, que es
+// quien lo rellena. Aquí sólo se guarda y se manda a la API.
 
 export interface AgendaPageProps {
   onClose: () => void;
@@ -394,6 +425,19 @@ export function AgendaPage({
   const [day, setDay] = useState<AgendaDay | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
+  // agenda-1 · DÍA O SEMANA, y nada más. Los tres controles de fecha de
+  // antes (el campo nativo, la tira de siete chips y las dos flechas que
+  // por debajo de 640 px no existían) eran tres maneras de hacer lo mismo
+  // y ninguna enseñaba la semana. Ahora las flechas están siempre, la
+  // semana es una vista de verdad y «Hoy» es un botón que sólo aparece
+  // cuando hace falta.
+  const [vista, setVista] = useState<"dia" | "semana">("dia");
+  // La semana, cuando se mira. No pasa por la caché offline (ver
+  // `fetchAgendaRange`): la pantalla que hay que poder mirar sin red es la
+  // del día, y ésa sigue saliendo de la caché.
+  const [semana, setSemana] = useState<AgendaDay | null>(null);
+  const [cargandoSemana, setCargandoSemana] = useState(false);
+  const [errorSemana, setErrorSemana] = useState<string | null>(null);
   const [services, setServices] = useState<CatalogProduct[]>([]);
   const [clientsById, setClientsById] = useState<Map<string, ClientRow>>(new Map());
   const [staffFilter, setStaffFilter] = useState<string | null>(
@@ -524,6 +568,8 @@ export function AgendaPage({
   // salen de la caché; sin caché, de los valores por defecto de B4.
   const dayInfo = useMemo(() => dayInfoOf(day, date), [day, date]);
   const slotMin = slotMinutesOf(day);
+  // agenda-1 · la escala de la rejilla sale de la retícula: ver `pxPorMinuto`.
+  const pxPorMin = pxPorMinuto(slotMin);
   const { startMin: dayStartMin, endMin: dayEndMin } = useMemo(
     () => visibleRange(dayInfo, day?.appointments ?? []),
     [dayInfo, day],
@@ -655,7 +701,7 @@ export function AgendaPage({
       const now = localMinutes(new Date().toISOString());
       scrollRef.current.scrollTop = Math.max(
         0,
-        (now - dayStartMin) * PX_PER_MIN - 120,
+        (now - dayStartMin) * pxPorMinuto(slotMinutesOf(day)) - 120,
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -836,7 +882,19 @@ export function AgendaPage({
     setDraft(null);
     setBookError(null);
     if (res.queuedOffline) flash("Cita guardada sin red; se enviará al reconectar.");
-    await loadDay(date);
+    // agenda-1 · Y LA AGENDA SE VA AL DÍA DE LA CITA que acaba de entrar.
+    //
+    // «Dársela» y «Otra fecha» pueden reservar en un día que no es el que
+    // se está viendo, y hasta aquí la cita se guardaba y no se veía en
+    // ninguna parte: la recepción se quedaba mirando hoy sin más
+    // confirmación que un panel que se cierra. Ahora se va allí, que es
+    // donde está la cita — y es además la confirmación más barata que
+    // hay: se ve en su hueco.
+    const diaDeLaCita = centerWallDate(
+      res.queuedOffline ? draft.start : res.appointment.start,
+    );
+    if (diaDeLaCita !== date) setDate(diaDeLaCita);
+    else await loadDay(date);
     if (cobrar && !res.queuedOffline) {
       await doCheckout(res.appointment.id);
     }
@@ -1054,13 +1112,90 @@ export function AgendaPage({
     }
     setDetail(null);
     setBookError(null);
+    // agenda-1 · H8 · TOCAR UN HUECO NO BORRA LA PACIENTE.
+    //
+    // Pasada del 27-10, hallazgo H8: tras «Dársela ahora» —que deja el
+    // panel con la paciente puesta— tocar una hora en la rejilla reabría
+    // «Nueva cita» EN BLANCO. Este `setDraft` era un objeto nuevo con
+    // `clientId: null`, y se llevaba por delante lo que la banda acababa
+    // de poner. Con la paciente delante del mostrador.
+    //
+    // Ahora el toque en un hueco escribe LA HORA (y la profesional de esa
+    // columna) en el borrador que haya, y sólo abre uno nuevo si no hay
+    // ninguno. Que es además lo que convierte el camino en UN toque:
+    // hueco + Reservar.
+    setDraft((previo) =>
+      previo
+        ? { ...previo, staffUserId, start: localToIso(date, snapped) }
+        : {
+            clientId: null,
+            clientName: null,
+            serviceIds: [],
+            staffUserId,
+            start: localToIso(date, snapped),
+          },
+    );
+  }
+
+  /** agenda-1 · «Dar cita» en frío, desde la cabecera. */
+  function abrirDarCita() {
+    setDetail(null);
+    setBookError(null);
     setDraft({
       clientId: null,
       clientName: null,
       serviceIds: [],
-      staffUserId,
-      start: localToIso(date, snapped),
+      staffUserId: null,
+      start: null,
     });
+  }
+
+  /**
+   * agenda-1 · un pendiente de recepción, atendido.
+   *
+   * «Dársela» abre el panel con TODO lo que se sabe puesto: la paciente,
+   * los servicios de la cita que lo propuso y el día desde el que buscar.
+   * Lo que falta son dos toques — la hora y Reservar — y es la cuenta que
+   * el bloque persigue.
+   */
+  function atenderPendiente(p: PendienteDeRecepcion) {
+    if (p.accion === "TABLET") {
+      setValoracionDe(p.clientId);
+      return;
+    }
+    const cita = p.appointmentId
+      ? (day?.appointments.find((a) => a.id === p.appointmentId) ?? null)
+      : null;
+    setDetail(null);
+    setBookError(null);
+    setDraft({
+      clientId: p.clientId,
+      clientName: clientNameOrNull(p.clientId),
+      // Los servicios de la cita que propuso la próxima: es lo que se le
+      // HIZO, y es el único origen honesto que hay hoy para el chip (ver
+      // la cabecera de `AgendaPage.darCita.tsx`).
+      serviceIds: cita ? cita.items.map((it) => it.serviceId) : [],
+      staffUserId: null,
+      start: null,
+      propuesta: p.desde
+        ? {
+            desde: p.desde,
+            // Si el APK no conoce esa propuesta (un servidor más nuevo),
+            // el chip dice el día y no una etiqueta vacía.
+            comoSeLlama: p.comoSeLlama ?? `Desde el ${p.desde}`,
+            serviciosDeHoy: cita ? cita.items.map((it) => it.serviceId) : [],
+          }
+        : null,
+    });
+    // Y el día de la agenda NO se mueve.
+    //
+    // clinica-9 (9) lo movía al propuesto, porque «Buscar hueco» buscaba
+    // sobre el día que se estaba viendo. El panel de agenda-1 lleva su
+    // propia ventana (`draft.propuesta.desde`), así que ya no hace falta —
+    // y moverlo tenía un precio: si la recepción cerraba el panel se
+    // quedaba en el 24 de noviembre, con la agenda de hoy a seis toques de
+    // flecha. Al reservar sí se va al día de la cita (ver `doCreate`), que
+    // es cuando hay algo que mirar allí.
   }
 
   const isToday = date === todayLocalDate();
@@ -1121,128 +1256,448 @@ export function AgendaPage({
     void cargarMatriz();
   }, [cargarMatriz]);
 
+  // ── agenda-1 · LA SEMANA ──────────────────────────────────────────
+  //
+  // Se pide al entrar en la vista y al cambiar de semana, no en cada
+  // cambio de día: moverse dentro de la misma semana no cambia nada de
+  // lo que la semana pinta.
+  const lunes = lunesDeLaSemana(date);
+  useEffect(() => {
+    if (vista !== "semana") return;
+    let vivo = true;
+    setCargandoSemana(true);
+    setErrorSemana(null);
+    const dias = sieteDias(lunes);
+    void fetchAgendaRange(dias[0]!, dias[dias.length - 1]!)
+      .then((r) => {
+        if (!vivo) return;
+        setSemana(r);
+      })
+      .catch(() => {
+        if (!vivo) return;
+        setSemana(null);
+        setErrorSemana(
+          "La semana necesita conexión. El día de hoy sí se ve sin red.",
+        );
+      })
+      .finally(() => {
+        if (vivo) setCargandoSemana(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [vista, lunes]);
+
+  // ── agenda-1 · LO QUE LA LISTA Y LA REJILLA NECESITAN ─────────────
+
+  /**
+   * D1 · ¿hay UNA sola profesional en esta pantalla?
+   *
+   * Decisión de Matías: una → lista; varias → rejilla. «Una» incluye el
+   * caso de un centro de varias con el filtro puesto en una de ellas —
+   * «mi día» es exactamente el día de una profesional.
+   */
+  const unaSola = columns.length === 1 ? columns[0]! : null;
+
+  /** Minutos de pared del inicio y del fin de una cita. */
+  const minutosDe = useCallback(
+    (a: AgendaAppointment) => {
+      const desdeMin = localMinutes(a.start);
+      const fin = localMinutes(a.end);
+      return { desdeMin, hastaMin: fin <= desdeMin ? 24 * 60 : fin };
+    },
+    [],
+  );
+
+  /**
+   * Las citas de la lista: las de la única profesional MÁS las que no
+   * tienen a nadie asignado.
+   *
+   * La rejilla les da una columna propia («Sin asignar»); la lista no
+   * tiene columnas, y dejarlas fuera sería esconder citas del día — que
+   * es la única cosa que esta pantalla no puede hacer.
+   */
+  const apptsDeLaLista = useMemo(() => {
+    if (!unaSola) return [];
+    return [
+      ...(apptsByStaff.get(unaSola.userId) ?? []),
+      ...(apptsByStaff.get("__unassigned__") ?? []),
+    ];
+  }, [unaSola, apptsByStaff]);
+
+  const serviciosQueCaben = useMemo(
+    () =>
+      services
+        .filter((x) => x.kind === "SERVICE" && (x.durationMin ?? 0) > 0)
+        .map((x) => ({ nombre: x.name, duracionMin: x.durationMin ?? 0 })),
+    [services],
+  );
+
+  /** El chip de estado de una fila, con todo lo que el día sabe. */
+  const estadoDe = useCallback(
+    (a: AgendaAppointment, esAhora: boolean): EstadoDeLaFila =>
+      estadoDeLaFila({
+        status: a.status,
+        cobradoCents: day?.cobradoPorCita?.[a.id] ?? null,
+        sesionPorCobrar: (day?.sesionesPorCobrar ?? []).includes(a.id),
+        valoracionPendiente:
+          a.clientId != null &&
+          (day?.valoracionesPendientes ?? []).includes(a.clientId),
+        esAhora,
+        pendienteOffline: a.pendingOffline === true,
+        rechazada: a.outboxStatus === "rejected",
+      }),
+    [day],
+  );
+
+  /**
+   * agenda-1 · tablero 4 · qué está haciendo cada profesional ahora.
+   *
+   * «Ahora: Mari Carmen · tinte» o «Libre hasta las 11:00». Sale del
+   * RELOJ y no del estado de la cita: «en sala» lo marca una persona y se
+   * olvida, y la pregunta que la cabecera contesta —«¿quién está libre?»—
+   * es del reloj. Es la misma regla que `ahoraYDespues` usa en la lista.
+   *
+   * `null` en un día que no es hoy: ahí la cabecera es sólo el nombre.
+   */
+  const queHaceAhora = useCallback(
+    (staffUserId: string): { texto: string; ocupada: boolean } | null => {
+      if (!isToday) return null;
+      const suyas = (apptsByStaff.get(staffUserId) ?? []).map((a) => ({
+        a,
+        ...minutosDe(a),
+      }));
+      const enCurso = suyas.find(
+        (x) => x.desdeMin <= nowMin && nowMin < x.hastaMin,
+      );
+      if (enCurso) {
+        return {
+          texto: `Ahora: ${clientLabel(enCurso.a.clientId).nombre} · ${serviceNames(enCurso.a)}`,
+          ocupada: true,
+        };
+      }
+      const hasta = libreHastaLas(suyas, nowMin);
+      return {
+        texto: hasta ? `Libre hasta las ${hasta}` : "Libre el resto del día",
+        ocupada: false,
+      };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isToday, apptsByStaff, nowMin, minutosDe, clientsById, services],
+  );
+
+  /** Lo que la recepción tiene pendiente, de `lib/agenda-recepcion.ts`. */
+  const pendientes = useMemo(
+    () =>
+      pendientesDeRecepcion({
+        proximasCitas: day?.proximasCitas ?? [],
+        nombreDeLaPropuesta: NOMBRE_DE_PROXIMA_CITA,
+        valoracionesPendientes: day?.valoracionesPendientes ?? [],
+        clientesDelDia: (day?.appointments ?? [])
+          .filter((a) => a.status !== "CANCELLED" && a.clientId)
+          .map((a) => a.clientId!),
+        puedeCobrar,
+      }),
+    [day, puedeCobrar],
+  );
+
+  /** Las tres cifras del día, y lo cobrado de verdad. */
+  const tramosDeLaLista = useMemo(
+    () => apptsDeLaLista.map((a) => ({ id: a.id, ...minutosDe(a) })),
+    [apptsDeLaLista, minutosDe],
+  );
+  const abiertosDeLaLista = useMemo(
+    () =>
+      cerrado
+        ? []
+        : (unaSola
+            ? (dayInfo?.staffOpen?.[unaSola.userId] ?? dayInfo?.open ?? [])
+            : []),
+    [cerrado, unaSola, dayInfo],
+  );
+  const cifras = useMemo(
+    () =>
+      cifrasDelDia({
+        citas: tramosDeLaLista,
+        hechas: apptsDeLaLista.filter(
+          (a) => a.status === "COMPLETED" || a.status === "NO_SHOW",
+        ).length,
+        abiertos: abiertosDeLaLista.map((r) => ({
+          desdeMin: minOf(r.startTime),
+          hastaMin: minOf(r.endTime),
+        })),
+        ausencias: (absencesByStaff.get(unaSola?.userId ?? "") ?? []).map(
+          (ab) => ({
+            desdeMin: minOf(ab.startTime),
+            hastaMin: minOf(ab.endTime),
+          }),
+        ),
+        sueloMin: pastUntilMin,
+      }),
+    [
+      tramosDeLaLista,
+      apptsDeLaLista,
+      abiertosDeLaLista,
+      absencesByStaff,
+      unaSola,
+      pastUntilMin,
+    ],
+  );
+  /**
+   * Lo cobrado del día. `null` = no se sabe: sin red `cobradoPorCita` no
+   * viaja en la caché (es dinero), y la tarjeta enseña «—» en vez de un
+   * cero que parece bueno y no lo es.
+   */
+  const cobradoDelDia = useMemo(() => {
+    const mapa = day?.cobradoPorCita;
+    if (!mapa) return null;
+    return apptsDeLaLista.reduce((suma, a) => suma + (mapa[a.id] ?? 0), 0);
+  }, [day, apptsDeLaLista]);
+
+  /**
+   * El suelo de un día cualquiera de la semana.
+   *
+   * La misma aritmética que `earliestMin`/`pastUntilMin` para el día que
+   * se está viendo, aplicada a otra fecha: `null` = nada de ese día ha
+   * pasado; `Infinity` = el día entero pasó; hoy = el comienzo de la
+   * franja en curso. Sin esto la semana ofrecería «+ libre 2 h» en la
+   * mañana del lunes pasado.
+   */
+  const sueloDeLaFecha = useCallback(
+    (fecha: string): number | null => {
+      const hoy = todayLocalDate();
+      if (fecha < hoy) return Number.POSITIVE_INFINITY;
+      if (fecha > hoy) return null;
+      return floorMin;
+    },
+    [floorMin],
+  );
+
+  /**
+   * La línea de aviso bajo el servicio de una fila.
+   *
+   * El diseño enseña ahí «Falta firmar el consentimiento de cirugía». Ese
+   * dato no viaja en la respuesta del día (haría falta consultar las
+   * firmas de cada paciente en el camino que se pinta cincuenta veces al
+   * día), así que queda para otro bloque y apuntado en el `-done`. Lo que
+   * sí se dice aquí es lo que el día ya sabe y la recepción necesita: por
+   * qué una cita no se pudo guardar, y que una cita quedó fuera del
+   * horario porque el festivo o la ausencia se pusieron después.
+   */
+  const avisoDeLaCita = useCallback(
+    (a: AgendaAppointment): string | null => {
+      if (a.outboxStatus === "rejected") {
+        return `No se pudo guardar: ${a.outboxError ?? "el servidor la rechazó"}`;
+      }
+      if (a.pendingOffline) return "Sin red todavía: se enviará al reconectar.";
+      const abiertos = abiertosDeLaLista;
+      if (abiertos.length === 0) return null;
+      const { desdeMin, hastaMin } = minutosDe(a);
+      const dentro = abiertos.some(
+        (r) => minOf(r.startTime) <= desdeMin && hastaMin <= minOf(r.endTime),
+      );
+      return dentro ? null : "Fuera del horario de ese día";
+    },
+    [abiertosDeLaLista, minutosDe],
+  );
+
+  const { ahora: idAhora, despues: idDespues } = useMemo(
+    () => ahoraYDespues(tramosDeLaLista, isToday ? nowMin : null),
+    [tramosDeLaLista, isToday, nowMin],
+  );
+
+  /** El rótulo de la cabecera: el día, o el rango de la semana. */
+  const diasDeLaSemana = sieteDias(lunes);
+  const rotulo =
+    vista === "semana"
+      ? rotuloDeLaSemana([diasDeLaSemana[0]!, diasDeLaSemana[6]!])
+      : new Intl.DateTimeFormat("es-ES", {
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+          timeZone: AGENDA_TZ,
+        }).format(new Date(`${date}T12:00:00.000Z`));
+  const enElPresente =
+    vista === "semana"
+      ? lunes === lunesDeLaSemana(todayLocalDate())
+      : isToday;
+
+  /** Las columnas de la semana, con lo que cada día necesita. */
+  const columnasDeLaSemana: DiaDeLaSemana[] = useMemo(() => {
+    if (!semana) return [];
+    const quien = unaSola?.userId ?? null;
+    return diasDeLaSemana.map((f) => {
+      const info = (semana.days ?? []).find((d) => d.date === f);
+      const citas = semana.appointments.filter((a) => {
+        if (a.status === "CANCELLED") return false;
+        if (centerWallDate(a.start) !== f) return false;
+        if (!quien) return true;
+        // Con el filtro en una profesional la semana es LA SUYA. Sin
+        // filtro se ven las de todas: en una peluquería de tres, «¿hay
+        // hueco el jueves?» es del centro, no de una persona.
+        return (
+          a.assignments.some(
+            (x) => x.reservableType === "STAFF" && x.staffUserId === quien,
+          ) ||
+          a.assignments.every((x) => x.reservableType !== "STAFF")
+        );
+      });
+      return {
+        fecha: f,
+        abiertos: quien
+          ? (info?.staffOpen?.[quien] ?? info?.open ?? null)
+          : (info?.open ?? null),
+        cerrado: info?.closed ?? null,
+        ausencias: (info?.absences ?? []).filter(
+          (ab) => !quien || ab.staffUserId === quien || ab.staffUserId === null,
+        ),
+        citas,
+      };
+    });
+  }, [semana, diasDeLaSemana, unaSola]);
+
   return (
     <div className="fixed inset-0 z-40 bg-mipiace-stone flex flex-col font-sans">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
-        {/* B-reservas-5 F8 · `shrink-0`. Sin él, a 390 px el flex aplastaba
-            el botón de Volver a 20 px de ancho: el área tocable se comía
-            para hacerle sitio al título, y el estándar de la casa son
-            64×64 (docs/ux-principles.md §1.2). Nada de lo que hay en esta
-            barra puede encogerse por debajo de su área tocable. */}
+      {/* ── agenda-1 · LA CABECERA ÚNICA ─────────────────────────────
+
+          Tablero 1 del diseño: volver · ‹ fecha · Hoy › · Día | Semana ·
+          «Dar cita». Y se van tres controles que hacían lo mismo:
+
+            · el campo `type="date"` de navegar por días. Lo pidió Matías
+              el 27-10 («fuera el campo de fecha»). El `type="date"` NO
+              desaparece del bloque: sigue siendo el control bueno para
+              pedir una fecha de CITA y vive dentro de «¿Cuándo?» →
+              «Otra fecha» (ver `AgendaPage.darCita.tsx`). Lo que se va es
+              el de NAVEGAR, que es otra cosa.
+            · la tira de SIETE chips de día. Su trabajo —ver y comparar
+              varios días— lo hace ahora la vista de Semana, que además
+              enseña lo que hay dentro de cada uno.
+            · el selector «Todos» cuando sólo hay UNA profesional: una
+              lista de un elemento no filtra nada.
+
+          Y las flechas dejan de ser `hidden sm:flex`: eran redundantes
+          con la tira, y sin la tira son el único modo de moverse un día.
+          Con ellas y la vuelta a «Hoy» siempre a mano, un jueves de
+          dentro de tres semanas se alcanza por Semana › › ›, que es el
+          camino que el diseño quiere. */}
+      <div className="flex items-center gap-2 md:gap-4 px-3 md:px-6 h-16 md:h-[72px] bg-white border-b border-slate-200 shrink-0">
         <button
           onClick={onClose}
-          className="h-11 w-11 shrink-0 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
+          className="h-11 w-11 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-200 flex items-center justify-center text-mipiace-ink"
           aria-label="Volver"
         >
           <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
         </button>
-        {/* El título se va en compacto: la tira de días de debajo ya dice
-            que esto es la agenda, y esos 66 px son los que le faltaban al
-            botón de Volver y al de Nueva cita. */}
-        <h1 className="hidden sm:block text-[18px] font-semibold text-mipiace-ink">
-          Agenda
-        </h1>
-        <div className="flex items-center gap-1 ml-2 shrink-0">
-          {/* B-reservas-5 F8 · las flechas se van en compacto. A 320 px la
-              barra no cabía y lo que se cortaba era "Nueva cita", que es
-              la acción principal. Y son redundantes: la tira de días de
-              debajo hace el mismo trabajo y con el dedo. */}
+
+        {/* agenda-1 · EL TÍTULO SE VA DE LA VISTA, NO DEL DOCUMENTO.
+            El tablero 1 no lleva «Agenda» escrito: el rótulo de la fecha y
+            el conmutador Día|Semana ya dicen dónde estás, y esos 66 px son
+            los que necesitan la fecha y «Dar cita» a 390 px (es la lección
+            de B-5 F8: esta barra no tiene píxeles de sobra).
+            Pero sigue siendo el `<h1>` de la pantalla: para un lector de
+            pantalla «esto es la agenda» no es decoración, y es además
+            cómo el banco distingue esta pantalla de la venta. */}
+        <h1 className="sr-only">Agenda</h1>
+
+        <div className="flex items-center gap-1 shrink-0 bg-mipiace-stone rounded-2xl p-1">
           <button
-            onClick={() => setDate(addDays(date, -1))}
-            className="hidden sm:flex h-9 w-9 rounded-xl hover:bg-slate-100 items-center justify-center"
-            aria-label="Día anterior"
+            data-test="anterior"
+            onClick={() => setDate(addDays(date, vista === "semana" ? -7 : -1))}
+            className="h-11 w-11 rounded-xl hover:bg-white flex items-center justify-center text-[20px] leading-none text-mipiace-ink"
+            aria-label={vista === "semana" ? "Semana anterior" : "Día anterior"}
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-5 h-5" strokeWidth={2.25} />
           </button>
-          {/* B-reservas-mostrador · IR A UN DÍA CUALQUIERA.
-
-              Lo destapó cruzar la suite con la rutina real de Sole, que
-              reserva con semanas de antelación. Hasta aquí sólo se podía
-              cambiar de día con la tira de SIETE chips y con dos flechas que
-              son `hidden sm:flex`. O sea:
-
-                · en la tablet, un jueves de dentro de tres semanas costaba
-                  VEINTIÚN toques en la flecha;
-                · por debajo de 640 px las flechas no existen, así que el
-                  día 8 en adelante era SENCILLAMENTE INALCANZABLE.
-
-              Aquí el `type="date"` nativo sí es el control bueno, y es el
-              contrario exacto del razonamiento del frente 3: una fecha de
-              CITA cae a semanas del día de hoy, que es justo donde el
-              calendario del sistema abre. Una fecha de NACIMIENTO cae
-              cuarenta años atrás, que es justo donde no abre. */}
-          <input
-            type="date"
-            value={date}
-            min={todayLocalDate()}
-            onChange={(e) => {
-              if (e.target.value) setDate(e.target.value);
-            }}
-            data-ir-a-dia
-            aria-label="Ir a un día"
-            className="h-11 w-[132px] shrink-0 px-2 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px] font-medium tabular-nums text-mipiace-ink"
-          />
-          {/* La vuelta a HOY no va aquí: va en el primer chip de la tira de
-              días, que ahora dice «Hoy» y está siempre a la vista. Probé a
-              ponerla también en la cabecera y a 390 px el resultado fue el
-              fallo que B-5 F8 arregló — «Nueva cita» cortado por el borde
-              derecho. Esta barra no tiene píxeles de sobra. */}
+          <div
+            data-test="rotulo-fecha"
+            className="min-w-[116px] md:min-w-[210px] text-center px-1 text-[15px] md:text-[17px] font-semibold text-mipiace-ink capitalize"
+          >
+            {rotulo}
+            {enElPresente && (
+              <span className="text-mipiace-coral-dark">
+                {vista === "semana" ? " · Esta semana" : " · Hoy"}
+              </span>
+            )}
+          </div>
           <button
-            onClick={() => setDate(addDays(date, 1))}
-            className="hidden sm:flex h-9 w-9 rounded-xl hover:bg-slate-100 items-center justify-center"
-            aria-label="Día siguiente"
+            data-test="siguiente"
+            onClick={() => setDate(addDays(date, vista === "semana" ? 7 : 1))}
+            className="h-11 w-11 rounded-xl hover:bg-white flex items-center justify-center text-[20px] leading-none text-mipiace-ink"
+            aria-label={
+              vista === "semana" ? "Semana siguiente" : "Día siguiente"
+            }
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-5 h-5" strokeWidth={2.25} />
           </button>
+          {/* La vuelta a HOY. Era el primer chip de la tira de días, que
+              ya no está; aquí sólo aparece cuando hace falta, así que en
+              el caso de siempre no le quita píxeles a nadie. */}
+          {!enElPresente && (
+            <button
+              data-test="volver-a-hoy"
+              onClick={() => setDate(todayLocalDate())}
+              className="h-11 px-3.5 shrink-0 rounded-xl bg-white border border-slate-200 text-[13.5px] font-semibold text-mipiace-coral-dark"
+            >
+              Hoy
+            </button>
+          )}
         </div>
-        {offline && (
-          <span className="ml-2 text-[11px] rounded-md bg-amber-100 text-amber-700 px-2 py-0.5">
-            Sin conexión · caché
-          </span>
-        )}
-        <div className="flex-1" />
-        {/* Filtro por profesional (útil en móvil = "mi día") */}
-        {activeStaff.length > 0 && (
-          <select
-            value={staffFilter ?? ""}
-            onChange={(e) => setStaffFilter(e.target.value || null)}
-            className="h-10 px-2 shrink-0 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px]"
-          >
-            <option value="">Todos</option>
-            {activeStaff.map((s) => (
-              <option key={s.userId} value={s.userId}>
-                {s.displayName}
-              </option>
-            ))}
-          </select>
-        )}
-        <button
-          onClick={() =>
-            setDraft({
-              clientId: null,
-              clientName: null,
-              serviceIds: [],
-              staffUserId: null,
-              start: null,
-            })
-          }
-          // n1-vertical · por debajo de `sm` (640 px) el rótulo está
-          // `hidden`, así que el botón se queda SIN NOMBRE: un «+» pelado.
-          // En el N1 en vertical (360 px) es el botón más importante de
-          // la agenda y no lo nombraba nada — ni para quien usa lector de
-          // pantalla ni para el banco, que no podía ni encontrarlo.
-          //
-          // `aria-label` y NO `title`: en la agenda los tooltips están
-          // prohibidos (ux-principles §6, y hay un banco que lo vigila —
-          // `agenda-mostrador.test.tsx`). Un nombre accesible no es un
-          // tooltip: no se pinta, no tapa nada y no esconde un motivo.
-          aria-label="Nueva cita"
-          className="h-11 px-4 shrink-0 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium flex items-center gap-2"
+
+        <div
+          role="group"
+          aria-label="Vista"
+          className="flex shrink-0 bg-mipiace-stone rounded-2xl p-1"
         >
-          <Plus className="w-[18px] h-[18px]" strokeWidth={2.25} />
-          <span className="hidden sm:inline">Nueva cita</span>
+          {(["dia", "semana"] as const).map((v) => (
+            <button
+              key={v}
+              data-test={`vista-${v}`}
+              aria-pressed={vista === v}
+              onClick={() => setVista(v)}
+              className={`h-11 px-4 md:px-5 rounded-xl text-[14.5px] font-semibold ${
+                vista === v
+                  ? "bg-mipiace-ink text-white"
+                  : "text-slate-600 font-medium"
+              }`}
+            >
+              {v === "dia" ? "Día" : "Semana"}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        <button
+          data-test="dar-cita"
+          onClick={abrirDarCita}
+          // n1-vertical · por debajo de `sm` el rótulo está `hidden`, así
+          // que el botón se queda sin nombre accesible. `aria-label` y no
+          // `title`: en la agenda los tooltips están prohibidos
+          // (ux-principles §6) y hay un banco que lo vigila.
+          aria-label="Dar cita"
+          className="h-touch-lg px-4 md:px-7 shrink-0 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] md:text-[17px] font-semibold flex items-center gap-2"
+        >
+          <Plus className="w-5 h-5" strokeWidth={2.4} />
+          <span className="hidden sm:inline">Dar cita</span>
         </button>
+
+        {/* agenda-1 · EL ⋯ DE LAS AUSENCIAS, con una sola profesional.
+            En la rejilla vive en la cabecera de cada columna, que es donde
+            Sole escribe «Ana libre» en su Excel. La lista no tiene
+            cabecera de columna, y quitarle a Rosario la forma de decir que
+            un día no está sería una función menos por un cambio de
+            layout. Así que sube aquí — un botón de 44 px a la derecha de
+            «Dar cita», y sólo cuando la columna es una. */}
+        {unaSola && unaSola.userId !== "__unassigned__" && (
+          <button
+            data-ausencia-menu={unaSola.userId}
+            onClick={() => setAbsenceFor(unaSola)}
+            className="h-11 w-11 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-200 flex items-center justify-center text-slate-600"
+            aria-label={`Opciones de ${unaSola.displayName}`}
+          >
+            <MoreVertical className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* B-reservas-6a frente O · un alta que el servidor rechazó no puede
@@ -1271,141 +1726,129 @@ export function AgendaPage({
         </div>
       )}
 
-      {/* Semana (tira de días) + la puerta del panel de salud.
-          B-reservas-9 · el botón NO va en la cabecera: a 320 px la barra ya
-          iba justa y lo que se cortaba era "Nueva cita" (B-5 F8). Aquí no
-          le quita nada a nadie — los chips de día ya hacen scroll — y la
-          cifra de servicios que nadie puede hacer se ve desde la agenda,
-          que es de lo que va el bloque: el fallo era invisible porque había
-          que saber dónde mirar. */}
-      <div className="flex items-center gap-1 px-3 md:px-6 py-2 bg-white border-b border-slate-100 shrink-0">
-        <div className="flex-1 flex gap-1 overflow-x-auto">
-          {Array.from({ length: 7 }, (_, i) => addDays(todayLocalDate(), i)).map(
-            (d) => (
-              <button
-                key={d}
-                onClick={() => setDate(d)}
-                className={`shrink-0 h-9 px-3 rounded-xl text-[12.5px] font-medium capitalize ${
-                  d === date
-                    ? "bg-mipiace-ink text-white"
-                    : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
-                }`}
+      {/* ── agenda-1 · LA FILA DE LO SECUNDARIO ──────────────────────
+          Lo que no es la acción principal pero tiene que verse: el aviso
+          de que el día salió de la caché, los cobros pendientes, la salud
+          de la agenda y —sólo con VARIAS profesionales— el filtro. La
+          cabecera no tiene píxeles para esto a 390 px (es el fallo que
+          B-5 F8 arregló: lo que se cortaba era la acción principal), y
+          aquí no le quita nada a nadie.
+          La fila entera desaparece cuando no tiene nada dentro. */}
+      {(offline ||
+        (puedeCobrar && (day?.sesionesPorCobrar ?? []).length > 0) ||
+        matrizEditable === true ||
+        activeStaff.length > 1) && (
+        <div className="flex items-center gap-2 px-3 md:px-6 py-2 bg-white border-b border-slate-100 shrink-0 flex-wrap">
+          {offline && (
+            <span className="text-[12px] rounded-lg bg-amber-100 text-amber-800 px-2.5 py-1">
+              Sin conexión · caché
+            </span>
+          )}
+          {/* El filtro por profesional sólo con MÁS DE UNA: un selector
+              «Todos / Rosario» en la clínica de Rosario no filtra nada
+              (prompt del bloque: «fuera el selector Todos con una
+              profesional»). */}
+          {activeStaff.length > 1 && (
+            <select
+              value={staffFilter ?? ""}
+              onChange={(e) => setStaffFilter(e.target.value || null)}
+              aria-label="Profesional"
+              className="h-11 px-2.5 shrink-0 rounded-2xl bg-mipiace-stone border border-slate-200 text-[13.5px]"
+            >
+              <option value="">Todas</option>
+              {activeStaff.map((s) => (
+                <option key={s.userId} value={s.userId}>
+                  {s.displayName}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="flex-1" />
+          {/* clinica-3 · POR COBRAR. Sólo si hay algo y sólo para quien
+              cobra: a un sanitario sin caja la ruta le contesta 403. */}
+          {puedeCobrar && (day?.sesionesPorCobrar ?? []).length > 0 && (
+            <button
+              onClick={() => setVerCobros(true)}
+              className="h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 bg-mipiace-coral-soft text-mipiace-coral-dark"
+              aria-label="Sesiones por cobrar"
+            >
+              <Wallet className="w-[18px] h-[18px]" strokeWidth={2.25} />
+              <span
+                data-test="badge-por-cobrar"
+                className="tabular-nums font-semibold"
               >
-                {d === todayLocalDate()
-                  ? "Hoy"
-                  : new Intl.DateTimeFormat("es-ES", {
-                      weekday: "short",
-                      day: "numeric",
-                    }).format(new Date(`${d}T12:00:00.000Z`))}
-              </button>
-            ),
+                {(day?.sesionesPorCobrar ?? []).length}
+              </span>
+            </button>
+          )}
+          {/* clinica-8 (fase B, 17) · el estetoscopio no se le abre a la
+              clienta: se gatea con lo mismo que decide quién puede
+              ARREGLAR lo que el panel enseña. */}
+          {matrizEditable === true && (
+            <button
+              onClick={() => setSaludAbierta(true)}
+              data-test="abrir-salud"
+              className={`h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 ${
+                sinNadie !== null && sinNadie > 0
+                  ? "bg-mipiace-coral-soft text-mipiace-coral-dark"
+                  : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
+              }`}
+              aria-label="Salud de la agenda"
+            >
+              <Stethoscope className="w-[18px] h-[18px]" strokeWidth={2.25} />
+              {sinNadie !== null && sinNadie > 0 && (
+                <span
+                  data-test="badge-salud"
+                  className="tabular-nums font-semibold"
+                >
+                  {sinNadie}
+                </span>
+              )}
+            </button>
           )}
         </div>
-        {/* clinica-3 · POR COBRAR. Sólo si hay algo y sólo para quien
-            cobra: a un sanitario sin caja la ruta le contesta 403, así que
-            pintarle el botón sería ofrecerle una acción que siempre falla
-            (el mismo criterio que «Cobrar en caja», clinica-1 §7).
-            Y sólo aparece cuando hay cobros pendientes: en una peluquería
-            la lista está siempre vacía, y un botón que nunca tiene nada
-            dentro es ruido en la barra que más se usa. */}
-        {puedeCobrar && (day?.sesionesPorCobrar ?? []).length > 0 && (
-          <button
-            onClick={() => setVerCobros(true)}
-            className="ml-1 h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 bg-mipiace-coral-soft text-mipiace-coral-dark"
-            aria-label="Sesiones por cobrar"
-          >
-            <Wallet className="w-[18px] h-[18px]" strokeWidth={2.25} />
-            <span data-test="badge-por-cobrar" className="tabular-nums font-semibold">
-              {(day?.sesionesPorCobrar ?? []).length}
-            </span>
-          </button>
-        )}
-        {/* clinica-8 (fase B, 17) · EL ESTETOSCOPIO NO SE LE ABRE A LA
-            CLIENTA.
-            Auditoría del 18-10, punto 24: «el estetoscopio de la agenda
-            abre "Salud de la agenda" con jerga interna». Y es literal:
-            ese panel enseña SEIS tarjetas con la CONSULTA SQL que
-            produce cada cifra (ADR-F3, y está bien que lo haga). Es una
-            herramienta de quien lleva el centro y de Mi Piace, y vive en
-            la cabecera de la agenda del mostrador, donde la cajera lo
-            toca con la clienta delante.
-            Se gatea con lo mismo que decide quién puede ARREGLAR lo que
-            el panel enseña: si la matriz de servicios es de sólo lectura
-            para esta sesión, el panel no tiene salida y no se ofrece.
-            Y con el botón se va el badge: una cifra que no se puede
-            abrir es una alarma sin puerta. */}
-        {matrizEditable === true && (
-        <button
-          onClick={() => setSaludAbierta(true)}
-          data-test="abrir-salud"
-          className={`ml-1 h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 ${
-            sinNadie !== null && sinNadie > 0
-              ? "bg-mipiace-coral-soft text-mipiace-coral-dark"
-              : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
-          }`}
-          aria-label="Salud de la agenda"
-        >
-          <Stethoscope className="w-[18px] h-[18px]" strokeWidth={2.25} />
-          {sinNadie !== null && sinNadie > 0 && (
-            <span data-test="badge-salud" className="tabular-nums font-semibold">
-              {sinNadie}
-            </span>
-          )}
-        </button>
-        )}
-      </div>
+      )}
 
-      {/* ── clinica-9 (9) · LA PRÓXIMA CITA PROPUESTA ──────────────────
-          La pantalla de cierre le promete a la sanitaria que «la recepción
-          elige el hueco con el paciente al cobrar». La pasada del 24-10
-          cobró una sesión con «4 semanas» propuestas y en el cobro no
-          salió nada: la propuesta se quedó dentro de la historia clínica,
-          que es el único sitio donde la recepción no mira.
-          Sale AQUÍ, en la agenda del día, que es donde la recepción está
-          cuando acaba de cobrar y la paciente sigue delante. Y se apaga
-          sola en cuanto esa persona tiene una cita por delante: un
-          recordatorio que hay que apagar a mano acaba encendido siempre.
-          Sólo para quien cobra, como el resto de lo de caja. */}
-      {puedeCobrar && (day?.proximasCitas ?? []).length > 0 && (
+      {/* ── agenda-1 · LOS PENDIENTES DE RECEPCIÓN, DONDE HAY SITIO ───
+
+          clinica-9 (9) sacó la próxima cita propuesta a una banda a todo
+          lo ancho sobre la agenda, y funcionó: la pasada del 27-10 la vio
+          (paso 28). Pero es una banda que empuja la agenda hacia abajo y
+          que, con dos avisos, se come dos filas de citas.
+
+          En el tablero 1 su sitio es la tarjeta «Pendiente de recepción»
+          de la columna izquierda, con el test de la tablet al lado — y
+          ahí es donde vive ahora (ver `ColumnaDelDia`). La banda se queda
+          SÓLO para los layouts que no tienen columna izquierda: la
+          rejilla de varias profesionales (tablero 4) y la semana. Dos
+          pinturas del mismo aviso es menos malo que un aviso que
+          desaparece al cambiar de layout.
+
+          La lista sale de `lib/agenda-recepcion.ts`, la misma para las
+          dos superficies. */}
+      {pendientes.length > 0 && (vista === "semana" || !unaSola) && (
         <div
           data-test="proximas-citas-propuestas"
-          className="px-3 md:px-6 py-2 bg-mipiace-coral-soft/60 border-b border-mipiace-coral/20 space-y-1.5"
+          className="px-3 md:px-6 py-2 bg-mipiace-coral-soft/60 border-b border-mipiace-coral/20 space-y-1.5 shrink-0"
         >
-          {(day?.proximasCitas ?? []).map((p) => (
+          {pendientes.map((p) => (
             <div
-              key={p.appointmentId}
+              key={p.clave}
               className="flex items-center gap-3 flex-wrap text-[13px] text-mipiace-ink"
             >
               <span className="flex-1 min-w-0">
                 <b className="font-semibold">
                   {clientLabel(p.clientId).nombre}
                 </b>{" "}
-                se va sin la próxima cita · la sanitaria propuso{" "}
-                {NOMBRE_DE_PROXIMA_CITA[
-                  p.propuesta as keyof typeof NOMBRE_DE_PROXIMA_CITA
-                ]?.toLowerCase() ?? p.propuesta}
-                .
+                {p.texto}
               </span>
               <button
-                data-test={`dar-proxima-cita-${p.appointmentId}`}
-                onClick={() => {
-                  // El día propuesto pasa a ser el de la agenda: es el
-                  // punto de partida de «Buscar hueco», que busca sobre
-                  // el día que se está viendo.
-                  setDate(p.desde);
-                  setDetail(null);
-                  setBookError(null);
-                  setDraft({
-                    clientId: p.clientId,
-                    clientName: clientNameOrNull(p.clientId),
-                    serviceIds: [],
-                    staffUserId: null,
-                    start: null,
-                  });
-                }}
+                data-test={`dar-proxima-cita-${p.appointmentId ?? p.clientId}`}
+                data-pendiente={p.clave}
+                onClick={() => atenderPendiente(p)}
                 className="shrink-0 min-h-touch px-4 rounded-2xl bg-mipiace-coral text-white text-[13px] font-semibold"
               >
-                Dársela ahora
+                {p.accion === "DAR_CITA" ? "Dársela ahora" : p.boton}
               </button>
             </div>
           ))}
@@ -1448,22 +1891,147 @@ export function AgendaPage({
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Calendario */}
-        <div ref={scrollRef} className="flex-1 overflow-auto">
-          {loading ? (
-            <div className="flex items-center gap-2 text-[13px] text-slate-500 py-10 justify-center">
-              <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
+        {/* ── agenda-1 · LAS TRES SUPERFICIES ──────────────────────────
+            Semana (tablero 2) · día de UNA profesional en lista (tablero
+            1) · día de VARIAS en rejilla (tablero 4). La decisión D1 de
+            Matías en una línea: `unaSola`. */}
+        {vista === "semana" ? (
+          <SemanaEnColumnas
+            dias={columnasDeLaSemana}
+            hoy={todayLocalDate()}
+            elegido={date}
+            cargando={cargandoSemana}
+            error={errorSemana}
+            clienteDe={(a) => clientLabel(a.clientId)}
+            servicioDe={serviceNames}
+            minutosDe={minutosDe}
+            sueloDe={sueloDeLaFecha}
+            cobradaDe={(a) => (day?.cobradoPorCita?.[a.id] ?? 0) > 0}
+            onDia={(f) => {
+              setDate(f);
+              setVista("dia");
+            }}
+            // Tocar un hueco de la semana abre «Dar cita» con ese día y
+            // esa hora puestos — y se cambia de día, para que al cerrar
+            // el panel la recepción se quede donde la cita cayó.
+            onHueco={(f, min) => {
+              setDate(f);
+              setVista("dia");
+              setDetail(null);
+              setBookError(null);
+              setDraft((previo) =>
+                previo
+                  ? { ...previo, start: localToIso(f, min) }
+                  : {
+                      clientId: null,
+                      clientName: null,
+                      serviceIds: [],
+                      staffUserId: null,
+                      start: localToIso(f, min),
+                    },
+              );
+            }}
+            onCita={(a) => {
+              setDate(centerWallDate(a.start));
+              setVista("dia");
+              abrirCita(a);
+            }}
+          />
+        ) : loading ? (
+          <div className="flex-1 flex items-center justify-center gap-2 text-[13px] text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
+          </div>
+        ) : columns.length === 0 ? (
+          <div className="flex-1 p-8 text-center text-[14px] text-slate-500 max-w-md mx-auto">
+            No hay profesionales con perfil de agenda activo. Actívalos en el
+            panel de Personal (admin).
+          </div>
+        ) : unaSola ? (
+          /* ── Tablero 1 · el día de UNA profesional ─────────────── */
+          <div className="flex-1 min-w-0 flex flex-col-reverse md:flex-row gap-4 p-3 md:p-6 overflow-hidden">
+            {/* `flex-col-reverse` en compacto: con el móvil en la mano lo
+                que hay que tener delante son las citas, no el resumen.
+                En la tablet apaisada —que es la Lenovo del mostrador— van
+                lado a lado, con la columna a la izquierda como el
+                diseño. */}
+            {/* agenda-1 · CON «DAR CITA» ABIERTO, LA COLUMNA SE APARTA.
+                El panel mide 520 px; a 1280 (la Lenovo apaisada) eso deja
+                760 para repartir entre el resumen y la lista, y la lista
+                se queda en 380 px con los nombres partidos y las filas
+                pisándose. Lo que hay que leer mientras se da una cita es
+                la LISTA —para saber qué hay alrededor de la hora que se
+                está eligiendo—, no las tres cifras del día.
+                Desde 1536 px (`2xl`) caben los tres y no se aparta nada.
+                Y lo que se esconde no se pierde: los pendientes están
+                dentro del panel (es de donde se abrió) y las cifras
+                vuelven al cerrarlo. */}
+            <div className={draft ? "hidden 2xl:contents" : "contents"}>
+            <ColumnaDelDia
+              ahora={apptsDeLaLista.find((a) => a.id === idAhora) ?? null}
+              despues={apptsDeLaLista.find((a) => a.id === idDespues) ?? null}
+              clienteDe={(a) => clientLabel(a.clientId)}
+              servicioDe={serviceNames}
+              minutosDe={minutosDe}
+              estadoDe={estadoDe}
+              // clinica-2/3 · la puerta a la sesión es del SANITARIO, y
+              // «Abrir sesión» sólo tiene sentido el día de la cita. La
+              // tarjeta de Ahora es de hoy por definición, así que basta
+              // con la marca.
+              onAbrirSesion={
+                esSanitario && clinicaEncendida
+                  ? (a) => {
+                      if (a.clientId) setSesionDe(a.id);
+                      else flash("Esa cita no tiene paciente.");
+                    }
+                  : undefined
+              }
+              rotuloDeSesion="Abrir sesión"
+              pendientes={pendientes}
+              nombreDeCliente={(id) => clientLabel(id).nombre}
+              onPendiente={atenderPendiente}
+              cifras={cifras}
+              cobradoCents={cobradoDelDia}
+              libreHasta={libreHastaLas(
+                tramosDeLaLista,
+                isToday ? nowMin : null,
+              )}
+            />
             </div>
-          ) : columns.length === 0 ? (
-            <div className="p-8 text-center text-[14px] text-slate-500 max-w-md mx-auto">
-              No hay profesionales con perfil de agenda activo. Actívalos en el
-              panel de Personal (admin).
-            </div>
-          ) : (
-            // Con una sola columna el carril ocupa el ancho entero en
-            // vez de `min-w-max`, que lo encogería al contenido y
-            // dejaría a la columna sin nada que repartir.
-            <div className={columns.length === 1 ? "flex w-full" : "flex min-w-max"}>
+            <DiaEnLista
+              appts={apptsDeLaLista}
+              abiertos={cerrado ? [] : abiertosDeLaLista}
+              ausencias={absencesByStaff.get(unaSola.userId) ?? []}
+              minutosDe={minutosDe}
+              servicios={serviciosQueCaben}
+              sueloMin={pastUntilMin}
+              ahoraMin={isToday ? nowMin : null}
+              clienteDe={(a) => clientLabel(a.clientId)}
+              servicioDe={serviceNames}
+              estadoDe={estadoDe}
+              avisoDe={avisoDeLaCita}
+              onCita={abrirCita}
+              onHueco={(min) => openSlotFirst(unaSola.userId, min)}
+              onAusencia={setAbsenceDetail}
+            />
+          </div>
+        ) : (
+          /* ── Tablero 4 · el día de VARIAS profesionales ─────────── */
+          <div ref={scrollRef} className="flex-1 overflow-auto">
+            {/* El carril se encoge al contenido y se desliza: esta rama es
+                la de VARIAS profesionales, así que siempre hay más de una
+                columna que repartir. (El `flex w-full` de una sola columna
+                se fue con la lista del tablero 1.) */}
+            {/* agenda-1 · EL CARRIL REPARTE EL ANCHO QUE TIENE.
+                Con `min-w-max` y columnas de ancho fijo, tres
+                profesionales dejaban 600 px en blanco a la derecha en la
+                Lenovo apaisada — es el punto 29 de la auditoría del 18-10
+                («columna estrecha, citas cortas difíciles de tocar»)
+                repetido con tres columnas en vez de una.
+                `w-full` + `flex-1` reparte; el `min-w` de cada columna es
+                el suelo de siempre, así que con seis profesionales el
+                carril vuelve a desbordar y se desliza, que es lo que
+                tiene que hacer. */}
+            <div className="flex w-full min-w-max">
               {/* Regla de horas.
 
                   B-reservas-6a · la regla MENTÍA, y el bucle visual de este
@@ -1481,16 +2049,21 @@ export function AgendaPage({
                   suelo pintado esto deja de ser un detalle: si la regla no
                   cuadra, no se sabe a qué hora acaba lo que ya pasó. */}
               <div className="w-14 shrink-0 sticky left-0 z-10 bg-mipiace-stone">
-                <div className="h-10 shrink-0" />
+                {/* B-reservas-6a · este espaciador MIDE LO QUE MIDE la
+                    cabecera de la columna. Si no, la regla va por delante
+                    de las citas — es el fallo 1 de los dos que ese bloque
+                    arregló. Con la línea de «qué hace» la cabecera pasa a
+                    h-14, y esto con ella. */}
+                <div className={isToday ? "h-14 shrink-0" : "h-10 shrink-0"} />
                 <div
                   className="relative"
-                  style={{ height: (dayEndMin - dayStartMin) * PX_PER_MIN }}
+                  style={{ height: (dayEndMin - dayStartMin) * pxPorMin }}
                 >
                   {hourRows(dayStartMin, dayEndMin).map((h) => (
                     <div
                       key={h}
                       data-hora={`${String(h).padStart(2, "0")}:00`}
-                      style={{ top: (h * 60 - dayStartMin) * PX_PER_MIN }}
+                      style={{ top: (h * 60 - dayStartMin) * pxPorMin }}
                       className="absolute right-0 pr-2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums"
                     >
                       {String(h).padStart(2, "0")}:00
@@ -1510,6 +2083,8 @@ export function AgendaPage({
                   dayStartMin={dayStartMin}
                   dayEndMin={dayEndMin}
                   slotMin={slotMin}
+                  pxPorMin={pxPorMin}
+                  queHace={queHaceAhora(s.userId)}
                   // El día cerrado apaga la columna entera: `open: []`.
                   open={cerrado ? [] : (dayInfo?.staffOpen?.[s.userId] ?? null)}
                   absences={absencesByStaff.get(s.userId) ?? []}
@@ -1535,6 +2110,7 @@ export function AgendaPage({
                   dayStartMin={dayStartMin}
                   dayEndMin={dayEndMin}
                   slotMin={slotMin}
+                  pxPorMin={pxPorMin}
                   open={cerrado ? [] : (dayInfo?.open ?? null)}
                   absences={(dayInfo?.absences ?? []).filter(
                     (a) => a.staffUserId === null,
@@ -1547,20 +2123,20 @@ export function AgendaPage({
                 />
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Panel de alta — AL LADO, sin scrim (no tapa el calendario). En
-            móvil ocupa toda la anchura como hoja. */}
+        {/* agenda-1 · «DAR CITA» — AL LADO, sin scrim (no tapa la
+            agenda, que es lo que la recepción está mirando). En compacto
+            ocupa toda la anchura, como hoja. */}
         {draft && (
-          <BookingPanel
+          <PanelDarCita
             draft={draft}
             setDraft={setDraft}
             services={services}
             staff={activeStaff}
             date={date}
             isPastDay={isPastDay}
-            dayInfo={dayInfo}
             staffName={
               activeStaff.find((s) => s.userId === draft.staffUserId)
                 ?.displayName ?? null
@@ -2174,6 +2750,8 @@ function StaffColumn(props: {
   dayStartMin: number;
   dayEndMin: number;
   slotMin: number;
+  /** agenda-1 · la escala, derivada de la retícula (ver `pxPorMinuto`). */
+  pxPorMin: number;
   // Los tramos reservables de esta columna (turno ∩ centro). `null` = este
   // centro no tiene horario configurado ⇒ no se apaga nada, que es como se
   // comportaba antes del bloque. `[]` = nada es reservable hoy.
@@ -2187,6 +2765,17 @@ function StaffColumn(props: {
   onAppt: (a: AgendaAppointment) => void;
   labelOf: (a: AgendaAppointment) => string;
   clientOf: (a: AgendaAppointment) => { nombre: string; desconocido: boolean };
+  /**
+   * agenda-1 · tablero 4 · qué está haciendo esta profesional ahora, o
+   * hasta cuándo está libre. `null` = el día no es hoy, y entonces la
+   * cabecera es sólo el nombre.
+   *
+   * Es la línea que convierte la rejilla de Sole en algo que se lee de
+   * un vistazo: tres columnas de tarjetas no dicen quién está ocupada,
+   * hay que buscar la franja de «ahora» con el dedo y cruzarla con cada
+   * columna.
+   */
+  queHace?: { texto: string; ocupada: boolean } | null;
 }) {
   const {
     staff,
@@ -2196,10 +2785,11 @@ function StaffColumn(props: {
     dayStartMin,
     dayEndMin,
     slotMin,
+    pxPorMin,
     open,
     absences,
   } = props;
-  const totalH = (dayEndMin - dayStartMin) * PX_PER_MIN;
+  const totalH = (dayEndMin - dayStartMin) * pxPorMin;
   // B-reservas-mostrador F2 · el color de ESTA columna, y el tinte con el que
   // se pintan sus citas. Se calculan una vez por columna, no por tarjeta.
   const colorStaff = colorDeCabecera(staff.userId, staff.color);
@@ -2209,7 +2799,7 @@ function StaffColumn(props: {
       ? 0
       : Math.max(
           0,
-          (Math.min(pastUntilMin, dayEndMin) - dayStartMin) * PX_PER_MIN,
+          (Math.min(pastUntilMin, dayEndMin) - dayStartMin) * pxPorMin,
         );
   // B-reservas-7a · lo que NO es reservable de esta columna.
   const cerradas = closedBands(open, dayStartMin, dayEndMin);
@@ -2224,6 +2814,37 @@ function StaffColumn(props: {
   ) {
     gridLines.push(m);
   }
+  // agenda-1 · los huecos de ESTA columna, con la misma aritmética que la
+  // lista del tablero 1 (`lib/agenda-dia.ts`). Una sola cuenta para las
+  // dos superficies: si la rejilla ofreciera un hueco que la lista no, una
+  // de las dos estaría mintiendo y nadie sabría cuál.
+  const huecosLibresDeLaColumna = filasDelDia({
+    citas: appts
+      .filter((a) => a.status !== "CANCELLED")
+      .map((a) => {
+        const desdeMin = localMinutes(a.start);
+        const fin = localMinutes(a.end);
+        return {
+          id: a.id,
+          desdeMin,
+          hastaMin: fin <= desdeMin ? 24 * 60 : fin,
+        };
+      }),
+    abiertos: (open ?? []).map((r) => ({
+      desdeMin: minOf(r.startTime),
+      hastaMin: minOf(r.endTime),
+    })),
+    ausencias: absences.map((ab) => ({
+      desdeMin: minOf(ab.startTime),
+      hastaMin: minOf(ab.endTime),
+    })),
+    sueloMin: pastUntilMin,
+    // Lo que cabe no se dice en la rejilla: la columna mide 176 px.
+    servicios: [],
+    // Por debajo de una franja de la retícula no hay nada que ofrecer.
+    minimoDeHuecoMin: slotMin,
+  }).filter((f): f is FilaHueco => f.tipo === "hueco" && f.reservable);
+
   /** ¿Esta cita se sale del horario de la columna o pisa una ausencia?
    *  Pasa cuando el festivo o la ausencia se pusieron DESPUÉS. Se sigue
    *  viendo y se sigue pudiendo cobrar: sólo se marca. */
@@ -2256,14 +2877,17 @@ function StaffColumn(props: {
     // el mínimo se queda en el ancho de siempre para que nada encoja.
     <div
       data-columna-staff={props.staff.userId}
-      className={
-        props.unica
-          ? "flex-1 min-w-44 border-l border-slate-200"
-          : "w-44 md:w-52 shrink-0 border-l border-slate-200"
-      }
+      // agenda-1 · `flex-1` con el ancho de siempre como SUELO. El carril
+      // es `w-full min-w-max`: con pocas columnas se reparten la pantalla
+      // y con muchas el carril desborda y se desliza. (`unica` sobra desde
+      // que una sola profesional es una lista, pero el gancho se queda
+      // para la columna «Sin asignar», que puede quedarse sola.)
+      className="flex-1 min-w-44 md:min-w-52 border-l border-slate-200"
     >
       <div
-        className="sticky top-0 z-10 h-10 flex items-center gap-2 px-2 bg-white border-b border-slate-200"
+        className={`sticky top-0 z-10 flex items-center gap-2 px-2 bg-white border-b border-slate-200 ${
+          props.queHace ? "h-14" : "h-10"
+        }`}
         // B-reservas-mostrador F2 · la cabecera usa el MISMO color base que el
         // tinte de sus tarjetas: si la columna es morada, sus citas son
         // moradas. Una profesional sin color ya no cae en el gris de todas —
@@ -2274,8 +2898,20 @@ function StaffColumn(props: {
         // blanco de la cabecera y la columna se quedaba sin su marca.
         style={{ borderTop: `3px solid ${colorStaff}` }}
       >
-        <span className="text-[13px] font-semibold text-mipiace-ink truncate flex-1">
-          {staff.displayName}
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-semibold text-mipiace-ink truncate">
+            {staff.displayName}
+          </span>
+          {props.queHace && (
+            <span
+              data-que-hace={staff.userId}
+              className={`block text-[11.5px] truncate ${
+                props.queHace.ocupada ? "text-emerald-700" : "text-amber-700"
+              }`}
+            >
+              {props.queHace.texto}
+            </span>
+          )}
         </span>
         {/* B-reservas-7a · TOQUE 1 de 3 para poner una ausencia. Va en la
             cabecera de la columna porque es donde Sole escribe «Ana libre»
@@ -2303,7 +2939,7 @@ function StaffColumn(props: {
         onClick={(e) => {
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
           const y = e.clientY - rect.top;
-          props.onSlot(dayStartMin + y / PX_PER_MIN);
+          props.onSlot(dayStartMin + y / pxPorMin);
         }}
       >
         {/* B-reservas-6a · lo que ya pasó no invita. Va PRIMERO en el DOM
@@ -2328,8 +2964,8 @@ function StaffColumn(props: {
             aria-hidden
             data-no-reservable={`${hhmm(b.from)}-${hhmm(b.to)}`}
             style={{
-              top: (b.from - dayStartMin) * PX_PER_MIN,
-              height: (b.to - b.from) * PX_PER_MIN,
+              top: (b.from - dayStartMin) * pxPorMin,
+              height: (b.to - b.from) * pxPorMin,
             }}
             // B-reservas-mostrador F2 · el rayado BAJA de tono (0,18 → 0,09 y
             // el fondo de slate-100 a slate-50). Hasta este bloque era lo que
@@ -2345,7 +2981,7 @@ function StaffColumn(props: {
         {gridLines.map((m) => (
           <div
             key={m}
-            style={{ top: (m - dayStartMin) * PX_PER_MIN }}
+            style={{ top: (m - dayStartMin) * pxPorMin }}
             className={`absolute left-0 right-0 border-t ${
               m % 60 === 0 ? "border-slate-200" : "border-slate-100"
             }`}
@@ -2366,8 +3002,8 @@ function StaffColumn(props: {
               }}
               data-ausencia={ab.id ?? "sin-id"}
               style={{
-                top: (from - dayStartMin) * PX_PER_MIN,
-                height: (to - from) * PX_PER_MIN,
+                top: (from - dayStartMin) * pxPorMin,
+                height: (to - from) * pxPorMin,
               }}
               // SIN `z-index`: el orden del DOM ya la deja por encima de las
               // bandas apagadas y por debajo de las citas, que van después.
@@ -2387,23 +3023,59 @@ function StaffColumn(props: {
             </button>
           );
         })}
+        {/* agenda-1 · LOS HUECOS LIBRES, VISIBLES. Hasta este bloque un
+            hueco en la rejilla era ausencia de tarjeta: se ve si te fijas
+            y no se puede tocar con intención. Tocar la columna ya abría
+            un alta en esa franja (B4), pero nada lo decía — y la pasada
+            del 27-10 midió el camino de la rejilla en 5 toques justamente
+            porque hay que adivinar dónde tocar.
+            Van por DEBAJO de las citas en el DOM, así que una cita nunca
+            queda tapada por un hueco; y son `<button>` con su hora dentro
+            para que el bucle visual y el banco los encuentren. */}
+        {huecosLibresDeLaColumna.map((h) => (
+          <button
+            key={`libre-${h.desdeMin}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onSlot(h.desdeMin);
+            }}
+            data-hueco={hhmm(h.desdeMin)}
+            data-hueco-min={String(h.desdeMin)}
+            style={{
+              top: (h.desdeMin - dayStartMin) * pxPorMin,
+              height: (h.hastaMin - h.desdeMin) * pxPorMin,
+            }}
+            // B-reservas-mostrador F2 · el mismo criterio que el rayado de
+            // «no reservable»: lo que dice que ahí NO hay nada no puede
+            // pesar más que la cita, que es lo único que importa. Un
+            // punteado de 1 px y slate-200, no de 2 y slate-300.
+            className="absolute left-1 right-1 rounded-lg border border-dashed border-slate-200 px-2 py-1 text-left text-[11px] text-slate-400 overflow-hidden hover:bg-slate-50"
+          >
+            {hhmm(h.desdeMin)} · libre {duracionHumana(h.hastaMin - h.desdeMin)}
+          </button>
+        ))}
         {/* línea "ahora" */}
         {nowMin != null && nowMin >= dayStartMin && nowMin <= dayEndMin && (
           <div
-            style={{ top: (nowMin - dayStartMin) * PX_PER_MIN }}
+            style={{ top: (nowMin - dayStartMin) * pxPorMin }}
             className="absolute left-0 right-0 h-0.5 bg-red-500 z-20"
           />
         )}
         {/* citas */}
         {appts.map((a) => {
-          const top = (localMinutes(a.start) - dayStartMin) * PX_PER_MIN;
+          const top = (localMinutes(a.start) - dayStartMin) * pxPorMin;
           const finMin =
             localMinutes(a.end) <= localMinutes(a.start)
               ? 24 * 60
               : localMinutes(a.end);
+          // agenda-1 · el suelo de la tarjeta es el área tocable, no 22
+          // px. Con la escala derivada de la retícula una cita de una
+          // franja ya mide eso; el `max` cubre la cita de MEDIA franja
+          // que llega de una reserva online o de un `slotMinutes`
+          // cambiado después (y que se seguiría pudiendo tocar).
           const height = Math.max(
-            22,
-            (finMin - localMinutes(a.start)) * PX_PER_MIN,
+            TOQUE_MIN_PX,
+            (finMin - localMinutes(a.start)) * pxPorMin,
           );
           // B-reservas-7a · una cita que quedó fuera del horario —porque el
           // festivo o la ausencia se pusieron DESPUÉS— se sigue viendo y se
@@ -2540,559 +3212,18 @@ function StaffColumn(props: {
   );
 }
 
-// ── Panel de alta (cliente-first + multi-servicio + buscar hueco) ──────
-
-function BookingPanel(props: {
-  draft: DraftBooking;
-  setDraft: (d: DraftBooking) => void;
-  services: CatalogProduct[];
-  staff: AgendaStaff[];
-  date: string;
-  // B-reservas-6a · un día que ya pasó no tiene huecos que buscar.
-  isPastDay: boolean;
-  // B-reservas-7a · el horario del centro de ESE día. Sirve para que "no
-  // hay huecos" deje de ser una sola frase para tres causas distintas.
-  dayInfo: AgendaDayInfo | undefined;
-  staffName: string | null;
-  // agenda-lista (hallazgo 🟡 4) · quién sabe hacer qué. `null` mientras
-  // no se sabe: entonces no se filtra nada.
-  skillsPorStaff: Map<string, Set<string>> | null;
-  /** Si esta sesión puede tocar la matriz (OWNER/MANAGER) o sólo mirarla. */
-  matrizEditable: boolean;
-  onAbrirMatriz: () => void;
-  // El 409 del servidor con su frase y sus alternativas.
-  bookError: { message: string; alternatives: AvailabilitySlot[] } | null;
-  onPickAlternative: (start: string) => void;
-  onClientPicked: (c: ClientRow) => void;
-  onCancel: () => void;
-  onReserve: () => void;
-  onReserveAndCharge: () => void;
-  /** B-reservas-8 · la palabra del centro para los bonos. */
-  bonoEtiqueta: string;
-}) {
-  const { draft, setDraft, services, date, isPastDay, bookError, dayInfo } =
-    props;
-  const picker = useClientPicker();
-  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  // El panel hace scroll: si el aviso nace fuera de la vista, no existe.
-  const errorRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    // `?.()` porque jsdom no implementa scrollIntoView y el aviso no
-    // puede depender de que exista.
-    if (bookError) errorRef.current?.scrollIntoView?.({ block: "center" });
-  }, [bookError]);
-
-  // agenda-lista (hallazgo 🟡 4) · dos filtros, no uno.
-  //
-  // El de siempre: es un servicio y tiene duración (sin ficha de agenda no
-  // hay hueco que calcular). Y el nuevo: si la cita se está dando EN LA
-  // COLUMNA de alguien, sólo lo que esa persona hace. Antes se podía
-  // elegir «Mechas» con Lucía, que no las hace, y el «no» llegaba al
-  // pulsar Reservar hablando de huecos — la cajera veía que no había sitio
-  // a ninguna hora del día y no sabía por qué.
-  //
-  // Sin profesional elegida (alta desde «primer hueco libre») se ofrecen
-  // todos y el motor elige a quien sabe: eso no cambia.
-  const conDuracion = services.filter(
-    (s) => s.kind === "SERVICE" && (s.durationMin ?? 0) > 0,
-  );
-  const bookableServices = serviciosQueSabeHacer(
-    conDuracion,
-    draft.staffUserId,
-    props.skillsPorStaff,
-  );
-  const noSabeHacerNada = noHaceNingunServicio(
-    draft.staffUserId,
-    props.skillsPorStaff,
-  );
-  // clinica-8 (fase B, 17) · agrupados por categoría y ordenados por
-  // uso. El contador se lee una vez por apertura de la hoja: leerlo en
-  // cada render movería la lista bajo el dedo si se reservara en otra
-  // pestaña.
-  const uso = useMemo(() => leerUsoDeServicios(tenantDelTerminal()), []);
-  /** clinica-8 (fase B, 17) · la tira de horas, para traerla a la vista
-   *  en cuanto la búsqueda contesta. */
-  const huecosRef = useRef<HTMLDivElement | null>(null);
-  const grupos = useMemo(
-    () => agruparServiciosDeLaCita(bookableServices, uso),
-    [bookableServices, uso],
-  );
-  const totalDuration = draft.serviceIds.reduce((sum, id) => {
-    const s = services.find((x) => x.id === id);
-    return sum + (s?.durationMin ?? 0);
-  }, 0);
-
-  // B-reservas-mostrador F4 · SIN DURACIÓN NO HAY FIN. Hasta este bloque
-  // bastaba con tener la hora de inicio: con cero servicios elegidos
-  // `totalDuration` es 0 y la etiqueta decía «fin 12:30» para una cita que
-  // empieza a las 12:30. En el AP11 quedó fotografiado
-  // (`docs/qa/2026-09-13-ap11/20-lunes-cita.png`). Decir una hora de fin
-  // falsa es peor que no decir ninguna: la cajera la lee por teléfono.
-  const endHHMM =
-    draft.start && totalDuration > 0
-      ? localHHMM(
-          new Date(
-            new Date(draft.start).getTime() + totalDuration * 60000,
-          ).toISOString(),
-        )
-      : null;
-
-  function toggleService(id: string) {
-    const has = draft.serviceIds.includes(id);
-    setDraft({
-      ...draft,
-      serviceIds: has
-        ? draft.serviceIds.filter((x) => x !== id)
-        : [...draft.serviceIds, id],
-    });
-    setSlots([]);
-  }
-
-  /** Por qué no hay huecos: el centro cerrado, nadie con turno, o el día
-   *  lleno. Se mira en ese orden porque es el orden en que se arreglan. */
-  function sinHuecosPorque(): string {
-    if (dayInfo?.closed) {
-      return dayInfo.closed.name
-        ? `El centro está cerrado ese día · ${dayInfo.closed.name}.`
-        : "El centro está cerrado ese día.";
-    }
-    const quien = draft.staffUserId;
-    if (quien && dayInfo) {
-      const suyos = dayInfo.staffOpen?.[quien] ?? [];
-      if (suyos.length === 0) {
-        return `${props.staffName ?? "Esa profesional"} no tiene turno ese día.`;
-      }
-      const todoElDia = (dayInfo.absences ?? []).some(
-        (a) =>
-          (a.staffUserId === quien || a.staffUserId === null) &&
-          minOf(a.startTime) <= minOf(suyos[0]!.startTime) &&
-          minOf(a.endTime) >= minOf(suyos[suyos.length - 1]!.endTime),
-      );
-      if (todoElDia) {
-        return `${props.staffName ?? "Esa profesional"} no está ese día.`;
-      }
-    }
-    if (
-      dayInfo &&
-      !quien &&
-      Object.values(dayInfo.staffOpen ?? {}).every((r) => r.length === 0)
-    ) {
-      return "Ese día no hay nadie con turno.";
-    }
-    return "No hay huecos ese día.";
-  }
-
-  async function findSlots() {
-    if (draft.serviceIds.length === 0) return;
-    if (isPastDay) {
-      setSearchError("Ese día ya ha pasado.");
-      return;
-    }
-    setSearching(true);
-    setSearchError(null);
-    try {
-      const res = await searchAvailability({
-        items: draft.serviceIds.map((serviceId) => ({ serviceId })),
-        staffUserId: draft.staffUserId,
-        from: date,
-        to: date,
-      });
-      setSlots(res);
-      // clinica-8 (fase B, 17) · LAS HORAS, A LA VISTA.
-      //
-      // Auditoría del 18-10, punto 25: «"Buscar hueco": las horas salen
-      // bajo el pliegue». La hoja del alta es una columna con scroll
-      // propio (cliente, servicios, hora, bono, acciones) y los chips de
-      // hora nacen debajo de su botón, que en una tablet en vertical cae
-      // ya al borde. Se pulsa, parece que no pasa nada, y se vuelve a
-      // pulsar.
-      //
-      // Se lleva la tira a la vista en cuanto llega. `block: "nearest"`
-      // para que mueva lo justo —no centra ni salta— y con `?.` porque
-      // jsdom no implementa `scrollIntoView`: el test comprueba que se
-      // llama, el navegador hace el resto.
-      huecosRef.current?.scrollIntoView?.({ block: "nearest" });
-      // B-reservas-7a · TRES CAUSAS, tres frases. "No hay huecos" era una
-      // sola para las tres, y se arreglan de formas distintas: el centro
-      // cerrado lo arregla el owner en los ajustes, el turno que falta lo
-      // arregla el panel de Personal, y el día lleno se arregla con otro
-      // día. Decirlas igual es mandar a la cajera al sitio equivocado.
-      if (res.length === 0) setSearchError(sinHuecosPorque());
-    } catch (err) {
-      setSearchError(err instanceof ApiError ? err.message : "Error buscando huecos.");
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  const canReserve = draft.serviceIds.length > 0 && !!draft.start;
-
-  // ── B-reservas-mostrador F4 · ningún botón mudo ────────────────────
-  //
-  // Un botón apagado sin motivo obliga a adivinar delante de la clienta. El
-  // motivo va en TEXTO VISIBLE junto al botón, nunca en un `title` ni en un
-  // tooltip: `docs/ux-principles.md` §6 los prohíbe («Touch no tiene hover.
-  // Las cosas se ven o no existen»).
-
-  /** Por qué no se puede buscar hueco. `null` = sí se puede. */
-  function motivoBuscarHueco(): string | null {
-    if (isPastDay) return "Ese día ya ha pasado.";
-    if (draft.serviceIds.length === 0) return "Elige al menos un servicio.";
-    return null;
-  }
-
-  /**
-   * Por qué no se puede reservar. `null` = sí se puede.
-   *
-   * NO nombra el cliente, y no es un olvido: desde B4 una cita SIN cliente es
-   * legal a propósito —la reserva por teléfono de quien todavía no tiene
-   * ficha— y `canReserve` nunca lo ha exigido. Decir «falta el cliente»
-   * mandaría a la cajera a buscar un dato que no hace falta.
-   */
-  function motivoReservar(): string | null {
-    const falta: string[] = [];
-    if (draft.serviceIds.length === 0) falta.push("el servicio");
-    if (!draft.start) falta.push("la hora");
-    if (falta.length === 0) return null;
-    return falta.length === 1
-      ? `Falta ${falta[0]}.`
-      : `Faltan ${falta.join(" y ")}.`;
-  }
-
-  const porQueNoSeBusca = motivoBuscarHueco();
-  const porQueNoSeReserva = motivoReservar();
-
-  // B-reservas-mostrador F1 · ¿la cita que se va a guardar es de HOY? Sale de
-  // `draft.start` —el instante que se va a escribir— y no de `date`, que es
-  // sólo el día que se está mirando. Sin hora elegida no hay cita que cobrar,
-  // así que tampoco hay botón.
-  const esDeHoy = draft.start ? centerWallDate(draft.start) === centerToday() : false;
-
-  return (
-    <div className="w-full md:w-96 shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 h-14 px-4 border-b border-slate-100 shrink-0">
-        <h2 className="text-[15px] font-semibold text-mipiace-ink flex-1">
-          Nueva cita
-        </h2>
-        <button
-          onClick={props.onCancel}
-          className="h-9 w-9 rounded-xl hover:bg-slate-100 flex items-center justify-center"
-          aria-label="Cerrar"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* B-reservas-6a · el cuerpo es lo único que hace scroll. Antes
-          scrolleaba el panel entero con el pie en `sticky bottom-0`, así que
-          el pie FLOTABA sobre el contenido: el bucle visual pilló las
-          alternativas del 409 asomando por debajo de "Reservar y cobrar",
-          visibles y no tocables. */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Cliente primero */}
-        <div>
-          <label className="text-[12px] font-medium text-slate-500">Cliente</label>
-          <button
-            onClick={() =>
-              picker.open((c) => {
-                props.onClientPicked(c);
-                setDraft({ ...draft, clientId: c.id, clientName: clientFullName(c) });
-              })
-            }
-            className="mt-1 w-full h-11 px-3 rounded-xl bg-mipiace-stone border border-slate-200 text-left text-[14px]"
-          >
-            {draft.clientName ?? "Buscar o crear cliente…"}
-          </button>
-        </div>
-
-        {/* Servicios encadenables */}
-        <div>
-          <label className="text-[12px] font-medium text-slate-500">
-            Servicios {totalDuration > 0 && `· ${totalDuration} min`}
-            {endHHMM && ` · fin ${endHHMM}`}
-          </label>
-          {/* clinica-9 (13) · SIN CAJA DE CUATRO LÍNEAS CON SCROLL PROPIO.
-              `max-h-52 overflow-y-auto` dejaba los 17 servicios de una
-              clínica dentro de una ventana de ~4 filas con su barra
-              dentro del panel, que ya scrollea (pasada del 24-10,
-              capturas 08-09): dos scrolls anidados, y el de dentro sólo
-              se mueve si el dedo cae justo encima. La lista ocupa ahora
-              lo que ocupe y el panel entero hace el scroll, que es el
-              gesto que la recepción ya está haciendo.
-              Lo que la hace manejable no es recortarla: es que esté
-              agrupada por categoría y ordenada por uso (clinica-8 fase
-              B, 17, `servicios-de-la-cita.ts`). */}
-          <div className="mt-1 space-y-1">
-            {/* agenda-lista · una lista vacía no es una frase. Tres causas
-                distintas, tres mensajes, porque se arreglan en sitios
-                distintos: el catálogo, la matriz, o nada. */}
-            {bookableServices.length === 0 &&
-              (noSabeHacerNada ? (
-                <div
-                  data-motivo="sin-servicios"
-                  className="py-2 space-y-2"
-                >
-                  <div className="text-[12.5px] leading-snug text-slate-600">
-                    {props.staffName ?? "Esta profesional"} no tiene ningún
-                    servicio asignado todavía.
-                  </div>
-                  {props.matrizEditable ? (
-                    <button
-                      data-accion="abrir-matriz"
-                      onClick={props.onAbrirMatriz}
-                      className="h-10 px-3 rounded-xl border border-slate-300 text-[13px] font-medium text-mipiace-ink hover:bg-slate-50"
-                    >
-                      Asignarle servicios en la matriz
-                    </button>
-                  ) : (
-                    <div className="text-[12px] text-slate-500">
-                      Lo asigna quien lleva el centro, en la matriz de
-                      servicios.
-                    </div>
-                  )}
-                </div>
-              ) : conDuracion.length === 0 ? (
-                <div className="text-[12px] text-slate-400 py-2">
-                  No hay servicios con duración configurada.
-                </div>
-              ) : (
-                <div className="text-[12px] text-slate-400 py-2">
-                  No hay servicios que pueda hacer.
-                </div>
-              ))}
-            {/* clinica-8 (fase B, 17) · POR CATEGORÍA Y POR USO.
-                Diecisiete líneas seguidas con la paciente al teléfono se
-                leen enteras cada vez. Ver `servicios-de-la-cita.ts`: los
-                grupos y su contenido salen ordenados de ahí, y el
-                encabezado sólo se pinta si hay MÁS DE UNO — en un centro
-                con una sola categoría, un encabezado es una línea que no
-                distingue nada. */}
-            {grupos.map((g) => (
-              <div key={g.categoria} data-categoria={g.categoria}>
-                {grupos.length > 1 && (
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-1 pt-1.5 pb-1">
-                    {g.titulo}
-                  </div>
-                )}
-                <div className="space-y-1">
-                  {g.servicios.map((s) => {
-                    const active = draft.serviceIds.includes(s.id);
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => toggleService(s.id)}
-                        className={`w-full flex items-center justify-between gap-2 px-3 min-h-10 py-1.5 rounded-lg border text-[13px] ${
-                          active
-                            ? "border-mipiace-coral bg-mipiace-coral/10 text-mipiace-ink"
-                            : "border-slate-200 bg-white text-slate-600"
-                        }`}
-                      >
-                        {/* clinica-8 (fase B, 19) · el nombre ENTERO, en
-                            dos líneas si hace falta. Ver la nota del
-                            mismo punto en `SalePage`: lo que distingue
-                            «Revisión biomecánica adultos» de «Revisión
-                            biomecánica niños» es la última palabra, y
-                            `truncate` cortaba justo ahí. */}
-                        <span className="text-left leading-tight line-clamp-2">
-                          {s.name}
-                        </span>
-                        <span className="text-[11px] tabular-nums text-slate-400 shrink-0">
-                          {s.durationMin} min
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Hueco: fijado (slot-first) o buscar */}
-        <div>
-          <label className="text-[12px] font-medium text-slate-500">Hora</label>
-          {draft.start ? (
-            <div className="mt-1 flex items-center gap-2">
-              <span className="text-[14px] font-semibold text-mipiace-ink">
-                {localHHMM(draft.start)}
-              </span>
-              <button
-                onClick={() => setDraft({ ...draft, start: null })}
-                className="text-[12px] text-mipiace-coral"
-              >
-                cambiar
-              </button>
-            </div>
-          ) : (
-            <div className="mt-1">
-              <button
-                data-accion="buscar-hueco"
-                onClick={findSlots}
-                disabled={porQueNoSeBusca !== null || searching}
-                className="w-full h-10 rounded-xl bg-mipiace-ink text-white text-[13px] font-medium disabled:opacity-40"
-              >
-                {searching ? "Buscando…" : "Buscar hueco"}
-              </button>
-              {/* B-reservas-mostrador F4 · el motivo, en texto y debajo del
-                  botón que está apagado. `searching` no genera frase: la
-                  etiqueta ya dice «Buscando…». */}
-              {porQueNoSeBusca && !searching && (
-                <div
-                  data-motivo="buscar-hueco"
-                  className="text-[12px] text-slate-500 mt-1.5"
-                >
-                  {porQueNoSeBusca}
-                </div>
-              )}
-              {searchError && (
-                <div className="text-[12px] text-red-500 mt-1">{searchError}</div>
-              )}
-              {/* La tira de horas, y CUÁNTAS son. El número delante
-                  convierte «no ha pasado nada» en «hay siete, elige»:
-                  cuando la tira se corta por abajo, el encabezado se ve
-                  aunque los chips no. */}
-              <div ref={huecosRef} className="mt-2">
-                {slots.length > 0 && (
-                  <div
-                    data-test="cuantos-huecos"
-                    className="text-[12px] text-slate-500 mb-1.5"
-                  >
-                    {slots.length === 1
-                      ? "1 hueco · toca la hora"
-                      : `${slots.length} huecos · toca una hora`}
-                  </div>
-                )}
-              <div className="flex flex-wrap gap-1.5">
-                {slots.slice(0, 24).map((sl) => (
-                  <button
-                    key={sl.start}
-                    onClick={() => setDraft({ ...draft, start: sl.start })}
-                    className="h-9 px-2.5 rounded-lg bg-mipiace-stone hover:bg-slate-200 text-[12.5px] tabular-nums"
-                  >
-                    {localHHMM(sl.start)}
-                  </button>
-                ))}
-              </div>
-              </div>
-            </div>
-          )}
-        </div>
-        {/* B-reservas-6a · el 409 del suelo, pegado a la HORA, que es de lo
-            que habla. Aquí y no al final del panel: el bucle visual lo puso
-            debajo de las acciones primarias y la barra pegajosa le tapaba
-            justo las alternativas — un error con salida cuya salida no se
-            puede tocar es medio error otra vez. */}
-        {/* B-reservas-8 · EL BONO. Va después del cliente y de los
-            servicios porque depende de los dos: sin ficha no hay bono que
-            buscar, y sin servicios no se sabe qué tiene que cubrir. */}
-        <BonoDeLaCita
-          clientId={draft.clientId}
-          serviceIds={draft.serviceIds}
-          elegido={draft.voucherId ?? null}
-          onElegir={(voucherId) => setDraft({ ...draft, voucherId })}
-          etiqueta={props.bonoEtiqueta}
-        />
-
-        {bookError && (
-          <div
-            ref={errorRef}
-            className="rounded-xl border border-amber-300 bg-amber-50 p-3"
-          >
-            <div className="text-[13px] leading-snug text-amber-900">
-              {bookError.message}
-            </div>
-            {bookError.alternatives.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {bookError.alternatives.slice(0, 3).map((sl) => (
-                  <button
-                    key={sl.start}
-                    onClick={() => props.onPickAlternative(sl.start)}
-                    className="h-11 px-3.5 rounded-xl bg-white border border-amber-300 text-[14px] font-semibold tabular-nums text-amber-900 hover:bg-amber-100"
-                  >
-                    {localHHMM(sl.start)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Acciones primarias.
-
-          B-reservas-mostrador F1 · «Reservar» es EL botón, y «Reservar y
-          cobrar» sólo existe si la cita es de hoy.
-
-          Por qué: un cobro entra en el turno ABIERTO, que es el de hoy. Si
-          alguien reserva para el jueves y pulsa el primario por inercia, el
-          dinero del jueves cae en el arqueo de hoy — y deshacerlo no es
-          anular (no existe) sino devolver, que cae en el turno del día en que
-          se haga. Un toque de más descuadra DOS arqueos.
-
-          Y «de hoy» sale de `draft.start`, no del día que se está mirando:
-          `start` es el instante que se va a guardar, y cambiar de día con el
-          panel abierto NO lo mueve. Derivarlo de `date` haría aparecer el
-          botón sobre una cita que sigue siendo del jueves.
-
-          El orden del DOM es el orden del tabulador: «Reservar» primero. No
-          hay `<form>` ni `type="submit"` en este panel, así que no existe un
-          Enter que cobre; lo que se fija aquí es que no nazca uno por
-          descuido al reordenar. */}
-      <div className="shrink-0 p-4 border-t border-slate-100 space-y-2 bg-white">
-        {/* B-reservas-mostrador F4 · el motivo va ENCIMA del botón apagado,
-            que es donde cae la mirada al venir del cuerpo del panel. Y en una
-            ranura de alto fijo, por lo mismo que el secundario de F1: el pie
-            está anclado abajo, así que cualquier fila que aparezca o
-            desaparezca mueve los dos botones — y moverlos justo cuando la
-            cajera va a tocar es cómo se cobra lo que no se quería cobrar. */}
-        <div className="h-5 flex items-center justify-center">
-          {porQueNoSeReserva && (
-            <p
-              data-motivo="reservar"
-              className="text-[12.5px] text-slate-500 text-center leading-snug"
-            >
-              {porQueNoSeReserva}
-            </p>
-          )}
-        </div>
-        <button
-          data-accion="reservar"
-          onClick={props.onReserve}
-          disabled={!canReserve}
-          className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold disabled:opacity-40"
-        >
-          Reservar
-        </button>
-        {/* El hueco del secundario NO desaparece: el pie es `shrink-0` al
-            final de un `flex-col`, así que quitarle una fila subiría el borde
-            y bajaría el primario de golpe. Cuando la cita no es de hoy, esa
-            misma fila la ocupa la razón. Ni salto ni hueco muerto. */}
-        <div className="h-11 flex items-center justify-center">
-          {esDeHoy ? (
-            <button
-              data-accion="reservar-y-cobrar"
-              onClick={props.onReserveAndCharge}
-              disabled={!canReserve}
-              className="w-full h-11 rounded-xl border border-slate-300 text-mipiace-ink text-[14px] font-medium disabled:opacity-40"
-            >
-              Reservar y cobrar
-            </button>
-          ) : (
-            <p
-              data-cobro-otro-dia
-              className="text-[12.5px] text-slate-500 text-center leading-snug"
-            >
-              Se cobra el día de la cita.
-            </p>
-          )}
-        </div>
-      </div>
-      {picker.element}
-    </div>
-  );
-}
+// ── agenda-1 · el panel de alta se fue a `AgendaPage.darCita.tsx` ────
+//
+// `BookingPanel` (cliente-first + multi-servicio + «Buscar hueco») vivía
+// aquí desde B4 y es lo que la pasada del 27-10 midió en ~10 toques. Lo
+// sustituye `PanelDarCita`: el mismo contrato de entrada y salida (un
+// `DraftBooking`, `onReserve`, `onReserveAndCharge`), otra forma de
+// preguntar. Lo que se conserva, pieza a pieza y con sus motivos, está
+// comentado allí: «Reservar y cobrar» sólo en una cita de hoy (F1), el
+// motivo visible de cada botón apagado (F4), las alternativas del 409 del
+// suelo pegadas a la hora (6a), la lista agrupada por categoría y uso
+// (clinica-8 fase B, 17), el nombre entero en dos líneas (19), las horas
+// traídas a la vista (25) y el bono (B-reservas-8).
 
 // ── Detalle de cita ────────────────────────────────────────────────────
 

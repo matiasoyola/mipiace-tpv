@@ -304,7 +304,16 @@ function ClientPickerSheet({
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
-              placeholder="Buscar por nombre, teléfono o email…"
+              // agenda-1 · EL MÓVIL PRIMERO. En un centro de cita previa
+              // la paciente da su móvil antes que su apellido, y
+              // `semillaDesdeLaBusqueda` ya trata una ristra de dígitos
+              // como teléfono (y la siembra en el alta). Lo que faltaba
+              // era decirlo.
+              // El `inputMode` NO cambia a "tel", y es a propósito: en
+              // Android eso da un teclado numérico sin letras, y el
+              // buscador también busca por nombre. Lo que cambia es el
+              // orden de la frase, que es lo que la recepción lee.
+              placeholder="Móvil, nombre o email…"
               className="w-full h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none mb-3"
             />
             {loading ? (
