@@ -29,6 +29,8 @@ interface FakeUser {
   alias: string | null;
   role: "OWNER" | "MANAGER" | "CASHIER";
   pinHash: string | null;
+  // pin-1 · la marca de «este PIN se lo pusieron».
+  pinProvisionalAt: Date | null;
   lastLoginAt: Date | null;
   createdAt: Date;
   isTestCashier: boolean;
@@ -168,6 +170,7 @@ function addUser(u: Partial<FakeUser> & { id: string; email: string }): FakeUser
     alias: null,
     role: "CASHIER",
     pinHash: PIN_HASH,
+    pinProvisionalAt: null,
     lastLoginAt: null,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     isTestCashier: false,
@@ -251,6 +254,49 @@ describe("GET /super-admin/tenants/:id/cashiers · el PIN no viaja", () => {
     // 3. Lo que sí viaja es el booleano derivado.
     expect(res.json().cashiers[0].canOpenTpv).toBe(true);
     expect(res.json().cashiers[0].pinProvisional).toBe(false);
+    await app.close();
+  });
+
+  // pin-1 (punto 3) · EL CUARTO ESTADO, Y EL QUE MÁS FALTA HACE.
+  //
+  // Esta pantalla es la que Mi Piace mira cuando alguien llama diciendo
+  // que no puede entrar. Un PIN PROVISIONAL tiene las dos mitades: hay
+  // PIN puesto, y con él no se entra —el TPV le obliga a elegir el suyo
+  // antes—. Decir `ACTIVE` / `canOpenTpv: true` era contestar «sí» a la
+  // pregunta equivocada, y dejar a soporte buscando el problema en la
+  // red.
+  it("un cajero con PIN PROVISIONAL lo dice, y NO puede abrir el TPV", async () => {
+    addUser({
+      id: "aaaaaaaa-0000-0000-0000-000000000004",
+      email: "marta@sirope.es",
+      alias: "Marta",
+      pinProvisionalAt: new Date("2026-10-27T09:00:00Z"),
+    });
+    const app = await buildApp();
+    const res = await get(app);
+    const c = res.json().cashiers[0];
+    expect(c.status).toBe("PIN_PROVISIONAL");
+    expect(c.pinProvisional).toBe(true);
+    expect(c.canOpenTpv).toBe(false);
+    // Y el PIN sigue sin salir, ni el hash ni el instante en que se puso
+    // (que no acerca a nadie al PIN, pero no hace falta).
+    expect(res.body).not.toContain("pinHash");
+    expect(res.body).not.toContain("pinProvisionalAt");
+    await app.close();
+  });
+
+  it("con el PIN propio vuelve a ACTIVE y puede abrir", async () => {
+    addUser({
+      id: "aaaaaaaa-0000-0000-0000-000000000004",
+      email: "marta@sirope.es",
+      alias: "Marta",
+    });
+    const app = await buildApp();
+    const res = await get(app);
+    const c = res.json().cashiers[0];
+    expect(c.status).toBe("ACTIVE");
+    expect(c.pinProvisional).toBe(false);
+    expect(c.canOpenTpv).toBe(true);
     await app.close();
   });
 
