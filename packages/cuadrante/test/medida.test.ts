@@ -76,22 +76,41 @@ describe("la medida de comprobarCuadrante", () => {
     // Una pasada para que V8 compile, y se tira la medida.
     comprobarCuadrante(c, reglas);
 
+    // ── LO QUE SE MIDE ES EL MÍNIMO, NO LA MEDIA ─────────────────────
+    //
+    // Y es una decisión, no un truco para que pase: esta medida corre
+    // dentro de `pnpm test`, con 230 ficheros más repartidos por los
+    // núcleos de la máquina. La media de veinte pasadas recoge el rato en
+    // que el planificador le dio la CPU a otro —medido: 5 ms a solas, 16
+    // en medio de la suite— y un presupuesto sobre eso se pone rojo según
+    // lo que haya corriendo al lado. Un test que falla por eso es un test
+    // que se aprende a reintentar.
+    //
+    // El mínimo es lo que la máquina SÍ puede hacer, y una regla nueva que
+    // duplique el trabajo lo duplica igual. Lo que el mínimo no detecta es
+    // un empeoramiento que sólo aparezca bajo carga, y de eso este
+    // presupuesto no habla.
+    const minimoDe = (cuantas: number, antes?: () => void): number => {
+      let mejor = Infinity;
+      for (let i = 0; i < cuantas; i += 1) {
+        antes?.();
+        const t0 = performance.now();
+        comprobarCuadrante(c, reglas);
+        mejor = Math.min(mejor, performance.now() - t0);
+      }
+      return mejor;
+    };
+
     // EN FRÍO: sin la memoria de los instantes. Es lo que paga el primer
     // toque después de abrir el mes.
-    olvidarInstantes();
-    const f0 = performance.now();
-    comprobarCuadrante(c, reglas);
-    const enFrio = performance.now() - f0;
-
+    const enFrio = minimoDe(5, olvidarInstantes);
     // EN CALIENTE: lo que paga cada uno de los toques siguientes, que son
     // todos los demás.
-    const t0 = performance.now();
-    for (let i = 0; i < 20; i += 1) comprobarCuadrante(c, reglas);
-    const enCaliente = (performance.now() - t0) / 20;
+    const enCaliente = minimoDe(20);
 
     // eslint-disable-next-line no-console
     console.log(
-      `comprobarCuadrante · 21 × 31 · frío ${enFrio.toFixed(2)} ms · caliente ${enCaliente.toFixed(2)} ms`,
+      `comprobarCuadrante · 21 × 31 · frío ${enFrio.toFixed(2)} ms · caliente ${enCaliente.toFixed(2)} ms (mínimo de 5 y de 20)`,
     );
     expect(enFrio).toBeLessThan(20);
     expect(enCaliente).toBeLessThan(10);

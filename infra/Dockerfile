@@ -53,6 +53,13 @@ COPY packages/bonos/package.json packages/bonos/
 COPY packages/clinica-sesion/package.json packages/clinica-sesion/
 COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
 COPY packages/consentimientos/package.json packages/consentimientos/
+# personal-1 · el paquete puro del cuadrante (`comprobarCuadrante`), la
+# ficha de personal y la importación CSV. Lo importan la API y el panel, y
+# `apps/api` lo declara como `workspace:*`: sin esta línea,
+# `pnpm install --frozen-lockfile` en la imagen falla con «no matching
+# version found for @mipiacetpv/cuadrante». Lo cazó
+# `infra/test/dockerfile-manifiestos.test.ts`, que existe justo para esto.
+COPY packages/cuadrante/package.json packages/cuadrante/
 # clinica-7 · el contrato de encargado del tratamiento y el estado del
 # módulo clínico, puros. Lo importan la API (decide si la ruta contesta), el
 # TPV (pinta la aceptación y la banda) y el panel del propietario.
