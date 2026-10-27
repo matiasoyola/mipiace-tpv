@@ -1406,7 +1406,11 @@ function MiPinSection({
                 setActual("");
                 setError(null);
               }}
-              className="text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
+              // `whitespace-nowrap` y `shrink-0`: al lado del botón, «He
+              // olvidado mi PIN» partía en dos líneas y la segunda
+              // quedaba colgando bajo la primera. Visto en el banco
+              // visual del panel, no en un test.
+              className="shrink-0 whitespace-nowrap text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
             >
               He olvidado mi PIN
             </button>
@@ -1415,7 +1419,7 @@ function MiPinSection({
             <button
               type="button"
               onClick={() => setOlvidado(false)}
-              className="text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
+              className="shrink-0 whitespace-nowrap text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
             >
               Sí me acuerdo, pedírmelo
             </button>
@@ -1481,7 +1485,14 @@ function PinDeSoporteSection() {
             antes de entrar, y no sirve para autorizar nada.
           </p>
         </div>
-        <OutlineButton onClick={regenerate} busy={busy} className="!h-9">
+        {/* `whitespace-nowrap`: en el ancho que le deja el texto de al
+            lado, «Regenerar PIN» partía en dos líneas dentro del botón.
+            Visto en el banco visual del panel. */}
+        <OutlineButton
+          onClick={regenerate}
+          busy={busy}
+          className="!h-9 whitespace-nowrap"
+        >
           Regenerar PIN
         </OutlineButton>
       </div>

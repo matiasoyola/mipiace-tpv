@@ -135,18 +135,73 @@ export function CambiarPinSheet({
       data-testid="cambiar-pin"
       className="fixed inset-0 z-[80] bg-mipiace-stone flex flex-col font-sans overflow-y-auto"
     >
-      <div className="flex-1 flex items-center justify-center p-5">
-        <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 p-6 md:p-7">
-          <h1 className="text-[20px] font-semibold text-mipiace-ink tracking-tight">
-            {esElegir ? `Hola ${nombre}, elige tu PIN` : "Cambiar mi PIN"}
-          </h1>
-          <p className="text-[13px] text-slate-500 mt-1 mb-5">
-            {esElegir
-              ? "El PIN con el que acabas de entrar te lo pusieron y sólo valía para esto. Elige el tuyo: de 4 a 8 cifras, las que quieras. Es el que usarás a partir de ahora."
-              : "De 4 a 8 cifras, las que tú quieras. El anterior deja de funcionar al guardar."}
+      {/* `items-start` por debajo de `md`, y no `items-center`: con la
+          tarjeta más alta que la ventana —el N1 en vertical mide 648 y
+          la tarjeta 857— centrar la desborda por ARRIBA y el título
+          queda fuera de alcance. Centrada sólo donde cabe. */}
+      <div className="flex-1 flex items-start md:items-center justify-center p-5 md:p-5">
+        {/* pin-1 · EN UN TERMINAL DE MOSTRADOR, EL TECLADO VA AL LADO.
+            Medido a 1280×800 con el banco visual: en una columna, el
+            modo «cambiar» —que tiene TRES campos— dejaba «Guardar mi
+            PIN» cortado por abajo y «Cancelar» bajo el pliegue. Y el
+            pliegue en esta pantalla es caro: quien la está mirando
+            acaba de teclear dos veces cuatro cifras y lo único que le
+            queda es pulsar.
+            De `md` hacia arriba, dos columnas —campos a la izquierda,
+            teclado a la derecha— y la altura baja de ~880 px a ~520.
+            Por debajo sigue siendo una columna: en la mano se baja con
+            el pulgar y el teclado tiene que estar debajo de lo que se
+            rellena, no al lado. */}
+        <div className="w-full max-w-md md:max-w-2xl bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 md:p-7 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] md:gap-x-7 md:items-start">
+          <div className="min-w-0 md:col-start-1 md:row-start-1">
+          {/* El ojo va en la CABECERA y no en una fila propia: es del
+              formulario entero, no de un campo. Y su fila suelta eran 44
+              px que en el N1 (360×648) empujaban la última fila del
+              teclado fuera de la pantalla. */}
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-[20px] font-semibold text-mipiace-ink tracking-tight">
+              {esElegir ? `Hola ${nombre}, elige tu PIN` : "Cambiar mi PIN"}
+            </h1>
+            <button
+              type="button"
+              onClick={() => setVisible((v) => !v)}
+              aria-label={visible ? "Ocultar PIN" : "Mostrar PIN"}
+              aria-pressed={visible}
+              className="shrink-0 inline-flex min-h-11 items-center gap-2 px-2 -mr-2 text-[13px] text-slate-500"
+            >
+              {visible ? (
+                <EyeOff className="w-[18px] h-[18px]" />
+              ) : (
+                <Eye className="w-[18px] h-[18px]" />
+              )}
+              <span className="hidden sm:inline">
+                {visible ? "Ocultar" : "Ver lo que tecleo"}
+              </span>
+            </button>
+          </div>
+          {/* EL TEXTO LARGO, SÓLO DONDE CABE.
+              En el N1 (360×648) la explicación del modo «elegir» son
+              CUATRO líneas —104 px— y es lo que empujaba el teclado
+              fuera de la pantalla. Lo que no se puede perder en compacto
+              es el dato (4 a 8 cifras); el porqué se queda para las
+              pantallas de mostrador, que es donde hay sitio para
+              leerlo. No es esconder la explicación: el título ya dice
+              «elige tu PIN», y el PIN prestado se lo acaba de dar su
+              encargada en persona. */}
+          <p className="text-[13px] text-slate-500 mt-1 mb-4 sm:mb-5">
+            <span className="hidden sm:inline">
+              {esElegir
+                ? "El PIN con el que acabas de entrar te lo pusieron y sólo valía para esto. Elige el tuyo: de 4 a 8 cifras, las que quieras. Es el que usarás a partir de ahora."
+                : "De 4 a 8 cifras, las que tú quieras. El anterior deja de funcionar al guardar."}
+            </span>
+            <span className="sm:hidden">
+              {esElegir
+                ? "De 4 a 8 cifras, las que quieras. Es el que usarás a partir de ahora."
+                : "De 4 a 8 cifras. El anterior deja de funcionar al guardar."}
+            </span>
           </p>
 
-          <div className="space-y-2.5 mb-5">
+          <div className="space-y-2 sm:space-y-2.5 mb-3 sm:mb-5">
             {!esElegir && (
               <CampoPin
                 etiqueta="PIN actual"
@@ -172,23 +227,6 @@ export function CambiarPinSheet({
             />
           </div>
 
-          <div className="flex items-center justify-between mb-4">
-            <button
-              type="button"
-              onClick={() => setVisible((v) => !v)}
-              aria-label={visible ? "Ocultar PIN" : "Mostrar PIN"}
-              aria-pressed={visible}
-              className="inline-flex min-h-11 items-center gap-2 px-2 text-[13px] text-slate-500"
-            >
-              {visible ? (
-                <EyeOff className="w-[18px] h-[18px]" />
-              ) : (
-                <Eye className="w-[18px] h-[18px]" />
-              )}
-              {visible ? "Ocultar" : "Ver lo que tecleo"}
-            </button>
-          </div>
-
           {/* El aviso de «no coinciden» va pegado a los campos y no debajo
               del botón: es donde está mirando quien acaba de teclear.
               Misma razón que el aviso de PIN incorrecto de `PinScreen`. */}
@@ -210,15 +248,16 @@ export function CambiarPinSheet({
               <span>{error}</span>
             </div>
           )}
+          </div>
 
-          <div className="grid grid-cols-3 gap-2.5 max-w-xs mx-auto w-full mb-5">
+          <div className="grid grid-cols-3 gap-2 sm:gap-2.5 max-w-xs mx-auto w-full mb-3 sm:mb-5 md:mb-0 md:col-start-2 md:row-start-1 md:row-span-2 md:w-auto md:mx-0">
             {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((n) => (
               <button
                 key={n}
                 type="button"
                 onClick={() => pulsar(n)}
                 disabled={busy}
-                className="h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
+                className="h-12 sm:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
               >
                 {n}
               </button>
@@ -226,7 +265,7 @@ export function CambiarPinSheet({
             <button
               type="button"
               onClick={() => ponerEn(campo, "")}
-              className="h-14 rounded-2xl text-[14px] text-slate-400 hover:text-mipiace-ink font-medium"
+              className="h-12 sm:h-14 rounded-2xl text-[14px] text-slate-400 hover:text-mipiace-ink font-medium"
             >
               Borrar
             </button>
@@ -234,7 +273,7 @@ export function CambiarPinSheet({
               type="button"
               onClick={() => pulsar("0")}
               disabled={busy}
-              className="h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
+              className="h-12 sm:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
             >
               0
             </button>
@@ -242,12 +281,19 @@ export function CambiarPinSheet({
               type="button"
               onClick={borrarUno}
               aria-label="Borrar último dígito"
-              className="h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500"
+              className="h-12 sm:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500"
             >
               <Delete className="w-5 h-5" strokeWidth={2.25} />
             </button>
           </div>
 
+          {/* EN LA MANO, «GUARDAR» NO SE VA BAJO EL PLIEGUE.
+              Medido en el banco a 360×648: la tarjeta mide 857 px, así
+              que el botón caía a 790 y había que bajar para pulsarlo
+              después de teclear ocho cifras. `sticky bottom-0` lo deja
+              siempre a la vista mientras el resto se desplaza; de `md`
+              hacia arriba no hace falta, porque entra entera. */}
+          <div className="md:col-start-1 md:row-start-2 md:self-end sticky bottom-0 md:static bg-white pt-2 -mx-5 px-5 sm:-mx-6 sm:px-6 md:mx-0 md:px-0 md:pt-0 md:bg-transparent border-t border-slate-100 md:border-0">
           <button
             type="button"
             data-testid="pin-guardar"
@@ -270,6 +316,7 @@ export function CambiarPinSheet({
           >
             {esElegir ? "Volver al inicio de sesión" : "Cancelar"}
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -297,12 +344,12 @@ function CampoPin({
       // saldrían en la misma línea.
       className={
         activo
-          ? "block w-full text-left px-4 py-3 rounded-2xl bg-white border-2 border-mipiace-coral"
-          : "block w-full text-left px-4 py-3 rounded-2xl bg-mipiace-stone border-2 border-transparent"
+          ? "block w-full text-left px-4 py-2 sm:py-3 rounded-2xl bg-white border-2 border-mipiace-coral"
+          : "block w-full text-left px-4 py-2 sm:py-3 rounded-2xl bg-mipiace-stone border-2 border-transparent"
       }
     >
       <div className="text-[12px] text-slate-500">{etiqueta}</div>
-      <div className="text-[20px] font-semibold tracking-[0.3em] tabular-nums text-mipiace-ink min-h-[28px]">
+      <div className="text-[20px] font-semibold tracking-[0.3em] tabular-nums text-mipiace-ink min-h-[26px] sm:min-h-[28px]">
         {valor.length === 0
           ? " "
           : visible
