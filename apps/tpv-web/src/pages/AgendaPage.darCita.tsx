@@ -50,10 +50,13 @@
 // sesión guarde el servicio propuesto, el chip cambia de rótulo y de
 // origen, y nada más.
 //
-// Y para una paciente NUEVA no se propone una «primera valoración»: cuál
-// es el servicio de primera visita no está en ninguna parte (el catálogo
-// no tiene esa marca). En vez de adivinarlo, el paso abre la lista entera
-// y dice que es nueva. Queda apuntado en el `-done` para Matías.
+// Y a una paciente NUEVA se le propone su PRIMERA VALORACIÓN, ya marcada.
+// Cuál es sale del catálogo y no de una suposición: es la marca «Es la
+// primera valoración» de Agenda · Catálogo (clinica-8,
+// `service_scheduling.primera_valoracion`), que en la Clínica demo lleva
+// «Consulta diagnóstico». Si el centro no ha marcado ninguna, el paso abre
+// la lista entera y dice que es nueva — que es lo único honesto cuando no
+// hay dato.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
@@ -304,6 +307,19 @@ export function PanelDarCita(props: PanelDarCitaProps) {
       sum + (props.services.find((s) => s.id === id)?.durationMin ?? 0),
     0,
   );
+  /**
+   * El servicio con el que se empieza, si el centro ha marcado uno.
+   *
+   * `null` = este centro no tiene marcada ninguna primera valoración, y
+   * entonces no se propone nada: adivinarlo sería peor que no proponer.
+   * Sale de los RESERVABLES, no del catálogo entero — si la profesional de
+   * la columna no lo hace, proponerlo acabaría en un «no» del motor.
+   */
+  const primeraVisita = useMemo(
+    () => reservables.find((x) => x.primeraValoracion === true) ?? null,
+    [reservables],
+  );
+
   const uso = useMemo(() => leerUsoDeServicios(tenantDelTerminal()), []);
   const grupos = useMemo(
     () => agruparServiciosDeLaCita(reservables, uso),
@@ -458,6 +474,34 @@ export function PanelDarCita(props: PanelDarCitaProps) {
     }
     return `No hay huecos ${cuando}. Prueba otra fecha.`;
   }
+
+  /**
+   * agenda-1 · A UNA PACIENTE NUEVA, SU PRIMERA VALORACIÓN YA PUESTA.
+   *
+   * Decisión de Matías: «lo que el sistema ya sabe viene puesto; se toca
+   * para quitar o cambiar». Y aquí lo sabe: la marca «Es la primera
+   * valoración» de Agenda · Catálogo dice cuál es el servicio con el que
+   * se empieza (en la Clínica demo, «Consulta diagnóstico»).
+   *
+   * Se pone UNA VEZ —el `useRef`— para no pelearse con la recepción: si
+   * cambia de servicio, no se le vuelve a poner. Y sólo cuando no hay
+   * nada elegido ya: «Dársela» trae lo de hoy y eso manda.
+   *
+   * Sin marca en el catálogo no se pone nada y el paso abre la lista
+   * entera diciendo que es nueva, que es lo único honesto sin el dato.
+   */
+  const primeraPuesta = useRef(false);
+  useEffect(() => {
+    if (primeraPuesta.current) return;
+    if (draft.propuesta || draft.serviceIds.length > 0) return;
+    if (ultimos == null || ultimos.length > 0 || !primeraVisita) return;
+    primeraPuesta.current = true;
+    elegirServicios([primeraVisita.id]);
+    // `elegirServicios` depende del borrador entero y meterlo aquí
+    // volvería a disparar el efecto en cada tecla. Lo que decide que hay
+    // algo que poner son estas tres cosas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ultimos, primeraVisita, draft.propuesta, draft.serviceIds.length]);
 
   /**
    * agenda-1 · LA VENTANA SE PONE SOLA, Y LA BÚSQUEDA TAMBIÉN.
@@ -751,7 +795,12 @@ export function PanelDarCita(props: PanelDarCitaProps) {
                           onClick={() => elegirServicios(ultimos)}
                         />
                       )}
-                    {ultimos != null && ultimos.length === 0 && (
+                    {/* Sin primera valoración marcada no se propone nada:
+                        cuál es el servicio con el que se empieza no se
+                        puede adivinar, y adivinarlo sería peor. Con ella
+                        marcada no se llega aquí — el servicio viene ya
+                        puesto y el paso sale plegado. */}
+                    {ultimos != null && ultimos.length === 0 && !primeraVisita && (
                       <p
                         data-test="paciente-nueva"
                         className="text-[13px] text-slate-600 leading-snug w-full"
@@ -767,9 +816,17 @@ export function PanelDarCita(props: PanelDarCitaProps) {
                     />
                   </div>
                 )}
+                {/* La lista entera se abre sola cuando no hay nada que
+                    proponer: sin paciente elegida todavía, o con una nueva
+                    en un centro que no ha marcado su primera valoración.
+                    Con la propuesta hecha, la lista está detrás de
+                    «Otro…» — y el chip propuesto a un toque. */}
                 {(verTodos ||
                   (!draft.propuesta &&
-                    (ultimos == null || ultimos.length === 0))) && (
+                    ultimos == null) ||
+                  (ultimos != null &&
+                    ultimos.length === 0 &&
+                    !primeraVisita)) && (
                   <ListaDeServicios
                     grupos={grupos}
                     elegidos={draft.serviceIds}

@@ -310,6 +310,25 @@ cierre (`dia.esHoy`):
 La franja de clinica-9 (4) sigue explicando por qué, y el botón de cerrar sigue
 apagado.
 
+### H3 · el Atrás de Android cierra la historia
+
+Pasada del 27-10: «en Historia de paciente, el **atrás** de Android no hace
+nada». Con la tablet en la mano eso es un botón roto — la única salida era el
+«Volver» de la cabecera.
+
+El mecanismo es de **clinica-10 (PR #49)**: tres capas de `useBackGuard` dentro
+de `HistoriaViva`, y un `onCerrar` opcional porque **salir de la historia es
+volver a la pantalla de la que se vino, y eso sólo lo sabe quien la pintó**. Lo
+que agenda-1 pone es justamente eso: `onCerrar={() => setHistoriaDe(null)}`
+donde la agenda la monta.
+
+**Ojo al mergear.** Cuando esto se escribió, #49 estaba ABIERTO y su cambio no
+estaba ni en master ni en esta rama, así que sin él la rama no compilaba. Los
+hunks de `HistoriaViva.tsx` están **copiados de #49 tal cual, comentarios
+incluidos**, para que las dos ramas digan lo mismo y el conflicto se resuelva
+quedándose con una de las dos copias, que son idénticas. El que mergee segundo
+rebasa, como dice el prompt del bloque.
+
 ### Volver al día en el que se estaba
 
 `lib/dia-de-la-agenda.ts` (clinica-9, 12) ya cubría la vuelta de la tablet, que
@@ -391,11 +410,25 @@ suelta, que no es de ninguna cita.
    y eso es lo que se ofrece («Lo de hoy»), más «Su último» del historial que el
    CRM ya publica. **Cuando la sesión guarde el servicio propuesto, el chip
    cambia de rótulo y de origen y nada más.**
-2. **A una paciente nueva no se le propone una «primera valoración».** Cuál es
-   el servicio de primera visita no está en ninguna parte (el catálogo no tiene
-   esa marca). En vez de adivinarlo, el paso abre la lista entera y dice que es
-   nueva. **Para Matías: si quiere el chip, hace falta marcar un servicio como
-   «primera visita» en el catálogo del centro.**
+2. **A una paciente nueva se le propone su primera valoración, YA PUESTA.**
+
+   *(Corregido. La primera versión de este `-done` decía que el catálogo no
+   tenía esa marca y que por eso no se proponía nada. Era falso: la marca
+   existe desde clinica-8 — el check «Es la primera valoración» de
+   Agenda · Catálogo, `service_scheduling.primera_valoracion`, que en la
+   Clínica demo lleva «Consulta diagnóstico». No se buscó bien.)*
+
+   Lo que faltaba era el cable: la marca **no salía** por
+   `/tpv/catalog/products`, así que el terminal no podía verla. Ahora viaja
+   (`primeraValoracion`, opcional y `false` por defecto como `esBono`: un
+   catálogo cacheado de antes del bloque no la trae y se lee como «no»).
+
+   Y se pone **ya marcada**, no se ofrece: es la regla del bloque — «lo que el
+   sistema ya sabe viene puesto; se toca para quitar o cambiar». Una vez, con
+   un `useRef`, para no pelearse con la recepción si cambia de servicio.
+
+   **Si el centro no ha marcado ninguna**, no se adivina: el paso abre la lista
+   entera y dice que es nueva. Adivinarlo sería peor que no proponer.
 3. **El consentimiento sin firmar no está en «Pendiente de recepción».** El
    diseño lo enseña como tercer pendiente; la respuesta de `GET /agenda` no lo
    trae, y traerlo es una consulta clínica dentro del camino que se pinta
@@ -453,7 +486,7 @@ que la función no usa `Date` local.
 
 El fichero entero corre además en verde con `TZ=America/New_York`.
 
-### `agenda-1-pantalla.test.tsx` (28 tests)
+### `agenda-1-pantalla.test.tsx` (33 tests)
 
 | # | Sabotaje | Caen |
 |---|---|---|
@@ -468,6 +501,10 @@ El fichero entero corre además en verde con `TZ=America/New_York`.
 | 9 | `libreHastaLas` devuelve `null` siempre | 2 |
 | 10 | `queHaceAhora` devuelve `null` siempre | 1 |
 | 11 | la ventana por defecto no se pone sola | 4 |
+| 12 | la primera valoración no se pone sola | 1 |
+| 13 | `primeraVisita` ignora la marca del catálogo | 1 |
+| 14 | `AgendaPage` no pasa `onCerrar` a la historia | 1 |
+| 15 | `HistoriaViva` sin el guardia del Atrás | 1 |
 
 ### `agenda-1-cita-de-otro-dia.test.tsx` (6 tests) · H6
 
@@ -544,7 +581,7 @@ pantalla reventaba al mirar el día de la cita.
 
 ## 13 · Verde
 
-- **Suite entera desde la raíz**: `pnpm vitest run` → **478 ficheros, 6968
+- **Suite entera desde la raíz**: `pnpm vitest run` → **478 ficheros, 6973
   tests, 10 saltados, 0 rojos.**
 - **`tsc` paquete a paquete**: `apps/tpv-web` y `apps/api`, los dos limpios.
 - **e2e contra Postgres real**: hicieron falta **dos pasadas rojas** y las dos
@@ -602,8 +639,12 @@ Qué mirar en hierro, en este orden:
 
 - **PIN elegible (H4).** Su propio bloque. Sigue sin hacerse y Matías lo olvidó
   dos veces en la misma mañana.
-- **H5** (el servicio reservado no llega al cobro), **H1**, **H2**, **H3**,
-  **H9**, **H10** y los dos fallos del guion (33 y 38): son de clinica-10.
+- **H5** (el servicio reservado no llega al cobro), **H1**, **H2**, **H9**,
+  **H10** y los dos fallos del guion (33 y 38): son de clinica-10.
+- **H3 · sólo la mitad.** El Atrás cierra la historia **abierta desde la
+  agenda** (§7). El mecanismo es de clinica-10; lo que falta —la historia
+  abierta desde Clientes, y las demás pantallas sin guardia— sigue siendo
+  suyo.
 - **Reserva online**, y las sugerencias de venta y el cheque regalo del spa:
   preparados en `proponer()` como configuración del centro, sin pantalla.
 - **La pasada en hierro.** La hace Matías con Claude en la Lenovo, junto con

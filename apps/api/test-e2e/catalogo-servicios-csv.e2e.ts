@@ -484,12 +484,29 @@ describe.skipIf(!e2eEnabled)("e2e · una clínica carga sus 17 servicios del fic
         sku: string;
         basePrice: number;
         priceGross: number;
+        durationMin: number | null;
+        primeraValoracion: boolean;
       }>;
       expect(items).toHaveLength(17);
       const q = items.find((i) => i.sku === "POD-002")!;
       // 25 € en la rejilla y 25 € en la columna: con IVA 0 no hay viaje.
       expect(q.priceGross).toBe(25);
       expect(q.basePrice).toBe(25);
+
+      // agenda-1 · Y LA MARCA DE LA PRIMERA VALORACIÓN LLEGA AL TPV.
+      //
+      // El test de arriba prueba que la marca está en `service_scheduling`
+      // (POD-001, la consulta de diagnóstico); éste prueba que SALE por la
+      // ruta del catálogo, que es lo único que el terminal ve. Sin ella,
+      // «Dar cita» no puede proponerle a una paciente nueva el servicio
+      // con el que se empieza, y la única alternativa sería adivinarlo.
+      const consulta = items.find((i) => i.sku === "POD-001")!;
+      expect(consulta.primeraValoracion).toBe(true);
+      expect(consulta.durationMin).toBe(20);
+      // Y es UNA, no todas: el resto va en `false`.
+      expect(items.filter((i) => i.primeraValoracion).map((i) => i.sku)).toEqual(
+        ["POD-001"],
+      );
     });
 
     it("cobra 25,00 € sin IVA, con la línea marcada E1 y sin registro fiscal", async () => {

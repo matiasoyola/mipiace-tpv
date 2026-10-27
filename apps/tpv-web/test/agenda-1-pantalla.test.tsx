@@ -35,8 +35,18 @@
 //   9. `libreHastaLas` devuelve `null` siempre ················  caen 2
 //  10. `queHaceAhora` devuelve `null` siempre ··················  cae 1
 //  11. la ventana por defecto no se pone sola ·················  caen 4
+//  12. la primera valoración no se pone sola ··················  cae 1
+//  13. `primeraVisita` ignora la marca del catálogo ···········  cae 1
+//  14. `AgendaPage` no pasa `onCerrar` a la historia ··········  cae 1
+//  15. `HistoriaViva` sin el guardia del Atrás ················  cae 1
 //
-// Los once en rojo, uno cada vez, fichero entero y sin `-t`.
+// Los quince en rojo, uno cada vez, fichero entero y sin `-t`.
+//
+// Lo que NO tiene sabotaje, y se dice: «la agenda sigue viva» tras el
+// Atrás. Ninguno de los quince lo pone en rojo — es un guardia contra una
+// reacción de más (que el Atrás desmontara la pantalla entera), no contra
+// una línea concreta. Se queda porque el día que alguien registre el
+// guardia en el sitio equivocado, es el que lo dirá.
 
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
@@ -56,10 +66,18 @@ vi.mock("../src/api.js", async () => {
 // cabe en un hueco y qué se ofrece al dar la cita.
 const CATALOGO = vi.hoisted(() =>
   [
-    { sku: "POD-001", name: "Consulta diagnóstico", tag: "consulta", min: 20 },
-    { sku: "POD-002", name: "Quiropodia básica", tag: "quiropodia", min: 30 },
-    { sku: "POD-006", name: "Cura", tag: "cirugía", min: 15 },
-    { sku: "POD-012", name: "Avulsión ungueal", tag: "cirugía", min: 120 },
+    // agenda-1 · la marca «Es la primera valoración» de Agenda · Catálogo.
+    // En la Clínica demo la lleva «Consulta diagnóstico».
+    {
+      sku: "POD-001",
+      name: "Consulta diagnóstico",
+      tag: "consulta",
+      min: 20,
+      primera: true,
+    },
+    { sku: "POD-002", name: "Quiropodia básica", tag: "quiropodia", min: 30, primera: false },
+    { sku: "POD-006", name: "Cura", tag: "cirugía", min: 15, primera: false },
+    { sku: "POD-012", name: "Avulsión ungueal", tag: "cirugía", min: 120, primera: false },
   ].map((s, i) => ({
     id: `00000000-0000-0000-0000-00000000sv${i}`,
     holdedProductId: null,
@@ -71,6 +89,7 @@ const CATALOGO = vi.hoisted(() =>
     tags: [s.tag],
     kind: "SERVICE" as const,
     durationMin: s.min,
+    primeraValoracion: s.primera === true,
   })),
 );
 
@@ -98,15 +117,22 @@ vi.mock("../src/lib/clients.js", () => ({
   asegurarClientesEnCache: async () => false,
 }));
 
+// El selector es de B1 y tiene sus propios tests: aquí sólo hace falta
+// poder disparar su `onSelect` para que el panel tenga una paciente.
+const pickerMock = vi.hoisted(() => ({ elegido: null as unknown }));
+
 vi.mock("../src/hooks/useClientPicker.js", () => ({
   useClientPicker: () => ({
-    open: () => {},
+    open: (onSelect: (c: unknown) => void) => {
+      if (pickerMock.elegido) onSelect(pickerMock.elegido);
+    },
     close: () => {},
     isOpen: false,
     element: null,
   }),
 }));
 
+import { ApiError } from "../src/api.js";
 import { __resetOutboxForTests } from "../src/lib/outbox.js";
 import { AgendaPage, pxPorMinuto } from "../src/pages/AgendaPage.js";
 
@@ -222,6 +248,8 @@ let proximasCitas: unknown[];
 let valoracionesPendientes: string[];
 let cobradoPorCita: Record<string, number>;
 let llamadas: Array<{ path: string; init?: unknown }>;
+/** Lo que `/clients/:id/history` contesta: de ahí sale «su último». */
+let historial: Array<{ at: string; status: string; serviceIds: string[] }>;
 
 beforeEach(async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
@@ -236,6 +264,8 @@ beforeEach(async () => {
   valoracionesPendientes = [];
   cobradoPorCita = {};
   llamadas = [];
+  pickerMock.elegido = null;
+  historial = [];
   Element.prototype.scrollIntoView = function () {} as unknown as never;
 
   apiMock.apiWithCashier.mockReset();
@@ -305,7 +335,16 @@ beforeEach(async () => {
           skills: [],
         };
       }
-      if (path.includes("/history")) return { appointments: [] };
+      if (path.includes("/history")) return { appointments: historial };
+      // La historia viva y la guarda del contrato: lo justo para que la
+      // pantalla monte. Lo que pinta DENTRO no es de este fichero (tiene
+      // el suyo); aquí sólo se mide que la agenda sabe cerrarla.
+      if (path === "/clinica/contrato") {
+        return { aceptado: true, version: 2, debeAceptar: false };
+      }
+      if (path.includes("/historia")) {
+        throw new ApiError(404, "sin historia", "NOT_FOUND");
+      }
       if (path.includes("/vouchers")) {
         return { balance: { sessionsLeft: 0, amountLeftCents: 0 }, vouchers: [] };
       }
@@ -750,7 +789,119 @@ describe("la semana enseña los días que abre el centro", () => {
   });
 });
 
-// ── 6 · Pendiente de recepción ─────────────────────────────────────
+// ── 6 · La primera valoración de una paciente nueva ────────────────
+
+describe("a una paciente NUEVA se le propone su primera valoración", () => {
+  /** Abre «Dar cita» y elige a la paciente del selector. */
+  async function elegirPaciente(quien: unknown) {
+    pickerMock.elegido = quien;
+    await render();
+    await click(q('[data-test="dar-cita"]')!);
+    await click(q('[data-test="elegir-paciente"]')!);
+  }
+
+  it("viene YA MARCADA, sin tocar la lista: es la marca del catálogo", async () => {
+    // Lucía no tiene citas anteriores (`/clients/:id/history` vacío), y el
+    // catálogo del centro marca «Consulta diagnóstico» como la primera
+    // valoración (Agenda · Catálogo, clinica-8).
+    await elegirPaciente(LUCIA);
+
+    // El paso de servicios sale PLEGADO y con ella dentro: lo que el
+    // sistema ya sabe viene puesto, no se ofrece para que lo toquen.
+    const plegado = q('[data-test="paso-servicio-plegado"]')!;
+    expect(plegado.textContent).toContain("Consulta diagnóstico");
+    expect(plegado.textContent).toContain("20 min");
+    // Y la ficha de la paciente dice por qué.
+    expect(q('[data-test="paso-paciente-plegado"]')!.textContent).toContain(
+      "Es nueva",
+    );
+    // No se ha tocado ningún servicio de la lista para llegar aquí.
+    expect(q('[data-test="paciente-nueva"]')).toBeNull();
+  });
+
+  it("y sin marca en el catálogo NO se adivina: se abre la lista", async () => {
+    // Un centro que no ha marcado ninguna primera valoración.
+    for (const s of CATALOGO) (s as { primeraValoracion: boolean }).primeraValoracion = false;
+    try {
+      await elegirPaciente(LUCIA);
+      expect(q('[data-test="paso-servicio-plegado"]')).toBeNull();
+      expect(q('[data-test="paciente-nueva"]')!.textContent).toContain(
+        "Elige su primera visita",
+      );
+    } finally {
+      (CATALOGO[0] as { primeraValoracion: boolean }).primeraValoracion = true;
+    }
+  });
+
+  it("a quien SÍ tiene citas se le propone su último, no la primera visita", async () => {
+    // Carmen tiene una cita hoy: su historial no está vacío, así que lo
+    // que se propone es lo suyo y no el servicio de empezar.
+    citas = [cita("c1", CARMEN.id, ROSARIO.userId, "COMPLETED", "09:00")];
+    historial = [
+      {
+        at: madrid("09:00"),
+        status: "COMPLETED",
+        serviceIds: [CATALOGO[1]!.id],
+      },
+    ];
+    await elegirPaciente(CARMEN);
+    expect(
+      panel().querySelector('[data-test="servicio-su-ultimo"]')!.textContent,
+    ).toContain("Quiropodia básica");
+    expect(q('[data-test="paso-servicio-plegado"]')).toBeNull();
+  });
+});
+
+// ── 7 · El Atrás de Android cierra la historia ─────────────────────
+
+describe("clinica-10 (H3) · el Atrás cierra la historia abierta desde la agenda", () => {
+  /** El Atrás del sistema llega como `popstate`. */
+  async function atras() {
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    await asentar();
+  }
+
+  /** La historia se monta en un PORTAL (`AlFrente`), así que no está
+   *  dentro del contenedor del test: se busca en el documento. */
+  function hayHistoria(): boolean {
+    return [...document.querySelectorAll("h1")].some((h) =>
+      (h.textContent ?? "").startsWith("Historia ·"),
+    );
+  }
+
+  async function abrirHistoria() {
+    citas = [cita("c1", CARMEN.id, ROSARIO.userId, "CONFIRMED", "11:00")];
+    await render();
+    await click(q('[data-cita="c1"]')!);
+    const boton = [...document.querySelectorAll("button")].find(
+      (b) => (b.textContent ?? "").trim() === "Historia del paciente",
+    );
+    expect(boton).toBeTruthy();
+    await click(boton!);
+    expect(hayHistoria()).toBe(true);
+  }
+
+  it("el Atrás la cierra y devuelve a la agenda", async () => {
+    // Pasada del 27-10, hallazgo H3: «en Historia de paciente, el atrás
+    // de Android no hace nada». Con la tablet en la mano eso es un botón
+    // roto: la única salida era el «Volver» de la cabecera.
+    await abrirHistoria();
+    await atras();
+    expect(hayHistoria()).toBe(false);
+    // Y se vuelve a la agenda, no a ninguna otra parte.
+    expect(q('[data-test="dia-en-lista"]')).not.toBeNull();
+  });
+
+  it("y la agenda sigue viva: el Atrás no se lleva la pantalla entera", async () => {
+    await abrirHistoria();
+    await atras();
+    expect(q('[data-cita="c1"]')).not.toBeNull();
+  });
+});
+
+// ── 8 · Pendiente de recepción ─────────────────────────────────────
 
 describe("pendiente de recepción", () => {
   it("el test sin contestar de una paciente DEL DÍA, con su tablet", async () => {
