@@ -26,6 +26,9 @@
 // PIN sigue siendo provisional.
 
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
@@ -562,5 +565,95 @@ describe("el alta y el reset de personal dejan el PIN PROVISIONAL", () => {
     expect(marta.pinHash).toBeNull();
     expect(marta.pinProvisionalAt).toBeNull();
     await app.close();
+  });
+});
+
+// ── 5 · EL INVENTARIO DE LAS CINCO PUERTAS ──────────────────────────
+//
+// Las tres de arriba se miden ejercitándolas. Las otras dos —anular una
+// mesa y cerrar un turno con incidencia, las dos con `managerPin`— viven
+// detrás de media pantalla de venta: montarlas aquí serían doscientas
+// líneas de falsos para comprobar un `where`.
+//
+// Así que se miden como `h1-caja-gate.test.ts` mide la puerta de la
+// caja: contando el filtro en el fuente, con la lista enumerada. Y con
+// un barrido que CAZA LA SEXTA — el día que alguien escriba una ruta
+// nueva que verifique un `pin_hash`, este banco se pone rojo hasta que
+// decida qué hace con los PIN prestados.
+//
+// Es el patrón de «un comentario que promete sin cumplir»: la cabecera
+// de este fichero dice cinco, así que hay cinco contadas.
+
+const SRC = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "src",
+);
+
+/** Las puertas, y cuántas veces filtra cada fichero. */
+const PUERTAS: Array<[string, number]> = [
+  // El login y el roster offline, los dos en el mismo fichero: el
+  // login lo mira con un `if` (para contestar `mustChoosePin`) y el
+  // roster con un `where`.
+  ["shift/cashier-auth.ts", 1],
+  // Cerrar el turno con el PIN de un encargado.
+  ["shift/routes.ts", 1],
+  // Anular una mesa con el PIN de un encargado.
+  ["tables/routes.ts", 1],
+  // Autorizar un descuento o la anulación de un fiado.
+  ["admin/manager-authorize.ts", 1],
+];
+
+describe("el filtro está en las cinco puertas, y no hay una sexta", () => {
+  it.each(PUERTAS)("%s filtra el PIN prestado %i vez/veces", (rel, n) => {
+    const src = readFileSync(path.join(SRC, rel), "utf8");
+    // En posición de `where`/dato, no el nombre suelto: los comentarios
+    // también lo nombran.
+    const hits = src.match(/pinProvisionalAt: null/g) ?? [];
+    expect(hits.length, rel).toBe(n);
+  });
+
+  it("el login además contesta `mustChoosePin` en vez de emitir sesión", () => {
+    const src = readFileSync(path.join(SRC, "shift/cashier-auth.ts"), "utf8");
+    expect(src).toMatch(/user\.pinProvisionalAt != null/);
+    expect(src).toContain("mustChoosePin: true");
+  });
+
+  it("y NINGÚN otro fichero verifica un `pin_hash` sin decidir", () => {
+    // El barrido. Recorre `src` entero buscando quien compruebe un PIN
+    // de `users`, y exige que esté en la lista de arriba o en la de
+    // exenciones — con su razón escrita.
+    const EXENTOS = new Map<string, string>([
+      // Las dos rutas que ESCRIBEN el PIN propio: comprueban el actual
+      // (`/auth/me/pin`) o el token del login. Un PIN prestado tiene que
+      // poder cambiarse — es justo para lo que sirve.
+      ["auth/routes.ts", "cambiar el mío: el PIN prestado SÍ se cambia"],
+      // El PIN de PUERTA de la residencia es otra tabla (`care_pins`) y
+      // otras reglas. El bloque no lo toca.
+      ["residencia/pin-de-cuidado.ts", "PIN de puerta, otra tabla"],
+      ["residencia/puerta-registro-routes.ts", "PIN de puerta, otra tabla"],
+      ["residencia/ficha-routes.ts", "PIN de puerta, otra tabla"],
+    ]);
+
+    const sospechosos: string[] = [];
+    const recorrer = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          recorrer(abs);
+          continue;
+        }
+        if (!e.name.endsWith(".ts")) continue;
+        const src = readFileSync(abs, "utf8");
+        // Quien hace `verifyPassword(<algo>pinHash<algo>, …)`.
+        if (!/verifyPassword\([^)]*pinHash/.test(src)) continue;
+        const rel = path.relative(SRC, abs).split(path.sep).join("/");
+        if (PUERTAS.some(([p]) => p === rel)) continue;
+        if (EXENTOS.has(rel)) continue;
+        sospechosos.push(rel);
+      }
+    };
+    recorrer(SRC);
+    expect(sospechosos).toEqual([]);
   });
 });
