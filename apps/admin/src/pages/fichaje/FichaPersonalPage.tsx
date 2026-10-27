@@ -156,7 +156,7 @@ export function FichaPersonalPage() {
 
   if (error && !data) {
     return (
-      <AdminShell title="Ficha de personal">
+      <AdminShell title="Ficha">
         <FieldError message={error} />
       </AdminShell>
     );
@@ -196,7 +196,7 @@ export function FichaPersonalPage() {
   );
 
   return (
-    <AdminShell title="Ficha de personal">
+    <AdminShell title="Ficha">
       <Link
         to="/admin/fichaje/personal"
         className="-mt-2 mb-4 inline-flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-mipiace-ink"

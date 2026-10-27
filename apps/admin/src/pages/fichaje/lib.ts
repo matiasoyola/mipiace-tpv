@@ -75,7 +75,9 @@ export interface TodayResponse {
     entryId: string;
     startedAt: string;
   }>;
-  notClockedIn: Array<{ employeeId: string; employeeName: string }>;
+  /** `null` cuando el mes tiene cuadrante publicado: entonces la columna
+   *  no se pinta, porque `planned` contesta mejor la misma pregunta. */
+  notClockedIn: Array<{ employeeId: string; employeeName: string }> | null;
   /** personal-1 (punto 9) · planificado frente a fichado. `null` cuando el
    *  mes no tiene cuadrante publicado: la pantalla dice «publica el
    *  cuadrante para poder comparar» en vez de pintar tres listas vacías,
@@ -469,6 +471,19 @@ export function jornada(minutos: number | null): string {
 export function diferencia(minutos: number): string {
   if (minutos === 0) return duracion(0);
   return `${minutos > 0 ? "+" : "−"}${duracion(Math.abs(minutos))}`;
+}
+
+/**
+ * «42 min» / «7h 42m». Lo que se lee de un retraso.
+ *
+ * Por encima de hora y media se pasa a horas: «462 min de retraso»
+ * obliga a hacer la cuenta, y lo que la dirección quiere saber de un
+ * turno de mañana a las cuatro de la tarde es que lleva siete horas sin
+ * aparecer. Lo enseñó el bucle visual.
+ */
+export function retraso(minutos: number): string {
+  if (minutos < 90) return `${minutos} min`;
+  return duracion(minutos);
 }
 
 /** El día del mes, «1»…«31». Es lo que va en la cabecera de la rejilla. */

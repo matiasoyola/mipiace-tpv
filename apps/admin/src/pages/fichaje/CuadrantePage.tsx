@@ -79,6 +79,15 @@ export function CuadrantePage() {
   const [guardando, setGuardando] = useState(0);
   const [foco, setFoco] = useState<string | null>(null);
   const [verAvisos, setVerAvisos] = useState(true);
+  // personal-1 · lo que «Publicar» devuelve cuando hay avisos. Un panel y
+  // no un `window.confirm`: el nativo no puede enseñar CUÁLES son, y
+  // publicar un mes sabiendo que el sábado falta una auxiliar es una
+  // decisión que se toma leyendo, no aceptando.
+  const [confirmando, setConfirmando] = useState<{
+    mensaje: string;
+    rojos: number;
+    ambares: number;
+  } | null>(null);
   const pintando = useRef(false);
 
   const cargar = useCallback(() => {
@@ -244,24 +253,27 @@ export function CuadrantePage() {
     }
   }
 
-  async function publicar(confirmando: boolean) {
+  async function publicar(confirmarAvisos: boolean) {
     setGuardando((n) => n + 1);
     try {
       await api(`/admin/fichaje/cuadrante/${mes}/publicar`, {
         method: "POST",
-        body: { confirmarAvisos: confirmando },
+        body: { confirmarAvisos },
       });
       setError(null);
+      setConfirmando(null);
       cargar();
     } catch (err) {
       if (err instanceof ApiError && err.code === "CUADRANTE_CON_AVISOS") {
         // **Publicar con avisos pide confirmarlo** (decisión 7). No
         // bloquea: un cuadrante con un hueco real publicado es mejor que
-        // uno perfecto que nadie ve.
-        if (window.confirm(`${err.message}\n\n¿Publicarlo igual?`)) {
-          setGuardando((n) => n - 1);
-          return publicar(true);
-        }
+        // uno perfecto que nadie ve — el hueco se cubre llamando a
+        // alguien, no escondiéndolo.
+        setConfirmando({
+          mensaje: err.message,
+          rojos: resumen.rojos,
+          ambares: resumen.ambares,
+        });
       } else {
         setError(err instanceof ApiError ? err.message : "Error inesperado");
       }
@@ -347,6 +359,43 @@ export function CuadrantePage() {
       </div>
 
       {error && <FieldError message={error} />}
+
+      {/* ── PUBLICAR CON AVISOS ─────────────────────────────────────────
+          Los avisos NO bloquean (decisión 7). Lo que se pide es que quien
+          publica lea cuántos hay y de qué clase, y que quede apuntado. */}
+      {confirmando && (
+        <div className="mb-4 rounded-2xl border border-mipiace-coral/40 bg-mipiace-coral-soft px-4 py-4">
+          <p className="flex items-center gap-2 text-[15px] font-semibold text-mipiace-ink">
+            <TriangleAlert className="h-4 w-4 text-mipiace-coral-dark" />
+            Este cuadrante tiene avisos
+          </p>
+          <p className="mt-1 text-[13.5px] text-slate-700">{confirmando.mensaje}</p>
+          <p className="mt-2 text-[12.5px] text-slate-600">
+            Puedes publicarlo igual: los avisos no lo impiden. Lo que pasa es
+            que quedan <strong>apuntados</strong> en el cuadrante, con la
+            fecha y tu nombre — y eso es lo que a los seis meses contesta
+            «¿se publicó sabiendo que faltaba gente?».
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2.5">
+            <OutlineButton
+              className="!w-auto px-4"
+              onClick={() => void publicar(true)}
+              busy={guardando > 0}
+            >
+              Publicarlo igual
+            </OutlineButton>
+            <OutlineButton
+              className="!w-auto px-4"
+              onClick={() => {
+                setConfirmando(null);
+                setVerAvisos(true);
+              }}
+            >
+              Volver a mirarlo
+            </OutlineButton>
+          </div>
+        </div>
+      )}
 
       {/* Si está publicado, el motivo es obligatorio ANTES de tocar nada.
           Pedirlo después de cada celda haría que nadie pintara dos. */}

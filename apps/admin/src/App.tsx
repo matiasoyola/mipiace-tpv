@@ -273,7 +273,7 @@ export function App() {
             si no, el router los tomaría por un id de empleado. */}
         <Route path="/admin/fichaje/personal" element={<FichajeGate title="Personal"><PersonalPage /></FichajeGate>} />
         <Route path="/admin/fichaje/personal/importar" element={<FichajeGate title="Importar personal"><ImportarPersonalPage /></FichajeGate>} />
-        <Route path="/admin/fichaje/personal/:id" element={<FichajeGate title="Ficha de personal"><FichaPersonalPage /></FichajeGate>} />
+        <Route path="/admin/fichaje/personal/:id" element={<FichajeGate title="Ficha"><FichaPersonalPage /></FichajeGate>} />
         <Route path="/admin/fichaje/cuadrante" element={<FichajeGate title="Cuadrante"><CuadrantePage /></FichajeGate>} />
         <Route path="/admin/fichaje/cuadrante/cambios" element={<FichajeGate title="Cambios del cuadrante"><CambiosDelCuadrantePage /></FichajeGate>} />
         <Route path="/admin/fichaje/reglas" element={<FichajeGate title="Reglas del cuadrante"><ReglasPage /></FichajeGate>} />

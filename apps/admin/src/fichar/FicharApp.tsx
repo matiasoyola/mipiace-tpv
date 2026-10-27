@@ -10,7 +10,7 @@
 //   · sin móvil    — no hay token guardado y no hay enlace
 //   · fichando     — la pantalla de verdad
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   clearEmployeeToken,
@@ -32,6 +32,30 @@ type Estado =
 
 export function FicharApp() {
   const [estado, setEstado] = useState<Estado>({ fase: "cargando" });
+  // personal-1 · **EL CANJE DEL ENLACE SE INTENTA UNA VEZ, Y LAS DEMÁS
+  // ENTRADAS LO ESPERAN.**
+  //
+  // El efecto de abajo quita el `?p=` de la URL antes de canjearlo —para
+  // que el token no se quede en la barra ni en el historial—, así que una
+  // segunda entrada ya no encuentra enlace. Y vuelve a entrar: React
+  // monta, desmonta y vuelve a montar a propósito en desarrollo
+  // (`StrictMode`), y un fast refresh también.
+  //
+  // Lo que se guarda aquí no es una bandera sino **la promesa del canje**,
+  // y es la diferencia entre que funcione y que no:
+  //
+  //   · con una bandera, la segunda entrada se saltaba el canje y caía en
+  //     «este móvil todavía no está emparejado» con el POST todavía en el
+  //     aire;
+  //   · y cortando la segunda entrada del todo, la que se quedaba viva
+  //     era ella —la primera ya estaba desmontada y su `vivo` a `false`—,
+  //     así que nadie llamaba a `cargar()` y la pantalla se quedaba en
+  //     «Un momento…» para siempre.
+  //
+  // Esperando la promesa, canjea UNA y cargan las dos. En producción no
+  // hay segunda entrada y el camino es el de siempre; lo encontró el
+  // bucle visual de personal-1, que corre contra el `vite dev`.
+  const canje = useRef<Promise<void> | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -65,12 +89,12 @@ export function FicharApp() {
     (async () => {
       const url = new URL(window.location.href);
       const enlace = url.searchParams.get("p");
-      if (enlace) {
+      if (enlace != null && canje.current == null) {
         // El token del enlace no debe quedarse en la barra ni en el
         // historial: se canjea y se limpia la URL en el sitio.
         url.searchParams.delete("p");
         window.history.replaceState(null, "", url.pathname + url.search);
-        try {
+        canje.current = (async () => {
           const res = await ficharApi<{ employeeToken: string }>(
             "/fichaje/v1/pair",
             {
@@ -80,6 +104,11 @@ export function FicharApp() {
             },
           );
           storeEmployeeToken(res.employeeToken);
+        })();
+      }
+      if (canje.current != null) {
+        try {
+          await canje.current;
         } catch (err) {
           if (!vivo) return;
           setEstado({

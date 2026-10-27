@@ -15,10 +15,14 @@
 //      marcaran al abrir, recargar la pantalla —que es lo que uno hace
 //      para volver a mirarlos— los borraría.
 //
-//   3. **Los días vacíos no se pintan.** Un mes de 31 filas en las que
-//      veinte dicen «—» es una pantalla que hay que recorrer para
-//      encontrar los seis días que importan. Lo que se enseña es lo que
-//      hay, como en «Mis fichajes».
+//   3. **Los días vacíos no se pintan**, y en el mes en curso **tampoco
+//      los que ya han pasado**. Un mes de 31 filas en las que veinte son
+//      pasado es una pantalla que hay que recorrer hasta la mitad para
+//      ver qué toca mañana — y la pregunta que esto contesta es «¿qué
+//      tengo el sábado?», no «¿qué tuve el 3?». Lo que pasó está en «Mis
+//      fichajes», que es donde se mira y donde además se corrige. Lo
+//      enseñó el bucle visual: la captura del 27 de octubre abría por el
+//      día 1.
 
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, BellRing, CalendarDays } from "lucide-react";
@@ -112,6 +116,11 @@ export function MiCuadrante({
   }
 
   const nuevos = data?.cambios.filter((c) => c.nuevo) ?? [];
+
+  // El día de HOY en la zona del centro, para cortar el pasado.
+  const hoy = new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
+  const dias = (data?.dias ?? []).filter((d) => d.dia >= hoy);
+  const pasados = (data?.dias.length ?? 0) - dias.length;
 
   return (
     <div className="min-h-full px-5 pb-10 pt-4">
@@ -209,18 +218,22 @@ export function MiCuadrante({
             </div>
           )}
 
-          {data.dias.length === 0 ? (
+          {dias.length === 0 ? (
             <div className="rounded-3xl bg-white px-5 py-6 text-center">
               <p className="text-[15px] text-mipiace-ink">
-                Este mes no tienes nada puesto.
+                {pasados > 0
+                  ? "No te queda nada este mes."
+                  : "Este mes no tienes nada puesto."}
               </p>
               <p className="mt-1.5 text-[13px] text-slate-400">
-                Si crees que debería haber algo, pregúntale a tu empresa.
+                {pasados > 0
+                  ? "Mira el mes que viene ahí arriba."
+                  : "Si crees que debería haber algo, pregúntale a tu empresa."}
               </p>
             </div>
           ) : (
             <ul className="space-y-2">
-              {data.dias.map((d) => (
+              {dias.map((d) => (
                 <li
                   key={d.dia}
                   className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3"
@@ -253,6 +266,14 @@ export function MiCuadrante({
           )}
 
           <p className="mt-4 text-center text-[12px] text-slate-400">
+            {pasados > 0 && (
+              <>
+                Los {pasados} día{pasados === 1 ? "" : "s"} que ya{" "}
+                {pasados === 1 ? "pasó" : "han pasado"} están en «Mis
+                fichajes».
+                <br />
+              </>
+            )}
             Esto es lo que tu empresa ha publicado. Si algo no cuadra,
             díselo: desde aquí no se cambia.
           </p>

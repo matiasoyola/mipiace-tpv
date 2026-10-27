@@ -48,6 +48,7 @@ import {
   turnosDelTenant,
 } from "./cuadrante.js";
 import { entrySentOffline } from "./offline.js";
+import { nombreCompleto } from "./personal.js";
 import { isInFuture } from "./routes.js";
 import { maxOpenHoursFor } from "./max-open.js";
 import { esSalidaOlvidada, FICHAJE_TZ, localDate, monthRange } from "./time.js";
@@ -397,8 +398,12 @@ export async function registerFichajeAdminRoutes(
       maxOpenHoursFor(auth.tenantId),
       prisma.employee.findMany({
         where: { tenantId: auth.tenantId, active: true },
-        select: { id: true, name: true },
-        orderBy: { name: "asc" },
+        // personal-1 · con apellidos. El bucle visual enseñó una columna
+        // de veintiún nombres de pila —«ANA», «BEATRIZ»…— en la que dos
+        // Anas son la misma persona. `name` solo era suficiente cuando la
+        // ficha no tenía apellidos.
+        select: { id: true, name: true, lastName: true },
+        orderBy: [{ lastName: "asc" }, { name: "asc" }],
       }),
       // El mes entero, no sólo hoy: los avisos (sin salida, corregidos,
       // enviados sin conexión) son de días pasados por definición — una
@@ -429,7 +434,7 @@ export async function registerFichajeAdminRoutes(
       _count: { _all: true },
     });
     const counts = new Map(correcciones.map((c) => [c.timeEntryId, c._count._all]));
-    const nombre = new Map(employees.map((e) => [e.id, e.name]));
+    const nombre = new Map(employees.map((e) => [e.id, nombreCompleto(e)]));
 
     // personal-1 · el turno PUBLICADO de cada tramo abierto, en una
     // consulta por mes y no una por tramo. Lo mismo que el móvil usa, para
@@ -567,9 +572,23 @@ export async function registerFichajeAdminRoutes(
           : null,
       // Quién NO ha fichado hoy. Sin jornada teórica todavía (eso es F2),
       // así que esto es "no ha aparecido", no "falta al trabajo".
-      notClockedIn: employees
-        .filter((e) => !conFichaje.has(e.id))
-        .map((e) => ({ employeeId: e.id, employeeName: e.name })),
+      // personal-1 · **sólo cuando NO hay cuadrante publicado.**
+      //
+      // Era la queja del punto 1 de `fichaje-1-done` §10: sin jornada
+      // teórica, esto significa «no ha aparecido» y no «falta al
+      // trabajo». Con el cuadrante publicado existe la respuesta buena
+      // —`planned`, justo debajo— y mantener las dos deja una columna de
+      // dieciocho nombres, de los que la mitad libran o entran de noche,
+      // al lado de la lista de los siete que de verdad faltan.
+      //
+      // `null` y no una lista vacía: son dos cosas distintas, y la
+      // pantalla no pinta la columna cuando es `null`.
+      notClockedIn:
+        cabeceraDeHoy?.state === "PUBLICADO"
+          ? null
+          : employees
+              .filter((e) => !conFichaje.has(e.id))
+              .map((e) => ({ employeeId: e.id, employeeName: nombreCompleto(e) })),
       alerts: {
         // La salida olvidada vista desde la empresa: un tramo que lleva
         // abierto más del máximo del tenant. No se cierran solos, ni aquí
@@ -634,8 +653,11 @@ export async function registerFichajeAdminRoutes(
     const [employees, rows] = await Promise.all([
       prisma.employee.findMany({
         where: { tenantId },
-        select: { id: true, name: true, active: true },
-        orderBy: [{ active: "desc" }, { name: "asc" }],
+        // personal-1 · con apellidos, también aquí: el registro que se le
+        // enseña a la Inspección y el PDF que firma cada trabajador se
+        // leen por el apellido, no por el nombre de pila.
+        select: { id: true, name: true, lastName: true, active: true },
+        orderBy: [{ active: "desc" }, { lastName: "asc" }, { name: "asc" }],
       }),
       prisma.timeEntry.findMany({
         where: {
@@ -653,7 +675,7 @@ export async function registerFichajeAdminRoutes(
       _count: { _all: true },
     });
     const counts = new Map(correcciones.map((c) => [c.timeEntryId, c._count._all]));
-    const nombre = new Map(employees.map((e) => [e.id, e.name]));
+    const nombre = new Map(employees.map((e) => [e.id, nombreCompleto(e)]));
 
     // Por EMPLEADO y no en una lista plana: el registro que firma cada
     // trabajador es el suyo.
@@ -725,7 +747,11 @@ export async function registerFichajeAdminRoutes(
       .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 
     return {
-      employees,
+      employees: employees.map((e) => ({
+        id: e.id,
+        name: nombreCompleto(e),
+        active: e.active,
+      })),
       blocks,
       totalMinutes: blocks.reduce((a, b) => a + b.totalMinutes, 0),
       from,
