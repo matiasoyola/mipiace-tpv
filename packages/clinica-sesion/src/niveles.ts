@@ -152,6 +152,15 @@ export interface NivelPropuesto {
   /** `true` si el nivel lo impuso el umbral de cantidad y no un acto
    *  concreto. */
   porLaCantidad: boolean;
+  /**
+   * Cuántos actos DISTINTOS y conocidos se han marcado.
+   *
+   * clinica-10 · lo necesita `nivelCobrado` para contestar «¿ha hecho
+   * quiropodia hoy?», y no se puede deducir de los otros campos: con
+   * `actos: ["corte"]` el mínimo del corte es 1 y el nivel ya era 1, así
+   * que `porElActo` se queda en `null` igual que sin actos ninguno.
+   */
+  actosMarcados: number;
 }
 
 /**
@@ -205,6 +214,7 @@ export function nivelPropuesto(
     nivel,
     porElActo,
     porLaCantidad,
+    actosMarcados: validos.length,
     motivo: motivoDelNivel(validos, nivel, porElActo, porLaCantidad, listaDeActos),
   };
 }

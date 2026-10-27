@@ -152,6 +152,12 @@ import {
   type CategoryTone,
 } from "../lib/categoryTones.js";
 import { filasDeChips, layoutChips } from "../lib/chipRows.js";
+import {
+  ANCHO_UTIL_TARJETA,
+  CUERPOS_DE_TARJETA,
+  cuerpoQueCabe,
+  palabraMasLarga,
+} from "../lib/ancho-del-texto.js";
 import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import { isTouchDevice } from "../lib/touchDevice.js";
 import { SaleSearchInput } from "../components/SaleSearchInput.js";
@@ -4427,11 +4433,22 @@ function ProductTile({
             Lo que no cambia es que haya un tope: un nombre de verdad
             largo sigue cortando con puntos suspensivos. Lo que se
             arregla es el caso que se da todos los días. */}
+        {/* clinica-10 (paso 33) · el cuerpo baja un peldaño cuando la
+            palabra más larga no cabe, y `break-words` es el suelo: con
+            los dos, un nombre no se puede volver a recortar a mitad de
+            letra («biomecánic», captura 33). Ver `ancho-del-texto.ts`. */}
         <span
+          style={{
+            fontSize: `${cuerpoQueCabe(
+              palabraMasLarga(product.name),
+              ANCHO_UTIL_TARJETA,
+              CUERPOS_DE_TARJETA,
+            )}px`,
+          }}
           className={
             imgSrc
-              ? "line-clamp-3 text-[16.5px] font-medium leading-tight text-white drop-shadow"
-              : "line-clamp-3 text-[16.5px] font-medium leading-tight text-mipiace-ink"
+              ? "line-clamp-3 break-words font-medium leading-tight text-white drop-shadow"
+              : "line-clamp-3 break-words font-medium leading-tight text-mipiace-ink"
           }
         >
           {product.name}

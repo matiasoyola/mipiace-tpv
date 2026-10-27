@@ -69,11 +69,13 @@ import {
   comprobacionesVacias,
   gravedadDisponible,
   igualQueLaUltimaVez,
+  nivelCobrado,
   nivelPropuesto,
   pendientesQuePreguntar,
   productoDelNivel,
   resumenPorTipos,
   seCierraSolo,
+  semillaDeLoReservado,
   serviciosPorTipo,
   textoSinCobro,
   type ComprobacionesDelPie,
@@ -256,8 +258,10 @@ interface EstadoDeLosBloques {
   bioTipoDePie: string | null;
   bioPisada: string | null;
   bioPlantillas: boolean;
-  /** Los servicios tocados, por tipo. */
-  servicios: Partial<Record<TipoDeVisita, string[]>>;
+  /** Los servicios tocados, por tipo. `readonly` porque la semilla de
+   *  clinica-10 (`semillaDeLoReservado`) los entrega así y nadie los
+   *  muta en el sitio: cada toque arma una lista nueva (`alternar`). */
+  servicios: Partial<Record<TipoDeVisita, readonly string[]>>;
 }
 
 function bloquesVacios(): EstadoDeLosBloques {
@@ -319,6 +323,22 @@ function SesionPodologiaDentro(props: {
   // clinica-4 · con qué consentimiento entrar abierto cuando se llega
   // desde «Firmar ahora» o desde «Firmar consentimiento de fotos».
   const [plantillaInicial, setPlantillaInicial] = useState<string | null>(null);
+  /**
+   * clinica-10 (19b) · A QUÉ PESTAÑA SE VUELVE AL FIRMAR.
+   *
+   * Para hacer una foto hay que firmar el consentimiento de fotos, y el
+   * botón que lo pide está EN Fotos. Al firmarlo, la pantalla se quedaba
+   * en Consentimientos y la podóloga —que tiene la cámara en la mano y a
+   * la paciente con el pie encima— tenía que buscar la pestaña otra vez
+   * (pasada del 27-10, paso 19b).
+   *
+   * `null` = no se vuelve a ningún sitio, que es lo que pasa cuando se
+   * entra a Consentimientos por su pestaña o desde la puerta de arriba:
+   * ahí firmar es el final del recado, no el medio.
+   */
+  const [volverTrasFirmar, setVolverTrasFirmar] = useState<Pestana | null>(
+    null,
+  );
   const [capa, setCapa] = useState<Capa>("lesiones");
 
   // ── El estado de la sesión, EN MEMORIA hasta que se cierra ────────
@@ -422,6 +442,26 @@ function SesionPodologiaDentro(props: {
             : v.tiposSugeridos
           ).filter((t) => TIPOS_DE_VISITA.includes(t)),
         );
+        // clinica-10 · Y LOS SERVICIOS RESERVADOS, MARCADOS.
+        //
+        // La misma semilla que los tipos y por la misma razón: el tipo
+        // venía marcado desde clinica-5 y el servicio no, así que una
+        // cita de «Consulta diagnóstico» abría la tarjeta General con el
+        // chip de la consulta apagado y el pie diciendo «Nada que
+        // cobrar» (pasada del 27-10, capturas 18 y 24a).
+        //
+        // Va DENTRO del `sembrado` por lo de clinica-9 (1): una recarga
+        // —firmar el consentimiento de fotos llama a `cargar()`— no
+        // puede volver a marcar lo que la podóloga acaba de desmarcar.
+        setBloques((b) => ({
+          ...b,
+          servicios: {
+            ...semillaDeLoReservado({
+              reservados: v.cita.servicioIds,
+              catalogo: v.tratamientos,
+            }).servicios,
+          },
+        }));
         // Y la exploración por lo mismo: parte de la última, pero si la
         // sanitaria lleva media exploración tecleada, una recarga no se
         // la puede llevar.
@@ -462,6 +502,23 @@ function SesionPodologiaDentro(props: {
   }, [vista]);
 
   const porTipo = useMemo(() => serviciosPorTipo(catalogo), [catalogo]);
+  /**
+   * clinica-10 · ¿se propone un nivel de quiropodia sin tocar nada?
+   *
+   * Sale de la respuesta del servidor y no de un estado propio: así vale
+   * igual tras una recarga, y no hay un segundo sitio desde el que la
+   * pantalla pueda contestar distinto que el cierre. Ver
+   * `semillaDeLoReservado`.
+   */
+  const seProponeNivel = useMemo(
+    () =>
+      vista == null ||
+      semillaDeLoReservado({
+        reservados: vista.cita.servicioIds,
+        catalogo: vista.tratamientos,
+      }).seProponeNivel,
+    [vista],
+  );
   const niveles = useMemo(
     () => catalogo.filter((s) => s.nivelQuiropodia != null),
     [catalogo],
@@ -472,18 +529,26 @@ function SesionPodologiaDentro(props: {
    *  el cierre: así lo que se pinta y lo que se manda no pueden separarse. */
   const bloquesDelPaquete = useMemo(() => {
     const serviciosDe = (t: TipoDeVisita) => bloques.servicios[t] ?? [];
-    const nivelElegido =
-      bloques.nivelAMano ??
-      // La propuesta se recalcula aquí y no se guarda en estado: guardarla
-      // habría sido un segundo sitio desde el que puede quedar vieja.
-      nivelPropuestoDe(bloques.actos);
+    // La propuesta se recalcula aquí y no se guarda en estado: guardarla
+    // habría sido un segundo sitio desde el que puede quedar vieja. Y
+    // `nivelCobrado` es `null` cuando hoy no hay nivel que cobrar (cita
+    // de «Cura» sin ningún acto marcado): es la MISMA función que el
+    // servidor usa al escribir.
+    const nivelElegido = nivelCobrado({
+      actos: bloques.actos,
+      nivelAMano: bloques.nivelAMano,
+      seProponeNivel,
+    });
     const salida: Parameters<typeof resumenPorTipos>[0]["bloques"] = {};
     if (tipos.includes("QUIROPODIA")) {
       salida.QUIROPODIA = {
         actos: bloques.actos,
         nivelPropuesto: nivelPropuestoDe(bloques.actos),
         nivelElegido,
-        productoDelNivel: productoDelNivel(catalogo, nivelElegido),
+        productoDelNivel:
+          nivelElegido == null
+            ? null
+            : productoDelNivel(catalogo, nivelElegido),
         servicios: serviciosDe("QUIROPODIA"),
       };
     }
@@ -513,7 +578,7 @@ function SesionPodologiaDentro(props: {
       salida.GENERAL = { servicios: serviciosDe("GENERAL") };
     }
     return salida;
-  }, [tipos, bloques, catalogo]);
+  }, [tipos, bloques, catalogo, seProponeNivel]);
 
   const resumen = useMemo(() => {
     if (!vista) return null;
@@ -897,6 +962,10 @@ function SesionPodologiaDentro(props: {
         onCambiar={(p) => {
           setPestana(p);
           setZonaAbierta(null);
+          // Tocar una pestaña a mano cancela la vuelta: a partir de ahí
+          // la podóloga está en otra cosa, y devolverla a Fotos al firmar
+          // sería moverle la pantalla bajo el dedo.
+          setVolverTrasFirmar(null);
           // clinica-8 (fase B, 12) · y se suelta la hoja de confirmación
           // si estaba abierta. La hoja se pinta al final del componente,
           // fuera del `if` de la pestaña: sin esto, cambiar a «Fotos»
@@ -924,6 +993,7 @@ function SesionPodologiaDentro(props: {
           ]}
           onFirmarConsentimiento={(plantillaId) => {
             setPlantillaInicial(plantillaId);
+            setVolverTrasFirmar("fotos");
             setPestana("consentimientos");
           }}
         />
@@ -937,7 +1007,15 @@ function SesionPodologiaDentro(props: {
           plantillaInicial={plantillaInicial}
           // Al firmar se recarga la sesión: la puerta de arriba y el botón
           // de cerrar tienen que enterarse sin que nadie refresque.
-          onFirmado={() => void cargar()}
+          onFirmado={() => {
+            void cargar();
+            // clinica-10 (19b) · y se vuelve de donde se vino, si se vino
+            // de algún sitio.
+            if (volverTrasFirmar) {
+              setPestana(volverTrasFirmar);
+              setVolverTrasFirmar(null);
+            }
+          }}
         />
       )}
 
@@ -1083,6 +1161,7 @@ function SesionPodologiaDentro(props: {
                   lista={vista.listas.actos}
                   actos={bloques.actos}
                   nivelAMano={bloques.nivelAMano}
+                  elegido={bloquesDelPaquete.QUIROPODIA?.nivelElegido ?? null}
                   niveles={niveles}
                   servicios={serviciosDelTipo("QUIROPODIA")}
                   avisos={avisosDe("ACTO")}
@@ -1101,8 +1180,22 @@ function SesionPodologiaDentro(props: {
                   onNivel={(n) =>
                     setBloques((b) => ({
                       ...b,
+                      // Tocar el nivel que ya era el propuesto vuelve a
+                      // «seguir la propuesta» (`null`) para que siga
+                      // moviéndose con los actos... salvo cuando hoy NO
+                      // hay propuesta (clinica-10, cita de «Cura» sin
+                      // actos): ahí ese `null` dejaría el nivel apagado y
+                      // el toque no haría nada. Que un botón no responda
+                      // es peor que congelar un nivel.
                       nivelAMano:
-                        n === nivelPropuestoDe(b.actos) ? null : n,
+                        n === nivelPropuestoDe(b.actos) &&
+                        nivelCobrado({
+                          actos: b.actos,
+                          nivelAMano: b.nivelAMano,
+                          seProponeNivel,
+                        }) != null
+                          ? null
+                          : n,
                     }))
                   }
                 />

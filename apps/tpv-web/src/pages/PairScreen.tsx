@@ -73,7 +73,19 @@ export function PairScreen({ onPaired }: { onPaired: () => void }) {
         method: "POST",
         body: {
           code,
-          deviceName: navigator.userAgent.slice(0, 80),
+          // clinica-10 (paso 38) · SIN `deviceName`.
+          //
+          // Mandaba `navigator.userAgent.slice(0, 80)`, o sea el
+          // user-agent crudo y además cortado por la mitad, metido en la
+          // columna del NOMBRE. Y un nombre puesto manda sobre lo que el
+          // panel sepa leer, así que el lector de clinica-8 (fase B, 18)
+          // —el que escribe «Android 14 · TB311FU · app»— no llegaba a
+          // usarse nunca: la pasada del 27-10 seguía viendo la cadena
+          // entera en Dispositivos (paso 38).
+          //
+          // El nombre es de quien lo pone: una persona, desde el panel.
+          // Lo que la tablet sabe de sí misma es su user-agent, y va en
+          // el campo del user-agent.
           userAgent: navigator.userAgent.slice(0, 512),
         },
       });

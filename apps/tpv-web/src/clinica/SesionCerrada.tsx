@@ -293,8 +293,19 @@ function LoDeLosTipos(props: { cuerpo: SesionCerradaView["cuerpo"] }) {
       <div className="text-[13.5px] leading-relaxed mt-3 space-y-1.5">
         {q && (
           <div>
-            · <b className="font-medium">Quiropodia {NOMBRE_DE_NIVEL[q.nivelElegido].toLowerCase()}</b>
-            {q.nivelElegido !== q.nivelPropuesto && (
+            ·{" "}
+            <b className="font-medium">
+              {/* clinica-10 · sin nivel se lee «Quiropodia» a secas. La
+                  visita fue de quiropodia —el tipo está marcado— y lo
+                  que no hubo fue nivel que cobrar: lo reservado era una
+                  cura y no se marcó ningún acto. Pintar «Quiropodia
+                  básica» aquí sería decir en la historia que se hizo
+                  algo que no se hizo. */}
+              {q.nivelElegido == null
+                ? "Quiropodia"
+                : `Quiropodia ${NOMBRE_DE_NIVEL[q.nivelElegido].toLowerCase()}`}
+            </b>
+            {q.nivelElegido != null && q.nivelElegido !== q.nivelPropuesto && (
               <span className="text-slate-500">
                 {" "}
                 (propuesta {NOMBRE_DE_NIVEL[q.nivelPropuesto].toLowerCase()},

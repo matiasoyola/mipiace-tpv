@@ -84,6 +84,7 @@ import {
   type ComparadorDeZona,
   type FotoDeLaHistoria,
 } from "./Fotos.js";
+import { useBackGuard } from "../hooks/useBackGuard.js";
 import { Consentimientos } from "./Consentimientos.js";
 import { Informe } from "./Informe.js";
 import { FranjaRoja, Mal, cuantoHace, diaCorto } from "./piezas.js";
@@ -274,6 +275,7 @@ export function HistoriaViva(props: {
   clientId: string;
   onEmpezarVisita?: (tipos: TipoDeVisita[]) => void;
   onAbrirValoracion?: () => void;
+  onCerrar?: () => void;
 }) {
   return (
     <GuardaDelContrato>
@@ -296,6 +298,23 @@ function HistoriaVivaDentro(props: {
   onEmpezarVisita?: (tipos: TipoDeVisita[]) => void;
   /** Abrir la valoración del paciente (clinica-2), desde Documentos. */
   onAbrirValoracion?: () => void;
+  /**
+   * clinica-10 (H3) · cerrar la historia, para el Atrás de Android.
+   *
+   * La pasada del 27-10 encontró que el Atrás **no hacía nada** dentro de
+   * la historia de un paciente: `useBackGuard` existe desde v1.12 para
+   * que el Atrás no eche al camarero de la aplicación, y sin ninguna capa
+   * registrada se queda en el guardia de fondo, que con el turno abierto
+   * se traga el gesto. Para quien tiene la tablet en la mano eso es un
+   * botón roto.
+   *
+   * `undefined` = quien monta la historia no sabe cerrarla, y entonces el
+   * Atrás sigue cerrando lo que haya abierto DENTRO (la hoja de «¿qué
+   * visita es hoy?», la zona del pie) y nada más. No se inventa una
+   * salida: salir de aquí es volver a la pantalla de la que se vino, y
+   * eso sólo lo sabe quien la pintó.
+   */
+  onCerrar?: () => void;
 }) {
   const [vista, setVista] = useState<VistaDeLaHistoria | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -346,6 +365,21 @@ function HistoriaVivaDentro(props: {
   useEffect(() => {
     void cargar();
   }, [cargar]);
+
+  // clinica-10 (H3) · EL ATRÁS DE ANDROID, EN TRES CAPAS.
+  //
+  // De arriba abajo, que es el orden en que `useBackGuard` las cierra
+  // (manda la última registrada): la hoja de «¿qué visita es hoy?»,
+  // luego la zona del pie abierta en el panel de la derecha, y al final
+  // la historia entera. Es lo que cualquiera espera del Atrás: deshacer
+  // lo último, no saltar al principio.
+  //
+  // El `isOpen` de cada capa es la condición que la hace existir, así
+  // que sin hoja ni zona abiertas el Atrás cierra la historia a la
+  // primera.
+  useBackGuard(() => props.onCerrar?.(), props.onCerrar != null);
+  useBackGuard(() => setZonaElegida(null), zonaElegida != null);
+  useBackGuard(() => setHoja(null), hoja != null);
 
   // La zona abierta en el panel de la derecha: la elegida, o la primera
   // que haya. Nunca el hueco: abrir el pie vivo y encontrarse una columna

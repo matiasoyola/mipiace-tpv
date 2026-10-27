@@ -134,6 +134,41 @@ export function esMiPiaceMirando(request: FastifyRequest): boolean {
   return request.auth?.isImpersonation === true;
 }
 
+/**
+ * clinica-10 (H2) · LA PUERTA DE LA CONFIGURACIÓN CLÍNICA.
+ *
+ * Igual que `ensureClinicaEnabled` menos una cosa: **Mi Piace sí puede
+ * mirar**. Es para las rutas del módulo que no tocan ni un dato de salud,
+ * y hoy es una sola: el mapa `categoría → tipo de visita`
+ * (`tag_visit_types`), que son dos columnas de texto del catálogo.
+ *
+ * Por qué hacía falta separarlas, y no es una concesión: **el propio
+ * superadmin YA ESCRIBE esta tabla**. El importador de catálogo de una
+ * implantación (`superadmin/tenant-catalog.ts`) crea estas filas al
+ * cargar el CSV de la clínica, y el check «Catálogo clínico completo»
+ * las cuenta. O sea que Mi Piace podía crearlas y medirlas, y al abrir
+ * la pantalla donde se ven recibía la 404 de «aquí no hay nada» — y la
+ * pantalla la pintaba como «todavía no has asignado ninguna categoría»
+ * (ver `AgendaCatalogPage`, que ya no lo hace).
+ *
+ * Lo que la decisión 24 de clinica-7 protege sigue protegido entero: las
+ * historias, las valoraciones, las fotos, los consentimientos, los
+ * informes y la sesión llevan `ensureClinicaEnabled` y le siguen
+ * contestando a Mi Piace que esa ruta no existe. Lo que esta puerta deja
+ * pasar no es un dato de un paciente: es cómo se llama una categoría del
+ * catálogo.
+ */
+export async function ensureClinicaConfigurable(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const tenantId = resolveTenantId(request);
+  if (tenantId == null) return;
+  if (!(await clinicaIsEnabled(tenantId))) {
+    respondeComoRutaInexistente(request, reply);
+  }
+}
+
 export async function ensureClinicaEnabled(
   request: FastifyRequest,
   reply: FastifyReply,
