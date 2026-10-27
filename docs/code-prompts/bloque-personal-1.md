@@ -2,17 +2,22 @@
 
 Rama `personal-1`, worktree `~/Developer/Claude/Projects/mipiacetpv-personal-1`, desde
 `origin/master`. PR contra `master`. Escrito el 23-10-2026 desde el proyecto de Jardín de Gredos, el
-día que se encendió el fichaje en la primera empresa real (una residencia de 24 horas, 21 personas) y
-se vio que **no se puede arrancar**: el turno de noche sale como «salida olvidada» todas las noches.
+día que se encendió el fichaje en la primera empresa real (una residencia de 24 horas, 21 personas).
+Revisado el 27-10-2026: el turno de noche como «salida olvidada» **ya lo resolvió**
+`hotfix-fichaje-medianoche` (#45, en producción); este bloque lo afina con el turno planificado, no lo
+rehace.
 Es el **primero de dos**: personal-2 genera el cuadrante con IA. Este deja todo lo que esa IA
 necesita debajo (la ficha, los turnos, las reglas) y lo que la valida (`comprobarCuadrante`).
 
 Lee antes:
 1. `docs/blocks/fichaje-1-done.md` entero (§10 es lo que falta para F2: jornada teórica, ausencias,
    pausas) y `docs/design/adr-018-el-registro-de-jornada-es-inalterable.md`.
-2. `apps/api/src/fichaje/routes.ts` (la salida olvidada: `localDate(open.startedAt) !== hoy` y el 409
-   `PENDING_EXIT_REQUIRES_REASON`), `fichaje/time.ts`, `fichaje/view.ts` («el día del registro es el de
-   la ENTRADA»), `fichaje/admin-routes.ts` y `apps/admin/src/pages/fichaje/`.
+2. `docs/blocks/hotfix-fichaje-medianoche-done.md` entero: la salida olvidada ya se decide **por
+   duración** en un solo sitio, `esSalidaOlvidada(entry, now, maxHoras)` de `fichaje/time.ts`, con el
+   máximo del tenant en `tenants.fichaje_max_open_hours` (16 de serie, `fichaje/max-open.ts`), y lo
+   usan cierre, `/me` y «Hoy» del panel. Después `apps/api/src/fichaje/routes.ts`, `fichaje/view.ts`
+   («el día del registro es el de la ENTRADA»), `fichaje/admin-routes.ts` y
+   `apps/admin/src/pages/fichaje/`.
 3. `docs/blocks/residencia-1-done.md` §6 (`CenterShift`, `residencia/turnos.ts::turnoDe`: la noche
    como disyunción, hora de pared en `Europe/Madrid`, límite semiabierto, hueco = `null`).
 4. `docs/blocks/residencia-1b-done.md` (`cripto-campos.ts`, `cifrarValor` / `descifrarValor`).
@@ -26,9 +31,8 @@ Hoy hay **tres «personas» que no se hablan**: `Employee` (fichaje, sin usuario
 `StaffShift` (agenda, colgado de `User`) y `CareRoleAssignment` (residencia, colgado de `User`). Y el
 fichaje no sabe qué turno tiene nadie, así que:
 
-- Una auxiliar que entra a las 22:00 y sale a las 06:00 **no puede fichar la salida**: el tramo es «de
-  otro día» y se registra como corrección con motivo «Olvido». Cada noche. En una residencia con la
-  Inspección de Trabajo encima, eso no se puede enseñar.
+- El fichaje sólo sabe si un tramo lleva abierto más de 16 h (#45). No sabe que la auxiliar de noche
+  sale a las 08:00: si a las 13:00 sigue «dentro», nadie se entera hasta que pasan las 16 h.
 - «Quién no ha fichado hoy» no significa nada: no hay jornada teórica contra la que comparar.
 - El cuadrante vive en un Excel (`CUADRANTES 2026`), se reparte por WhatsApp y nadie comprueba que
   cumple la ratio, los descansos o la jornada contratada hasta que alguien se queja.
@@ -101,16 +105,19 @@ pasa a ser un aviso cierto. Y queda listo el suelo sobre el que personal-2 gener
    El convenio colectivo **no** se mete en código: sus límites entran como parámetros cuando Matías
    los confirme. Los avisos **no bloquean** publicar; publicar con avisos pide confirmarlo y los deja
    apuntados.
-8. **El fichaje entiende los turnos.** El tramo abierto ya no es «salida olvidada» por cambiar de día
-   de calendario, sino:
-   - **con turno planificado**: si ha pasado el fin de su turno más un margen (parámetro, por defecto
-     4 h). La noche de 22:00 a 08:00 se cierra a las 08:00 de un toque, como cualquier salida.
-   - **sin turno planificado** (el colegio, quien no tenga cuadrante): si el tramo lleva abierto más
-     de un máximo (parámetro, por defecto 16 h).
-   Todo lo demás de ADR-018 se queda como está: inalterable por trigger, correcciones con motivo, la
-   propuesta de hora por mediana. Los tramos que **ya** se registraron como olvido siguen siendo lo que
-   son; no se reescribe historia. Revisa el export PDF/CSV con un tramo de noche y con la noche del
-   cambio de hora (25-10-2026: 22:00→08:00 son 11 h).
+8. **El fichaje entiende los turnos.** Desde #45 la salida olvidada se decide por duración en
+   `esSalidaOlvidada` con el máximo del tenant (16 h). Se **amplía esa misma función** (sigue siendo el
+   único sitio que decide; nada de un segundo criterio en otra ruta):
+   - **con turno planificado**: olvidada si ha pasado el fin de su turno más un margen (parámetro del
+     tenant, por defecto 4 h). La noche de 22:00 a 08:00 sigue cerrándose de un toque, como ya hace.
+   - **sin turno planificado** (el colegio, quien no tenga cuadrante): exactamente lo de hoy,
+     `fichaje_max_open_hours`. No se toca ni se duplica.
+   El margen va junto a `fichaje_max_open_hours` y con el mismo trato (rango con CHECK y en el schema
+   de la ruta, se ajusta desde super-admin). Todo lo demás de ADR-018 y de #45 se queda como está:
+   inalterable por trigger, correcciones con motivo, la propuesta de hora por mediana, el tramo
+   pertenece al día en que empezó. Los tramos que **ya** se registraron como olvido siguen siendo lo
+   que son; no se reescribe historia. Lo nuevo de verdad aquí es el **planificado frente a fichado**
+   (punto 9) y que «sigue dentro pasada su hora» avise antes de las 16 h.
 9. **Planificado frente a fichado.** En «Hoy»: quién tenía turno y no ha fichado pasada la
    tolerancia (parámetro, por defecto 15 min), quién ha fichado sin turno y quién sigue dentro pasada
    su hora. En el mes, por persona: horas planificadas, horas fichadas y diferencia. En el export del
@@ -156,13 +163,15 @@ Nóminas. Fusionar `StaffProfile` o los roles de cuidado con la ficha (decisión
   08–15 (salta el descanso de 12 h), noche seguida de tarde (no salta), semana sin día y medio libre,
   turno de noche sin la cobertura mínima, ratio con 48 ocupadas y 9 jornadas completas (salta) y con
   10 (no), persona planificada antes de su alta, horas de más sobre jornada contratada.
-- Fichaje: entrada 22:00 con turno N y salida 07:58 del día siguiente → se cierra sin corrección;
-  la misma sin turno → se cierra (menos de 16 h); entrada 08:00 con turno M y nada hasta las 10:00 del
-  día siguiente → salida olvidada. La noche del 25-10-2026 cuenta 11 h en el export.
+- Fichaje (los tests de `esSalidaOlvidada` y los e2e de #45 siguen verdes sin tocarlos): entrada
+  08:00 con turno M de 08:00 a 15:00 y nada a las 19:01 → olvidada (fin + 4 h), aunque lleve menos de
+  16 h; la misma sin turno → no olvidada hasta las 16 h; entrada 22:00 con turno N y salida 07:58 →
+  se cierra sin corrección; la noche del 25-10-2026 (cambio de hora) cuenta 11 h en el export y en
+  planificado frente a fichado.
 - Importar: CSV con 21 filas sobre 21 fichas que sólo tienen el nombre completo → completa 21, crea
   0; repetir → 0 cambios; una celda vacía no borra; una fila con fecha `2026-10-01` → error de fila
   legible; BOM y `;` funcionan.
-- **Sabotajes**: publicar un cuadrante con avisos sin confirmar · editar una celda publicada sin
+- **Sabotajes**: decidir el olvido fuera de `esSalidaOlvidada` · publicar un cuadrante con avisos sin confirmar · editar una celda publicada sin
   motivo · intentar borrar una fila del registro de cambios por SQL · importar 5.000 filas (límite y
   mensaje) · un turno sin hora de fin · dos turnos del tenant que se solapan · ver el cuadrante de
   otra empresa desde `/fichaje/v1`.
