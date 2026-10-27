@@ -81,6 +81,8 @@ import {
   sitioTextoDeAccion,
   sitioValorDeRegistro,
   sitioZonaDeFoto,
+  sitioDniDeEmpleado,
+  sitioAfiliacionDeEmpleado,
 } from "../src/clinica/cripto-campos.js";
 import {
   FUERA_DE_PETICION,
@@ -183,6 +185,14 @@ const COLUMNAS: Columna[] = [
   // ── residencia-5 · el parte de relevo ─────────────────────────────
   { nombre: "sitioContenidoDeRelevo", sitio: sitioContenidoDeRelevo, tabla: "handovers", columna: "content", lectura: "TEXTO" },
   { nombre: "sitioResumenTardio", sitio: sitioResumenTardio, tabla: "handover_late_additions", columna: "resumen", lectura: "TEXTO" },
+  // ── personal-1 · la ficha de personal ─────────────────────────────
+  //
+  // Un DNI que no se descifra tiene que dejar su hueco marcado y su línea
+  // igual que una nota clínica: la ficha se abre, se ve «(este dato no se
+  // puede leer)» en el DNI y alguien mira por qué. Esconderlo sería
+  // borrar la única pista.
+  { nombre: "sitioDniDeEmpleado", sitio: sitioDniDeEmpleado, tabla: "employees", columna: "dni", lectura: "TEXTO" },
+  { nombre: "sitioAfiliacionDeEmpleado", sitio: sitioAfiliacionDeEmpleado, tabla: "employees", columna: "nss", lectura: "TEXTO" },
 ];
 
 /** Lee la columna por su camino de verdad, con la clave equivocada. */
@@ -214,20 +224,28 @@ function leerConLaClaveMala(c: Columna, filaId: string): unknown {
     : leerTexto({ cifrado, claro: null }, DEK_A, sitio);
 }
 
-describe("las veinticuatro columnas cifradas dejan su línea", () => {
-  it("son VEINTICUATRO, y la tabla las nombra", () => {
-    // La cabecera de `cripto-campos.ts` dice «Veinticuatro». Si un bloque
-    // añade la veinticinco y no la añade aquí, esto falla y dice cuántas
-    // hay — que es mejor que un test que pasa sin cubrir la nueva.
+describe("las veintiséis columnas cifradas dejan su línea", () => {
+  it("son VEINTISÉIS, y la tabla las nombra", () => {
+    // Si un bloque añade una columna cifrada y no la añade aquí, esto
+    // falla y dice cuántas hay — que es mejor que un test que pasa sin
+    // cubrir la nueva.
+    //
+    // **No son las treinta y dos de `cripto-campos.ts`, y conviene no
+    // esconderlo**: faltan las seis de calidad-1, que ese bloque añadió a
+    // `residencia-1b-cifrado.test.ts` (el inventario que cuenta los CHECK
+    // del SQL) y no a este otro, que es el que comprueba el HUECO y la
+    // LÍNEA de cada una. personal-1 añade las suyas a los dos; las seis
+    // de calidad siguen sin pasar por aquí y están en las dudas abiertas
+    // del done.
     expect(
       COLUMNAS.map((c) => c.nombre).join(", "),
-      "la cabecera de cripto-campos.ts dice veinticuatro",
+      "cada columna cifrada tiene que dejar su hueco y su línea",
     ).toBeTruthy();
-    expect(COLUMNAS).toHaveLength(24);
+    expect(COLUMNAS).toHaveLength(26);
     // Y ninguna repetida: dos entradas con la misma tabla y columna serían
     // una columna sin cubrir disfrazada de dos.
     const claves = COLUMNAS.map((c) => `${c.tabla}.${c.columna}`);
-    expect(new Set(claves).size).toBe(24);
+    expect(new Set(claves).size).toBe(26);
   });
 
   for (const c of COLUMNAS) {

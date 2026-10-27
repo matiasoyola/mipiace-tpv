@@ -3,7 +3,8 @@
 // Nueve columnas de la clínica (clinica-7), seis de la residencia
 // (residencia-1b, D-63), dos del registro de cuidados (residencia-3),
 // cinco del libro de incidencias (residencia-4), dos del relevo
-// (residencia-5) y seis de calidad (calidad-1). Treinta.
+// (residencia-5), seis de calidad (calidad-1) y dos de la ficha de
+// personal (personal-1). Treinta y dos.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -486,6 +487,50 @@ export function sitioMotivoDeOcupacion(
     tabla: "bed_assignments",
     columna: "reason",
     filaId: id,
+  };
+}
+
+// ── personal-1 · la ficha de personal ────────────────────────────────
+//
+// Los DOS datos de la ficha con los que se puede hacer daño a la persona
+// fuera de la empresa: un DNI y un número de afiliación son lo que hace
+// falta para suplantarla ante la Administración. La categoría, la jornada
+// y las fechas se quedan en claro, y eso es lo que permite que el
+// cuadrante las cuente sin tocar una clave.
+//
+// **Dos columnas lógicas distintas**, y no una «identificación»: con el
+// mismo nombre lógico, el nº de afiliación se podría copiar a la columna
+// del DNI y descifraría. Mismo argumento exacto que `reason` /
+// `close_reason` en `care_plan_items`.
+//
+// El id de fila es el `employees.id`, que ya existe cuando se escribe el
+// DNI (la ficha se crea con el nombre y se completa después), así que
+// éstas no necesitan `nuevoIdDeFila()` — como las tres de
+// `resident_profiles`, y por la misma razón: el id se sabe antes.
+
+/** El DNI/NIE de quien ficha. */
+export function sitioDniDeEmpleado(
+  tenantId: string,
+  employeeId: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "employees",
+    columna: "dni",
+    filaId: employeeId,
+  };
+}
+
+/** Y su nº de afiliación a la Seguridad Social. */
+export function sitioAfiliacionDeEmpleado(
+  tenantId: string,
+  employeeId: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "employees",
+    columna: "nss",
+    filaId: employeeId,
   };
 }
 

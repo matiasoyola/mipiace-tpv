@@ -68,6 +68,8 @@ import {
   sitioCierreDeAccionCorrectiva,
   sitioNotaDeEvidencia,
   sitioNotaDeVerificacion,
+  sitioDniDeEmpleado,
+  sitioAfiliacionDeEmpleado,
   sitioNotaDeRegistro,
   sitioNssDeResidente,
   sitioRespuestaDeFamilia,
@@ -145,6 +147,11 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     ["cierre de la acción correctiva", sitioCierreDeAccionCorrectiva, "corrective_actions", "closing_note"],
     ["nota de la evidencia", sitioNotaDeEvidencia, "corrective_action_evidences", "note"],
     ["nota de la verificación", sitioNotaDeVerificacion, "effectiveness_verifications", "note"],
+    // personal-1 · la ficha de personal. **Dos columnas lógicas y no una
+    // «identificación»**: con el mismo nombre lógico, el nº de afiliación
+    // se podría copiar a la columna del DNI y descifraría.
+    ["DNI del empleado", sitioDniDeEmpleado, "employees", "dni"],
+    ["afiliación del empleado", sitioAfiliacionDeEmpleado, "employees", "nss"],
   ];
 
   it.each(SITIOS)("%s → tenant|%s|%s|fila", (_, sitioDe, tabla, columna) => {
@@ -153,7 +160,7 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     );
   });
 
-  it("son TREINTA, y no se añade una columna cifrada sin su sitio", () => {
+  it("son TREINTA Y DOS, y no se añade una columna cifrada sin su sitio", () => {
     // El CHECK de formato (`~ '^c[0-9]+:…'`) es la marca de una columna
     // cifrada con una DEK: se cuentan los de TODAS las migraciones y se
     // comparan con los sitios de este inventario.
