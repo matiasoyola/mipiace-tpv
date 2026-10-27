@@ -159,11 +159,24 @@ J. **La habitación se elige en un plano, no en una lista** (lo pidió Matías e
    la suya. Un editor de texto sencillo (párrafos, negrita, listas y huecos), no un procesador de
    textos. La lista de plantillas (pantalla 8) dice de cada una cuándo se pide, quién firma y su
    **estado**: «En uso · vN» o «Falta vuestro texto»; toda la fila abre la plantilla.
-7. **Los textos legales son del centro.** No se inventan cláusulas: Mi Piace carga la primera vez los
-   Word que use el centro (contrato de estancia, reglamento de régimen interior, autorización de
-   imágenes, consentimiento de sujeciones…) convirtiéndolos en plantillas. La siembra trae **sólo**
-   el mandato SEPA (texto normalizado) y, para el resto, plantillas **marcadas «pendiente del texto
-   del centro»** que no se pueden usar hasta que se aprueben.
+7. **Los textos los escribe Mi Piace, desde cero, y los aprueba el centro** (decidido por Matías el
+   27-10-2026: no se parte de los Word antiguos del centro, que estaban desfasados —el contrato de
+   2021 citaba la LOPD 15/1999 y sometía a la familia al fuero del centro—). **La siembra son las
+   plantillas de `docs/residencia/plantillas/`** (léelas enteras, empezando por `00-LEEME.md`):
+   contrato de estancia (condiciones generales) + anexo económico de plaza privada o de plaza
+   concertada (se elige por la condición del guion) · reglamento de régimen interior con su resumen
+   en lectura fácil · protección de datos (información del art. 13 RGPD y tres consentimientos con
+   sí/no) · imagen (un sí/no por uso) · consentimiento de sujeción (uno por medida, nunca genérico) ·
+   salidas · declaración de guardador de hecho · inventario de pertenencias · mandato SEPA. **La lista
+   de huecos de `00-LEEME.md` es la lista cerrada** de `{…}` que ofrece el editor. Los `[corchetes]`
+   no son huecos: son texto que el centro escribe antes de aprobar, y **una plantilla con algún
+   `[ ]` no se puede aprobar** (el editor los señala). Todas entran en estado **«Borrador ·
+   pendiente de revisión jurídica»** (como `pendienteDeValidar` de clinica-4) y no se pueden usar
+   para firmar hasta que la dirección del centro la apruebe, lo que publica la versión 1. Los
+   comentarios `<!-- si … -->` / `<!-- fin -->` marcan párrafos condicionados (firma un
+   representante, plaza temporal, paga por recibo, hay DPD): el generador los incluye o los quita.
+   Las marcas ☐ son casillas que se contestan en la firma, una a una, y se guardan como datos (sí/no
+   por consentimiento), no como dibujo.
 8. **Preparar un documento** (pantalla 2 del mockup): el programa rellena la plantilla con la ficha y
    enseña la vista previa con **lo que viene de la ficha resaltado**. **Si falta un dato, no deja
    generarlo** y lleva al campo (el mismo `ANCLA_DEL_CAMPO` de alta-minima). Lo que dice el
@@ -222,8 +235,8 @@ J. **La habitación se elige en un plano, no en una lista** (lo pidió Matías e
 ## Fuera de alcance (declarado)
 
 Firma cualificada y sello de tiempo cualificado · leer documentos de otros países o idiomas · un editor tipo Word · el formulario del inventario de
-pertenencias y el PAI (sus bloques) · contratos de personal · enviar nada a la Junta · la carga de los
-Word del centro (la hace Mi Piace con la herramienta de plantillas cuando esté).
+pertenencias y el PAI (sus bloques) · contratos de personal · enviar nada a la Junta · la revisión
+jurídica de los textos (la encarga el centro; el programa sólo impide usarlos sin aprobar).
 
 ## Cómo se cierra
 

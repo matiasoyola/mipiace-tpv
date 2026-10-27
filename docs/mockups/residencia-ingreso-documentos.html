@@ -956,18 +956,20 @@
         <table class="tp">
           <thead><tr><th>Documento</th><th>Cuándo se pide</th><th>Quién firma</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            <tr><td><b>Contrato de estancia</b></td><td>Siempre</td><td>Residente o representante, y el centro</td><td><span class="tag g">En uso · v3</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
-            <tr><td><b>Reglamento de régimen interior</b></td><td>Siempre</td><td>Residente o representante</td><td><span class="tag g">En uso · v2</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Contrato de estancia</b></td><td>Siempre</td><td>Residente o representante, y el centro</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Anexo económico · plaza privada</b></td><td>Plaza privada o temporal</td><td>Residente o representante, y el centro</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Anexo económico · plaza concertada</b></td><td>Plaza concertada</td><td>Residente o representante, y el centro</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Reglamento de régimen interior</b></td><td>Siempre (se entrega)</td><td>—</td><td><span class="tag a">Borrador · pendiente de revisión</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
             <tr><td><b>Protección de datos</b></td><td>Siempre</td><td>Residente o representante</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
-            <tr><td><b>Consentimiento de imagen</b></td><td>Siempre (puede decir que no)</td><td>Residente o representante</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
-            <tr><td><b>Mandato SEPA</b></td><td>Si paga por recibo</td><td>Titular de la cuenta</td><td><span class="tag g">En uso · v2</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
-            <tr><td><b>Salidas autorizadas</b></td><td>Siempre</td><td>Residente o representante</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Imagen</b></td><td>Siempre (un sí o no por uso)</td><td>Residente o representante</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Consentimiento de sujeción</b></td><td>Cada vez que se prescribe una (una por medida)</td><td>Residente o representante, y el médico</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Salidas del centro</b></td><td>Siempre</td><td>Residente o representante</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
             <tr><td><b>Declaración de guardador de hecho</b></td><td>Si firma un guardador de hecho</td><td>El guardador</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
-            <tr><td><b>Consentimiento de sujeción</b></td><td>Si se prescribe una sujeción (uno por tipo)</td><td>Residente o representante, y el médico</td><td><span class="tag a">Falta vuestro texto</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
             <tr><td><b>Inventario de pertenencias</b></td><td>Siempre</td><td>Auxiliar y familia</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
+            <tr><td><b>Mandato SEPA</b></td><td>Si paga por recibo</td><td>Titular de la cuenta</td><td><span class="tag g">En uso · v1</span></td><td class="chev"><i data-lucide="chevron-right"></i></td></tr>
           </tbody>
         </table>
-        <p class="nota-c">Una plantilla con «Falta vuestro texto» no se usa hasta que se carga el Word del centro y se aprueba: el guion la salta y lo dice.</p>
+        <p class="nota-c">Todas llegan escritas por Mi Piace como <b>borrador pendiente de revisión jurídica</b>. Se usan cuando la dirección completa lo que le toca (los <b>[ ]</b>: horarios, precios, plazos propios) y las aprueba. Aquí, el reglamento todavía tiene huecos por rellenar.</p>
       </div>
       <div class="card" style="margin-top:14px">
         <h2>Así se escribe una plantilla</h2>
@@ -989,7 +991,7 @@ const LEY={
  presencial:`<b>Firma aquí.</b> En la tablet o en la pantalla del despacho. No se puede firmar sin haber llegado al final del texto. Queda quién firma, en calidad de qué y quién le explicó el documento. Prueba a firmar con el ratón.`,
  distancia:`<b>Firma a distancia.</b> Enlace por SMS y email, lectura completa, código al móvil y firma con el dedo. La familia recibe su copia sin pasar por la residencia.`,
  pdf:`<b>El PDF firmado.</b> El documento más una hoja final de pruebas: quién, cuándo, cómo, quién informó y la huella del documento. Queda en el expediente, no se borra ni se edita: si algo cambia, se firma un anexo.`,
- plantillas:`<b>Plantillas del centro</b> (en Configuración). Cada documento con cuándo se pide, quién lo firma y si está en uso o le falta el texto del centro. Toda la fila abre la plantilla. Huecos que se rellenan con la ficha; versionadas.`
+ plantillas:`<b>Plantillas del centro</b> (en Configuración). Llegan escritas por Mi Piace (contrato con su anexo económico, reglamento, datos, imagen, sujeción, salidas, guardador, inventario, SEPA) como borrador pendiente de revisión jurídica; la dirección rellena sus [ ] y las aprueba. Cada una dice cuándo se pide, quién la firma y su estado; toda la fila la abre. Versionadas.`
 };
 function ver(v){
   document.querySelectorAll(".vista").forEach(s=>s.classList.toggle("on",s.id==="v-"+v));
