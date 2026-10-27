@@ -351,9 +351,24 @@ portátil (ningún test de unidad toca SQL en crudo) y rojo en el e2e contra
 Postgres de verdad. Arreglado con literales sin tipar, que es lo que
 `clinica/cobros-pendientes.ts` lleva meses haciendo con `t.status = 'DRAFT'`.
 
-Ahora tiene su e2e en `cita-a-caja.e2e.ts` (4b): la cifra del día es la del
-ticket que el test 3 acaba de cobrar (6300 céntimos), y una cita cuyo borrador
-sigue en DRAFT **no** cuenta como cobrada.
+Ahora tiene su e2e propio, `agenda-cobrado.e2e.ts`, con su tenant: una cita
+cobrada sale con los céntimos del ticket, una con el borrador en DRAFT no, una
+sin ticket no está en el mapa (que no es lo mismo que «0 €»), y la cuarta es la
+que el banco aprendió a golpes —
+
+**En una cuenta EN ENSAYO no se enseña dinero.** Antes de que el comercio
+arranque (`fiscal_go_live_at` nulo, ADR-021) **todo cobro nace `TEST`**
+(`esCobroDeEnsayo`) y `purgeTestData` lo borra al activar: nunca fue dinero, y
+la cifra del día no lo cuenta. Lo descubrió el segundo e2e rojo — la primera
+versión de este banco vivía dentro de `cita-a-caja.e2e.ts`, cuyo tenant está en
+ensayo, así que el ticket era `TEST` y la cifra salía vacía **con la consulta ya
+arreglada**. El fallo decía «expected undefined to be 6300», que no distingue un
+rango mal calculado de un estado que no se cuenta; sólo lo dijo al afirmar los
+eslabones por separado.
+
+Tenant propio y no el de `cita-a-caja.e2e.ts`: aquel fichero encadena nueve
+tests sobre el mismo ticket y censa borradores huérfanos, así que una cita de
+más le descuadra las cuentas.
 
 **No viaja en la caché offline**, como sus cuatro vecinas y por la razón del
 dinero: una cifra vieja de «cobrado hoy» sobre un día que ha seguido cobrando es
@@ -532,9 +547,14 @@ pantalla reventaba al mirar el día de la cita.
 - **Suite entera desde la raíz**: `pnpm vitest run` → **478 ficheros, 6968
   tests, 10 saltados, 0 rojos.**
 - **`tsc` paquete a paquete**: `apps/tpv-web` y `apps/api`, los dos limpios.
-- **e2e contra Postgres real**: la primera pasada salió ROJA y encontró un 500
-  en `GET /agenda` que ningún test de unidad podía ver (ver §8). El e2e que lo
-  cubre está en `cita-a-caja.e2e.ts`.
+- **e2e contra Postgres real**: hicieron falta **dos pasadas rojas** y las dos
+  encontraron algo que ningún test de unidad podía ver (§8) — un 500 en
+  `GET /agenda` por comparar un enum con `text`, y después la regla de que en
+  una cuenta en ensayo todo cobro es `TEST`. El banco que lo cubre es
+  `agenda-cobrado.e2e.ts`.
+- **Sin Docker en el portátil no se puede correr el e2e en local** (`docker ps`
+  falla → Docker Desktop apagado), así que el PR fue el primer sitio donde se
+  supo. Está dicho aquí para que la próxima vez se levante antes.
 - Los dos ficheros puros, además, con `TZ=America/New_York`.
 
 ### Lo que se tocó de bancos existentes, y por qué
