@@ -96,16 +96,30 @@ I. **En el asistente** (revisado el 27-10-2026): en «Su salud al entrar», si q
    (DUE)», que le pone el paso en su panel; en «Las firmas», «Firmar los n seguidos aquí» (uno tras
    otro, con la lectura completa de cada uno) o «Mandárselos a …».
 J. **La habitación se elige en un plano, no en una lista** (lo pidió Matías el 27-10-2026). El paso
-   «Su habitación» enseña **el plano de la planta**: una pestaña por planta con cuántas camas libres
-   tiene, las habitaciones a los dos lados del pasillo en su orden, y cada cama como un cuadro:
-   ocupada (gris, con las iniciales de quien la ocupa), libre y revisada (verde), libre sin revisar
-   (ámbar punteado: se puede elegir y se avisa a mantenimiento) y **la propuesta del programa ya
-   marcada**, con su porqué debajo («a 8 m del control de enfermería; tiene disfagia y Alzheimer;
-   comparte con alguien de su misma dependencia»). Tocar una cama libre la elige y cambia el porqué.
-   En el pasillo, los hitos que el centro marque (control de enfermería, comedor, ascensor, salida
-   al jardín). **El plano es esquemático y sale solo** de las plantas, habitaciones y camas que ya
-   existen (residencia-1): nadie tiene que dibujarlo; los hitos y el lado del pasillo de cada
-   habitación se ajustan en *Configuración → Edificio*. Dibujar el plano real a escala queda fuera.
+   «Su habitación» enseña **el edificio tal como es**. En Jardín de Gredos: una sola planta y 27
+   habitaciones en tres alas en U (ala izquierda 20-27 bajando, ala de arriba 19…5 de izquierda a
+   derecha, ala derecha 4…1 bajando), **con las habitaciones a un solo lado del pasillo** y la zona
+   común en medio. Cada cama es un cuadro: ocupada (gris, con las iniciales de quien la ocupa), libre
+   y revisada (verde), libre sin revisar (ámbar punteado: se puede elegir y se avisa a mantenimiento)
+   y **la propuesta del programa ya marcada**, con su porqué debajo («a 8 m del control de
+   enfermería; tiene disfagia y Alzheimer; comparte con alguien de su misma dependencia»). Tocar una
+   cama libre la elige y cambia el porqué. En el pasillo, los hitos que el centro marque (control de
+   enfermería, baño geriátrico, comedor, salida al jardín). Con más de una planta, una pestaña por
+   planta con sus camas libres.
+   **El plano es esquemático y sale solo** de los datos: cada habitación tiene su **ala** y su
+   **orden dentro del ala**, y cada ala su posición (izquierda, arriba, derecha, abajo) y el lado del
+   pasillo en que quedan las habitaciones (uno o los dos). Añade esos campos a `Room` y a una tabla
+   de alas por planta, con migración; un centro sin alas se pinta como una sola fila. Dibujar el
+   plano real a escala queda fuera.
+   **Número y camas se cambian en el propio plano, en dos toques** (lo pidió Matías el 27-10-2026):
+   *Configuración → Edificio* usa el mismo plano y, para dirección, el asistente también trae
+   «Editar habitaciones». En ese modo se toca una habitación y debajo salen su **número** (texto
+   libre: «12», «12 bis»), sus **camas** con un − / + (de 1 a 4; las camas nuevas nacen libres y
+   sin revisar) y **«Fuera de servicio»**. Se guarda solo, sin botón, y queda en el registro de
+   quién lo cambió. No se puede quitar una cama ocupada («Cambia antes de habitación a quien la
+   ocupa») ni repetir un número de habitación; una habitación sin uso se marca fuera de servicio,
+   no se borra. La API ya tiene `PATCH /residencia/habitaciones/:roomId` y `/camas`: úsala; lo que
+   falta es la pantalla. Arrastrar para reordenar dentro del ala es deseable, no obligatorio.
    **El mismo selector** sirve para «Habitación» en la cabecera de la ficha (cambio de habitación),
    que deja su línea en Estancia.
 

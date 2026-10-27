@@ -481,25 +481,50 @@
   @media (max-width:820px){ .tp th:nth-child(2),.tp td:nth-child(2),.tp th:nth-child(3),.tp td:nth-child(3){display:none} .espera{width:auto} }
 
   /* el plano de la planta (paso «Su habitación») */
-  .plantas{display:flex;gap:6px;margin:-8px 0 14px;flex-wrap:wrap}
-  .plantas span{height:36px;padding:0 13px;border-radius:11px;border:1px solid var(--line);display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);cursor:pointer}
-  .plantas span.on{background:var(--ink);border-color:var(--ink);color:#fff}
-  .plantas em{font-style:normal;font-size:11.5px;color:var(--green-tx);background:var(--green-bg);border-radius:7px;padding:1px 6px}
-  .plantas span.on em{background:rgba(255,255,255,.18);color:#fff}
+  .pl-cab span{white-space:nowrap}
+  .pl-cab{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin:-6px 0 10px;font-size:13px;color:var(--muted)}
+  .pl-cab em{font-style:normal;font-size:11.5px;color:var(--green-tx);background:var(--green-bg);border-radius:7px;padding:1px 7px;margin-left:4px}
+  .pl-cab a{display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 12px;border-radius:10px;border:1px solid var(--line);color:var(--ink-soft);cursor:pointer;font-size:13px;background:#fff}
+  .pl-cab a svg{width:14px;height:14px}
+  .pl-cab a.on{background:var(--ink);border-color:var(--ink);color:#fff}
   .plano-w{overflow-x:auto;margin:0 -4px;padding:4px}
-  .plano{min-width:560px;background:var(--stone);border:1px solid var(--line);border-radius:18px;padding:10px}
-  .fila-h{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-  .hb{background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px 6px 7px;text-align:center}
-  .hb>b{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:5px}
+  .plano{background:var(--stone);border:1px solid var(--line);border-radius:18px;padding:10px}
+  .u{min-width:560px;display:grid;grid-template-columns:112px 1fr 112px}
+  .u .top{grid-column:1/4;display:flex;gap:4px}
+  .u .pas-h{grid-column:1/4;display:flex;justify-content:space-between;align-items:center;padding:7px 10px;margin:4px 0;background:#fff;border:1px dashed var(--line);border-radius:8px;font-size:11.5px;color:var(--muted)}
+  .u .col{display:flex;gap:4px}
+  .u .col .hbs{display:flex;flex-direction:column;gap:4px;flex:1}
+  .u .pas-v{width:14px;border-radius:8px;background:#fff;border:1px dashed var(--line)}
+  .u .zc{margin:0 10px;border:1.5px dashed var(--line);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--muted);text-align:center;padding:10px}
+  .u .zc b{font-weight:600;color:var(--ink-soft);font-size:12.5px}
+  .u .zc div{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  .hb{background:#fff;border:1px solid var(--line);border-radius:10px;padding:5px 3px 6px;text-align:center}
+  .hb>b{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:4px}
   .cm{display:flex;gap:4px;justify-content:center}
+  .top .hb{flex:1;min-width:30px;padding:5px 1px 6px}
+  .top .c{width:24px;height:24px;font-size:9.5px;border-radius:7px}
+  .u .col .c{width:26px;height:26px}
+  .top .cm{flex-direction:column;align-items:center}
+  .col .hb{display:flex;align-items:center;gap:6px;padding:5px 7px}
+  .col .hb>b{margin:0;min-width:18px;text-align:left}
   .c{width:28px;height:28px;border-radius:8px;display:inline-grid;place-items:center;font-style:normal;font-size:10.5px;font-weight:600}
   .c.o{background:#E2E8F0;color:#94A3B8}
   .c.l{background:var(--green-bg);color:var(--green-tx);border:1.5px solid #6EE7B7;cursor:pointer}
   .c.s{background:var(--amber-bg);color:var(--amber-tx);border:1.5px dashed var(--amber-line);cursor:pointer}
   .c.rec{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--coral)}
   .c.on{background:var(--coral);border-color:var(--coral);color:#fff}
-  .hb.ind .c{width:40px}
-  .pasillo{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 4px;font-size:11.5px;color:var(--muted)}
+  .plano.ed .hb{cursor:pointer;border-style:dashed;border-color:#94A3B8}
+  .plano.ed .hb:hover,.plano.ed .hb.sel{border:1.5px solid var(--coral);box-shadow:0 0 0 3px var(--coral-bg,#FFF1EE)}
+  .plano.ed .c{cursor:pointer}
+  .hb.fs{opacity:.45}
+  .ed-hab{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px}
+  .ed-hab label{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink-soft)}
+  .ed-hab input[type=text]{width:64px;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px;font:inherit;font-weight:600}
+  .stp{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .stp button{width:38px;height:38px;border:0;background:#fff;font-size:18px;cursor:pointer;color:var(--ink)}
+  .stp b{min-width:30px;text-align:center}
+  .ed-hab .nota{flex-basis:100%;font-size:12.5px;color:var(--muted)}
+  .ed-hab .nota.am{color:var(--amber-tx)}
   .hito{display:inline-flex;align-items:center;gap:5px}.hito svg{width:13px;height:13px}
   .hito.enf{color:var(--coral-dark);font-weight:500}
   .ley-pl{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:10px 0 14px}
@@ -651,18 +676,40 @@
       <template id="z-7">
         <h2>Su habitación</h2>
         <p class="fz-sub">Toca una cama libre. La que te propone el programa ya está marcada.</p>
-        <div class="plantas"><span class="on">Planta baja <em>3 libres</em></span><span>Primera <em>1</em></span><span>Segunda <em>1</em></span></div>
-        <div class="plano-w"><div class="plano">
-          <div class="fila-h"><div class="hb"><b>1</b><div class="cm"><i class="c o" title="Ocupada">EM</i><i class="c o" title="Ocupada">JR</i></div></div><div class="hb"><b>2</b><div class="cm"><i class="c o" title="Ocupada">PL</i><i class="c o" title="Ocupada">AN</i></div></div><div class="hb"><b>3</b><div class="cm"><i class="c o" title="Ocupada">AR</i><i class="c l" onclick="elegirCama(this,'3B')" title="Libre">B</i></div></div><div class="hb ind"><b>4</b><div class="cm"><i class="c o" title="Ocupada">FC</i></div></div><div class="hb"><b>5</b><div class="cm"><i class="c o" title="Ocupada">CM</i><i class="c o" title="Ocupada">AG</i></div></div><div class="hb"><b>6</b><div class="cm"><i class="c o" title="Ocupada">TS</i><i class="c o" title="Ocupada">MV</i></div></div><div class="hb"><b>7</b><div class="cm"><i class="c o" title="Ocupada">LR</i><i class="c o" title="Ocupada">IS</i></div></div></div>
-          <div class="pasillo"><span class="hito"><i data-lucide="door-open"></i>Jardín</span><span class="hito"><i data-lucide="utensils"></i>Comedor</span><span class="hito enf"><i data-lucide="cross"></i>Control de enfermería</span><span class="hito"><i data-lucide="arrow-up-down"></i>Ascensor</span></div>
-          <div class="fila-h"><div class="hb"><b>8</b><div class="cm"><i class="c o" title="Ocupada">DB</i><i class="c o" title="Ocupada">RM</i></div></div><div class="hb ind"><b>9</b><div class="cm"><i class="c s" onclick="elegirCama(this,'9')" title="Libre"></i></div></div><div class="hb"><b>10</b><div class="cm"><i class="c o" title="Ocupada">ER</i><i class="c o" title="Ocupada">GP</i></div></div><div class="hb"><b>11</b><div class="cm"><i class="c o" title="Ocupada">JM</i><i class="c o" title="Ocupada">PC</i></div></div><div class="hb"><b>12</b><div class="cm"><i class="c l rec on" onclick="elegirCama(this,'12A')" title="Libre">A</i><i class="c o" title="Ocupada">RP</i></div></div><div class="hb"><b>13</b><div class="cm"><i class="c o" title="Ocupada">VH</i><i class="c o" title="Ocupada">MA</i></div></div><div class="hb"><b>14</b><div class="cm"><i class="c o" title="Ocupada">EM</i><i class="c o" title="Ocupada">LP</i></div></div></div>
-        </div></div>
+        <div class="pl-cab"><span>Planta baja · 27 habitaciones<em>4 libres</em></span><a onclick="modoEd(this)"><i data-lucide="pencil"></i>Editar habitaciones</a></div>
+        <div class="plano-w"><div class="plano"><div class="u">
+          <div class="top"><div class="hb" data-n="19" onclick="editarHab(this)"><b>19</b><div class="cm"><i class="c o" title="Ocupada">FP</i></div></div><div class="hb" data-n="18" onclick="editarHab(this)"><b>18</b><div class="cm"><i class="c o" title="Ocupada">DG</i><i class="c o" title="Ocupada">GP</i></div></div><div class="hb" data-n="17" onclick="editarHab(this)"><b>17</b><div class="cm"><i class="c o" title="Ocupada">PJ</i><i class="c o" title="Ocupada">AR</i></div></div><div class="hb" data-n="16" onclick="editarHab(this)"><b>16</b><div class="cm"><i class="c o" title="Ocupada">CA</i><i class="c o" title="Ocupada">SR</i></div></div><div class="hb" data-n="15" onclick="editarHab(this)"><b>15</b><div class="cm"><i class="c o" title="Ocupada">LP</i><i class="c o" title="Ocupada">CL</i></div></div><div class="hb" data-n="14" onclick="editarHab(this)"><b>14</b><div class="cm"><i class="c o" title="Ocupada">GG</i><i class="c o" title="Ocupada">MJ</i></div></div><div class="hb" data-n="13" onclick="editarHab(this)"><b>13</b><div class="cm"><i class="c o" title="Ocupada">AS</i><i class="c o" title="Ocupada">LG</i></div></div><div class="hb" data-n="12" onclick="editarHab(this)"><b>12</b><div class="cm"><i class="c l rec on" onclick="elegirCama(this,'12A')" title="Libre">A</i><i class="c o" title="Ocupada">EA</i></div></div><div class="hb" data-n="11" onclick="editarHab(this)"><b>11</b><div class="cm"><i class="c o" title="Ocupada">AM</i><i class="c o" title="Ocupada">CJ</i></div></div><div class="hb" data-n="10" onclick="editarHab(this)"><b>10</b><div class="cm"><i class="c o" title="Ocupada">JG</i><i class="c o" title="Ocupada">GV</i></div></div><div class="hb" data-n="9" onclick="editarHab(this)"><b>9</b><div class="cm"><i class="c s" onclick="elegirCama(this,'9')" title="Libre"></i></div></div><div class="hb" data-n="8" onclick="editarHab(this)"><b>8</b><div class="cm"><i class="c o" title="Ocupada">AV</i><i class="c o" title="Ocupada">EL</i></div></div><div class="hb" data-n="7" onclick="editarHab(this)"><b>7</b><div class="cm"><i class="c o" title="Ocupada">SJ</i><i class="c o" title="Ocupada">LS</i></div></div><div class="hb" data-n="6" onclick="editarHab(this)"><b>6</b><div class="cm"><i class="c o" title="Ocupada">JA</i><i class="c o" title="Ocupada">TJ</i></div></div><div class="hb" data-n="5" onclick="editarHab(this)"><b>5</b><div class="cm"><i class="c o" title="Ocupada">MA</i><i class="c o" title="Ocupada">CR</i></div></div></div>
+          <div class="pas-h"><span>← Ala izquierda</span><span class="hito enf"><i data-lucide="cross"></i>Control de enfermería</span><span class="hito"><i data-lucide="bath"></i>Baño geriátrico</span><span>Ala derecha →</span></div>
+          <div class="col"><div class="hbs"><div class="hb" data-n="20" onclick="editarHab(this)"><b>20</b><div class="cm"><i class="c o" title="Ocupada">EG</i></div></div><div class="hb" data-n="21" onclick="editarHab(this)"><b>21</b><div class="cm"><i class="c o" title="Ocupada">MV</i><i class="c o" title="Ocupada">PV</i></div></div><div class="hb" data-n="22" onclick="editarHab(this)"><b>22</b><div class="cm"><i class="c o" title="Ocupada">SS</i><i class="c o" title="Ocupada">RL</i></div></div><div class="hb" data-n="23" onclick="editarHab(this)"><b>23</b><div class="cm"><i class="c o" title="Ocupada">MG</i><i class="c o" title="Ocupada">PR</i></div></div><div class="hb" data-n="24" onclick="editarHab(this)"><b>24</b><div class="cm"><i class="c o" title="Ocupada">TR</i><i class="c o" title="Ocupada">TM</i></div></div><div class="hb" data-n="25" onclick="editarHab(this)"><b>25</b><div class="cm"><i class="c o" title="Ocupada">RA</i><i class="c l" onclick="elegirCama(this,'25B')" title="Libre">B</i></div></div><div class="hb" data-n="26" onclick="editarHab(this)"><b>26</b><div class="cm"><i class="c o" title="Ocupada">AP</i><i class="c o" title="Ocupada">LV</i></div></div><div class="hb" data-n="27" onclick="editarHab(this)"><b>27</b><div class="cm"><i class="c o" title="Ocupada">CV</i></div></div></div><div class="pas-v"></div></div>
+          <div class="zc"><b>Zona común</b><div><span class="hito"><i data-lucide="utensils"></i>Comedor</span><span class="hito"><i data-lucide="coffee"></i>Cafetería</span><span class="hito"><i data-lucide="activity"></i>Terapia</span></div><span class="hito"><i data-lucide="door-open"></i>Salida al jardín</span></div>
+          <div class="col"><div class="pas-v"></div><div class="hbs"><div class="hb" data-n="4" onclick="editarHab(this)"><b>4</b><div class="cm"><i class="c o" title="Ocupada">FG</i></div></div><div class="hb" data-n="3" onclick="editarHab(this)"><b>3</b><div class="cm"><i class="c o" title="Ocupada">SA</i><i class="c l" onclick="elegirCama(this,'3B')" title="Libre">B</i></div></div><div class="hb" data-n="2" onclick="editarHab(this)"><b>2</b><div class="cm"><i class="c o" title="Ocupada">DA</i></div></div><div class="hb" data-n="1" onclick="editarHab(this)"><b>1</b><div class="cm"><i class="c o" title="Ocupada">LR</i></div></div></div></div>
+        </div></div></div>
         <div class="ley-pl"><span><i class="c l"></i>Libre</span><span><i class="c s"></i>Libre, sin revisar</span><span><i class="c o"></i>Ocupada</span><span><i class="c l rec"></i>Propuesta</span></div>
         <div class="cama-elegida" id="cama-info"><b>12 A</b> · doble, comparte con Remedios P. · a 8 m del control de enfermería<span>Recomendada: tiene disfagia y Alzheimer, mejor cerca de enfermería; Remedios tiene su misma dependencia.</span></div>
       </template>
       <script>
-        const INFO_CAMA={"12A": "<b>12 A</b> · doble, comparte con Remedios P. · a 8 m del control de enfermería<span>Recomendada: tiene disfagia y Alzheimer, mejor cerca de enfermería; Remedios tiene su misma dependencia.</span>", "3B": "<b>3 B</b> · doble, comparte con Ana R. · junto a la salida al jardín<span>Libre y revisada. Lejos del control de enfermería.</span>", "9": "<b>9</b> · individual<span class=\"am\">Sin revisar por mantenimiento: se puede elegir, y se le avisa para que la revise antes del lunes.</span>"};
-        function elegirCama(el,k){document.querySelectorAll('#fz-c .c.on').forEach(x=>x.classList.remove('on'));el.classList.add('on');document.getElementById('cama-info').innerHTML=INFO_CAMA[k];}
+        const INFO_CAMA={"12A": "<b>12 A</b> · doble, comparte con Remedios P. · a 8 m del control de enfermería<span>Recomendada: tiene disfagia y Alzheimer, mejor cerca de enfermería; Remedios tiene su misma dependencia.</span>", "3B": "<b>3 B</b> · doble, comparte con Ana R. · ala derecha, junto a la salida al jardín<span>Libre y revisada. Lejos del control de enfermería.</span>", "25B": "<b>25 B</b> · doble, comparte con Teresa S. · ala izquierda<span>Libre y revisada. Lejos del control de enfermería.</span>", "9": "<b>9</b> · individual · ala de arriba<span class=\"am\">Sin revisar por mantenimiento: se puede elegir, y se le avisa para que la revise antes del lunes.</span>"};
+        let INFO_PREV="";
+        function enEd(){const p=document.querySelector('#fz-c .plano');return p&&p.classList.contains('ed');}
+        function elegirCama(el,k){if(enEd())return;document.querySelectorAll('#fz-c .c.on').forEach(x=>x.classList.remove('on'));el.classList.add('on');document.getElementById('cama-info').innerHTML=INFO_CAMA[k]||('<b>'+k+'</b><span>Libre y revisada.</span>');}
+        function modoEd(a){const p=document.querySelector('#fz-c .plano'),i=document.getElementById('cama-info');p.classList.toggle('ed');a.classList.toggle('on');
+          if(enEd()){INFO_PREV=i.innerHTML;a.innerHTML='<i data-lucide="check"></i>Listo';i.innerHTML='<span style="margin:0">Toca una habitación para cambiar su número o sus camas. Se guarda solo.</span>';}
+          else{a.innerHTML='<i data-lucide="pencil"></i>Editar habitaciones';document.querySelectorAll('#fz-c .hb.sel').forEach(x=>x.classList.remove('sel'));i.innerHTML=INFO_PREV;}
+          lucide.createIcons();}
+        let HAB=null;
+        function editarHab(el){if(!enEd())return;document.querySelectorAll('#fz-c .hb.sel').forEach(x=>x.classList.remove('sel'));el.classList.add('sel');HAB=el;pintarEd('');}
+        function camas(){return HAB.querySelectorAll('.c').length;}
+        function pintarEd(nota,am){const n=HAB.querySelector('b').textContent,fs=HAB.classList.contains('fs');
+          document.getElementById('cama-info').innerHTML='<div class="ed-hab"><label>Habitación <input type="text" value="'+n+'" oninput="numHab(this.value)"></label><label>Camas <span class="stp"><button onclick="capHab(-1)">−</button><b>'+camas()+'</b><button onclick="capHab(1)">+</button></span></label><label><input type="checkbox" '+(fs?'checked':'')+' onchange="HAB.classList.toggle(\'fs\',this.checked)"> Fuera de servicio</label><span class="nota'+(am?' am':'')+'">'+(nota||'Los cambios se guardan solos y quedan en el registro de quién los hizo.')+'</span></div>';}
+        function numHab(v){HAB.querySelector('b').textContent=v.trim()||'?';}
+        function capHab(d){const cm=HAB.querySelector('.cm'),cs=[...cm.querySelectorAll('.c')],n=HAB.querySelector('b').textContent;
+          if(d>0){if(cs.length>=4)return pintarEd('Como mucho 4 camas por habitación.',1);
+            if(cs.length===1&&!cs[0].textContent)cs[0].textContent='A';
+            const lab='ABCD'[cs.length];const i=document.createElement('i');i.className='c l';i.title='Libre';i.textContent=lab;i.onclick=()=>elegirCama(i,n+lab);cm.appendChild(i);return pintarEd('Cama '+n+' '+lab+' añadida, libre.');}
+          if(cs.length<=1)return pintarEd('Una habitación tiene al menos una cama. Si no se usa, márcala fuera de servicio.',1);
+          const last=cs[cs.length-1];
+          if(last.classList.contains('o'))return pintarEd('No se puede quitar la cama '+n+' '+'ABCD'[cs.length-1]+': está ocupada. Cambia antes de habitación a quien la ocupa.',1);
+          last.remove();const r=[...cm.querySelectorAll('.c')];if(r.length===1&&!r[0].classList.contains('o'))r[0].textContent='';pintarEd('Cama quitada.');}
       </script>
 
       <template id="z-8">
@@ -984,7 +1031,7 @@
 
 <script>
 const LEY={
- asistente:`<b>El asistente de ingreso.</b> Pantalla completa, un paso cada vez, como un formulario de móvil. Llega casi lleno (preingreso de la familia + lectura de documentos); sólo se marca en ámbar lo que hay que revisar, y una línea arriba dice de dónde salen los datos. Lo clínico lo confirma la DUE. <b>La habitación se elige en el plano de la planta</b> (paso 7): toca una cama libre; la propuesta ya viene marcada con su porqué.`,
+ asistente:`<b>El asistente de ingreso.</b> Pantalla completa, un paso cada vez, como un formulario de móvil. Llega casi lleno (preingreso de la familia + lectura de documentos); sólo se marca en ámbar lo que hay que revisar, y una línea arriba dice de dónde salen los datos. Lo clínico lo confirma la DUE. <b>La habitación se elige en el plano</b> (paso 7): el edificio tal cual es, tres alas con las habitaciones a un lado del pasillo; toca una cama libre, la propuesta ya viene marcada con su porqué. Con «Editar habitaciones» (sólo dirección; es el mismo plano de Configuración → Edificio) se toca una habitación y se cambia su número, sus camas o se marca fuera de servicio.`,
  preingreso:`<b>Preingreso.</b> Lo que hace la familia desde casa con el enlace: datos, fotos de los documentos (el programa los lee y les pregunta si está bien), forma de pago y primeras firmas. Sólo se le pide lo que su caso necesita.`,
  guion:`<b>Cómo va el ingreso</b> (la pestaña «Documentos» de su ficha mientras dura el ingreso). Arriba, las tres fases y el siguiente paso con su botón. Debajo <b>sólo lo que falta</b>, con quién lo hace y su acción en la misma línea; las firmas de una misma persona se mandan o se firman juntas. Lo hecho, plegado («Hecho 12 · Ver»). Lo que no aplica no sale, y una línea dice por qué. Pasados los 30 días, la pestaña es la de la ficha completa.`,
  preparar:`<b>Preparar un documento.</b> El programa rellena la plantilla del centro con los datos de la ficha (resaltados). Si falta un dato, no deja generarlo y lleva al campo. Se elige si la persona firma aquí o a distancia.`,
