@@ -394,7 +394,7 @@ rojo el banco de pantalla, uno de los dos estaría probando lo que no es suyo.
 
 ## 10 · Verde
 
-- **Suite completa en local**: `480 ficheros · 6968 tests · 10 saltados`, verde.
+- **Suite completa en local**: `480 ficheros · 6970 tests · 10 saltados`, verde.
 - **e2e completo contra Postgres real** (`pnpm test:e2e`, base propia del
   worktree `mipiacetpv_clinica10_e2e`): `51 ficheros · 1198 tests`, verde. A las
   16:09 locales — ni de madrugada, que es cuando `residencia-3/4/5` dan falsos
