@@ -205,9 +205,35 @@ function porTexto(txt: string): HTMLElement | null {
   );
 }
 
-/** Abre la hoja de alta tocando «Nueva cita». */
+/** Abre el panel tocando «Dar cita» (agenda-1: era «Nueva cita»). */
 async function abrirAlta() {
-  await click(porTexto("Nueva cita")!);
+  await click(container.querySelector<HTMLElement>('[data-test="dar-cita"]')!);
+}
+
+/**
+ * Elige un servicio y pide las horas.
+ *
+ * agenda-1 · «Buscar hueco» YA NO EXISTE: la búsqueda sale de contestar
+ * «¿Cuándo?», que es un toque menos y es el objetivo del bloque. Lo que se
+ * sigue midiendo es lo mismo (punto 25 de la auditoría del 18-10: «las
+ * horas salen bajo el pliegue»): que la tira se traiga a la vista y que
+ * diga cuántas son.
+ */
+async function pedirHoras(servicio: string) {
+  // DENTRO del panel, no en toda la pantalla: en la lista del tablero 1
+  // una fila de cita también lleva el nombre del servicio, va antes en el
+  // DOM, y tocarla abriría el detalle en vez de elegir el servicio.
+  const panel = container.querySelector<HTMLElement>(
+    '[data-test="panel-dar-cita"]',
+  )!;
+  await click(
+    [...panel.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes(servicio),
+    )!,
+  );
+  await click(
+    container.querySelector<HTMLElement>('[data-test="cuando-esta-semana"]')!,
+  );
 }
 
 // ── 1 · Los servicios, por categoría ────────────────────────────────
@@ -274,9 +300,7 @@ describe("clinica-8 (17) · las horas de «Buscar hueco» se ven", () => {
       )!,
     );
     const antes = scrolls;
-    await click(
-      container.querySelector('[data-accion="buscar-hueco"]')!,
-    );
+    await pedirHoras("Quiropodia completa");
     expect(scrolls).toBeGreaterThan(antes);
     const cuantos = container.querySelector('[data-test="cuantos-huecos"]')!;
     expect(cuantos.textContent).toBe("3 huecos · toca una hora");
@@ -286,12 +310,7 @@ describe("clinica-8 (17) · las horas de «Buscar hueco» se ven", () => {
     huecos = [{ start: "2026-10-19T08:00:00.000Z" }];
     await render();
     await abrirAlta();
-    await click(
-      [...container.querySelectorAll("button")].find((b) =>
-        (b.textContent ?? "").includes("Quiropodia completa"),
-      )!,
-    );
-    await click(container.querySelector('[data-accion="buscar-hueco"]')!);
+    await pedirHoras("Quiropodia completa");
     expect(
       container.querySelector('[data-test="cuantos-huecos"]')!.textContent,
     ).toBe("1 hueco · toca la hora");
@@ -301,13 +320,10 @@ describe("clinica-8 (17) · las horas de «Buscar hueco» se ven", () => {
     huecos = [];
     await render();
     await abrirAlta();
-    await click(
-      [...container.querySelectorAll("button")].find((b) =>
-        (b.textContent ?? "").includes("Quiropodia completa"),
-      )!,
-    );
-    await click(container.querySelector('[data-accion="buscar-hueco"]')!);
+    await pedirHoras("Quiropodia completa");
     expect(container.querySelector('[data-test="cuantos-huecos"]')).toBeNull();
+    // Y en su lugar se dice POR QUÉ no hay ninguna.
+    expect(container.textContent).toContain("No hay huecos");
   });
 });
 
@@ -333,19 +349,35 @@ describe("clinica-8 (17) · «Salud de la agenda» no se le abre a la clienta", 
 // ── 4 · La columna con una sola profesional ─────────────────────────
 
 describe("clinica-8 (17) · con una sola profesional, la columna se ensancha", () => {
-  it("una columna se queda con la pantalla", async () => {
+  it("con UNA ya no hay columna: hay lista, y se queda con la pantalla", async () => {
+    // agenda-1 · decisión D1 de Matías (27-10). clinica-8 ensanchó la
+    // columna a `flex-1` para que no dejara 208 px de agenda y el resto en
+    // blanco; eso arreglaba el ancho y no el fondo del problema, que es el
+    // ALTO: una cita de 15 minutos seguía siendo una raya de 16 px. Con
+    // una profesional el día pasa a ser una lista de filas tocables y la
+    // columna desaparece.
     staff = [ROSA];
     await render();
-    const columnas = [
-      ...container.querySelectorAll('[data-columna-staff]'),
-    ] as HTMLElement[];
-    expect(columnas).toHaveLength(1);
-    expect(columnas[0]!.className).toContain("flex-1");
-    // Y el mínimo se queda en el ancho de siempre: nada encoge.
-    expect(columnas[0]!.className).toContain("min-w-44");
+    expect(container.querySelectorAll("[data-columna-staff]")).toHaveLength(0);
+    const lista = container.querySelector<HTMLElement>(
+      '[data-test="dia-en-lista"]',
+    );
+    expect(lista).not.toBeNull();
+    expect(lista!.className).toContain("flex-1");
+    // Y la columna izquierda con «Ahora», que es lo que la rejilla de una
+    // sola profesional no podía dar.
+    expect(
+      container.querySelector('[data-test="columna-del-dia"]'),
+    ).not.toBeNull();
   });
 
-  it("con dos, el ancho fijo de siempre y el carril se desliza", async () => {
+  it("con dos, cada una con su mínimo, y el carril se desliza si no caben", async () => {
+    // agenda-1 · el ancho de 176/208 px deja de ser FIJO y pasa a ser el
+    // SUELO: tres profesionales con ancho fijo dejaban 600 px en blanco a
+    // la derecha en la Lenovo apaisada (es el punto 29 de la auditoría
+    // con tres columnas en vez de una). El carril es `w-full min-w-max`:
+    // con pocas se reparten la pantalla, con muchas desborda y se desliza
+    // — que es lo que esta prueba fijaba y sigue fijando.
     staff = [ROSA, ANA];
     await render();
     const columnas = [
@@ -353,8 +385,10 @@ describe("clinica-8 (17) · con una sola profesional, la columna se ensancha", (
     ] as HTMLElement[];
     expect(columnas).toHaveLength(2);
     for (const c of columnas) {
-      expect(c.className).toContain("w-44");
-      expect(c.className).not.toContain("flex-1");
+      expect(c.className).toContain("min-w-44");
+      expect(c.className).toContain("md:min-w-52");
     }
+    const carril = columnas[0]!.parentElement!;
+    expect(carril.className).toContain("min-w-max");
   });
 });

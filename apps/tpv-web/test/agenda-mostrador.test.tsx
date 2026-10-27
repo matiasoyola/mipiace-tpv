@@ -91,7 +91,7 @@ import {
   tinteDeProfesional,
   tonoDeEstado,
 } from "../src/lib/staffColor.js";
-import { AgendaPage } from "../src/pages/AgendaPage.js";
+import { AgendaPage, pxPorMinuto } from "../src/pages/AgendaPage.js";
 
 /** jsdom devuelve los colores en `rgb(...)`, no en hex. */
 function hexARgb(hex: string): string {
@@ -186,7 +186,11 @@ function madrid(date: string, hhmm: string): string {
   ).toISOString();
 }
 
-const PX_PER_MIN = 1.1;
+// agenda-1 · la escala ya no es una constante: sale de la retícula, para
+// que la franja más pequeña que se puede reservar sea tocable.
+function pxPorMin(): number {
+  return pxPorMinuto(respuesta.slotMinutes ?? 15);
+}
 
 function cita(
   id: string,
@@ -263,20 +267,42 @@ beforeEach(async () => {
   cacheMock.lecturasDeClientes = 0;
   cacheMock.lecturasDeCatalogo = 0;
   clientesMock.elegido = null;
+  // agenda-1 · DOS PROFESIONALES por defecto, a propósito: desde la
+  // decisión D1 de Matías el día de UNA es una LISTA y la REJILLA —que es
+  // lo que casi todo este fichero mide (el tinte de la tarjeta, el toque
+  // en una franja, la cabecera con su color)— es el día de VARIAS. Lo que
+  // Rosario ve en su lista lo fija `agenda-1-dia-lista.test.tsx`.
   respuesta = {
-    staff: [SOLE],
+    staff: [SOLE, ANA],
     appointments: [],
     slotMinutes: 15,
-    dia: diaAbierto([SOLE]),
+    dia: diaAbierto([SOLE, ANA]),
   };
   apiMock.apiWithCashier.mockReset();
   apiMock.apiWithCashier.mockImplementation(
     async (path: string, init?: unknown) => {
       llamadas.push({ path, init });
       if (path.startsWith("/agenda?")) {
-        // El día que pinta la agenda es el que ha pedido: así `dayInfo` existe
-        // también cuando se cambia de día con las flechas.
-        const pedido = new URLSearchParams(path.slice(path.indexOf("?"))).get("date") ?? HOY;
+        // El día que pinta la agenda es el que ha pedido: así `dayInfo`
+        // existe también cuando se cambia de día con las flechas.
+        //
+        // agenda-1 · y la vista de SEMANA pide un RANGO (`from`+`to`, que
+        // `GET /agenda` ya aceptaba desde B4): entonces se devuelve un
+        // `days[]` por fecha, que es lo que el servidor hace.
+        const q = new URLSearchParams(path.slice(path.indexOf("?")));
+        const desde = q.get("from");
+        const hasta = q.get("to");
+        if (desde && hasta) {
+          const fechas: string[] = [];
+          for (let t = Date.parse(`${desde}T12:00:00Z`); t <= Date.parse(`${hasta}T12:00:00Z`); t += 86_400_000) {
+            fechas.push(new Date(t).toISOString().slice(0, 10));
+          }
+          return {
+            ...respuesta,
+            days: fechas.map((date) => ({ ...respuesta.dia, date })),
+          };
+        }
+        const pedido = q.get("date") ?? HOY;
         return { ...respuesta, days: [{ ...respuesta.dia, date: pedido }] };
       }
       if (path === "/agenda/availability") return { slots: slotsDeBusqueda };
@@ -343,27 +369,37 @@ async function tocarFranja(userId: string, hhmm: string) {
     x: 0, y: 0, toJSON: () => ({}),
   } as DOMRect);
   const [hh, mm] = hhmm.split(":").map(Number);
-  const y = ((hh ?? 0) * 60 + (mm ?? 0) - origenMin()) * PX_PER_MIN;
+  const y = ((hh ?? 0) * 60 + (mm ?? 0) - origenMin()) * pxPorMin();
   await act(async () => {
     col.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: y }));
   });
   await settle();
 }
 
-/** Cambia al día que dice el chip de la tira ("Hoy", "mié 16", "jue 17"…). */
+/**
+ * Cambia de día.
+ *
+ * agenda-1 · la tira de SIETE chips se fue de la cabecera (decisión de
+ * Matías, 27-10: «fuera los chips de días»), y su trabajo —ver y comparar
+ * varios días— lo hace ahora la vista de Semana. Para moverse un día están
+ * las flechas, que ya NO son `hidden sm:flex`: eran redundantes con la tira
+ * y sin ella son el único modo. Y la vuelta a HOY es su propio botón, que
+ * sólo aparece cuando el día no es hoy.
+ */
 async function irAlDia(date: string) {
-  const etiqueta =
-    date === HOY
-      ? "Hoy"
-      : new Intl.DateTimeFormat("es-ES", {
-          weekday: "short",
-          day: "numeric",
-        }).format(new Date(`${date}T12:00:00.000Z`));
-  const chip = Array.from(container.querySelectorAll("button")).find(
-    (b) => (b.textContent ?? "").trim() === etiqueta,
+  if (date === HOY) {
+    const hoy = container.querySelector<HTMLButtonElement>(
+      '[data-test="volver-a-hoy"]',
+    );
+    if (hoy) await click(hoy);
+    return;
+  }
+  const dias = Math.round(
+    (Date.parse(`${date}T12:00:00Z`) - Date.parse(`${HOY}T12:00:00Z`)) /
+      86_400_000,
   );
-  if (!chip) throw new Error(`no hay chip del día "${etiqueta}"`);
-  await click(chip);
+  const flecha = porEtiqueta(dias > 0 ? "Día siguiente" : "Día anterior");
+  for (let i = 0; i < Math.abs(dias); i++) await click(flecha);
 }
 
 /** Un botón por su `aria-label` (los que sólo llevan icono). */
@@ -391,11 +427,25 @@ function servicio(nombre: string): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
-/** El pie del panel de alta: lo que mide es lo que no puede saltar. */
+/** El pie del panel de «Dar cita»: lo que mide es lo que no puede saltar. */
 function pieDelPanel(): HTMLElement {
-  const boton = accion("reservar");
-  if (!boton) throw new Error("el panel de alta no está abierto");
-  return boton.parentElement as HTMLElement;
+  const pie = container.querySelector<HTMLElement>(
+    '[data-test="pie-del-panel"]',
+  );
+  if (!pie) throw new Error("el panel de «Dar cita» no está abierto");
+  return pie;
+}
+
+/** La columna de botones del pie: «Reservar» y la ranura del secundario. */
+function botonesDelPie(): HTMLElement {
+  return accion("reservar")!.parentElement as HTMLElement;
+}
+
+/** Abre «Dar cita» desde la cabecera. */
+async function abrirDarCita() {
+  await click(
+    container.querySelector<HTMLButtonElement>('[data-test="dar-cita"]')!,
+  );
 }
 
 // ── F1 · el botón que no descuadra dos arqueos ────────────────────────
@@ -435,20 +485,26 @@ describe("F1 · «Reservar» es el primario y «Reservar y cobrar» sólo es de 
     await render();
     await tocarFranja(SOLE.userId, "12:00");
     const conBoton = pieDelPanel().innerHTML;
-    const filasHoy = pieDelPanel().children.length;
+    const piezasHoy = pieDelPanel().children.length;
+    const botonesHoy = botonesDelPie().children.length;
 
     await irAlDia(MANANA);
     await tocarFranja(SOLE.userId, "12:00");
-    const filasManana = pieDelPanel().children.length;
 
     expect(conBoton).toContain("Reservar y cobrar");
-    // Mismo número de filas y la misma altura reservada para la segunda.
-    expect(filasManana).toBe(filasHoy);
-    // El pie son tres filas de alto fijo: el motivo de F4, el primario y la
-    // ranura del secundario. Ninguna aparece o desaparece.
-    expect(filasHoy).toBe(3);
-    const ranura = pieDelPanel().children[2] as HTMLElement;
+    // agenda-1 · el pie es el del tablero 3: el resumen a la izquierda y
+    // la columna de botones a la derecha. Dos piezas, y las dos están
+    // SIEMPRE — con la cita de hoy y con la de otro día.
+    expect(pieDelPanel().children.length).toBe(piezasHoy);
+    expect(piezasHoy).toBe(2);
+    // Y la ranura del secundario conserva su alto aunque el botón no
+    // exista: si desapareciera, «Reservar» subiría de golpe justo cuando
+    // la recepción va a tocarlo.
+    expect(botonesDelPie().children.length).toBe(botonesHoy);
+    expect(botonesHoy).toBe(2);
+    const ranura = botonesDelPie().children[1] as HTMLElement;
     expect(ranura.className).toContain("h-11");
+    expect(ranura.textContent).toContain("Se cobra el día de la cita.");
   });
 
   it("ningún atajo lleva a cobrar: el panel no tiene form ni submit", async () => {
@@ -497,9 +553,12 @@ function tarjetas(userId: string): HTMLButtonElement[] {
 }
 
 function tarjetaDe(hhmm: string): HTMLButtonElement {
-  const t = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
-    (b) => (b.textContent ?? "").startsWith(hhmm),
-  );
+  // agenda-1 · por `[data-cita]` y no por el texto: desde este bloque los
+  // HUECOS LIBRES de la rejilla también son botones que empiezan por su
+  // hora («11:00 · libre 1 h»), y buscar por texto cogería el hueco.
+  const t = Array.from(
+    container.querySelectorAll<HTMLButtonElement>("button[data-cita]"),
+  ).find((b) => (b.textContent ?? "").startsWith(hhmm));
   if (!t) throw new Error(`no hay tarjeta de las ${hhmm}`);
   return t;
 }
@@ -654,60 +713,69 @@ function motivo(cual: string): HTMLElement | null {
 }
 
 describe("F4 · un botón apagado dice qué le falta, en texto", () => {
-  it("«Buscar hueco» sin servicios dice que elija uno", async () => {
-    await render();
-    await tocarFranja(SOLE.userId, "12:00");
-    // Se quita la hora para que aparezca el botón de buscar.
-    await click(botonPorTexto("cambiar")!);
+  // agenda-1 · «Buscar hueco» YA NO EXISTE. La búsqueda sale de contestar
+  // «¿Cuándo?», que es un toque menos y es el objetivo del bloque. Así que
+  // ya no hay un botón apagado que explicar: lo que hay es un paso que NO
+  // SE OFRECE hasta que tiene sentido. El invariante de F4 sigue entero —
+  // nada apagado y mudo, ningún tooltip, el motivo en texto visible— y es
+  // lo que estos tests fijan sobre la superficie nueva.
 
-    const btn = accion("buscar-hueco")!;
-    expect(btn.disabled).toBe(true);
-    expect(motivo("buscar-hueco")!.textContent).toBe("Elige al menos un servicio.");
+  /** ¿Está el paso «¿Cuándo?» a la vista? */
+  function hayPasoCuando(): boolean {
+    return (
+      container.querySelector('[data-test="cuando-esta-semana"]') !== null
+    );
+  }
+
+  it("sin servicio no se ofrece «¿Cuándo?»: no hay botón mudo que apagar", async () => {
+    await render();
+    await abrirDarCita();
+    expect(hayPasoCuando()).toBe(false);
+    expect(motivo("reservar")!.textContent).toBe(
+      "Faltan el servicio y la hora.",
+    );
   });
 
-  it("con un servicio elegido, el botón se enciende y el motivo se va", async () => {
+  it("con un servicio elegido aparece «¿Cuándo?» y el motivo se queda en la hora", async () => {
     await render();
-    await tocarFranja(SOLE.userId, "12:00");
-    await click(botonPorTexto("cambiar")!);
+    await abrirDarCita();
     await click(servicio("Corte de pelo"));
-
-    expect(accion("buscar-hueco")!.disabled).toBe(false);
-    expect(motivo("buscar-hueco")).toBeNull();
+    expect(hayPasoCuando()).toBe(true);
+    expect(motivo("reservar")!.textContent).toBe("Falta la hora.");
   });
 
-  it("en un día PASADO dice que ese día ya pasó, no que falte un servicio", async () => {
+  it("en un día PASADO lo dice, aunque el servicio ya esté elegido", async () => {
     await render();
-    // Al día de ayer sólo se llega por la flecha: la tira de chips va de hoy
-    // en adelante. El panel se abre por el botón de cabecera, porque tocar
-    // una franja de un día pasado no abre nada (el suelo de 6a, intacto).
+    // Al día de ayer sólo se llega por la flecha. El panel se abre por el
+    // botón de la cabecera, porque tocar una franja de un día pasado no
+    // abre nada (el suelo de 6a, intacto).
     await click(porEtiqueta("Día anterior"));
-    await click(botonPorTexto("Nueva cita")!);
+    await abrirDarCita();
     await click(servicio("Corte de pelo"));
-
-    const btn = accion("buscar-hueco")!;
-    expect(btn.disabled).toBe(true);
     // Con el servicio YA elegido, el motivo no puede seguir siendo el
     // servicio: la causa de verdad es el día.
-    expect(motivo("buscar-hueco")!.textContent).toBe("Ese día ya ha pasado.");
+    expect(motivo("dia-pasado")!.textContent).toContain("ya ha pasado");
   });
 
-  it("y el día pasado MANDA sobre el servicio que falta", async () => {
+  it("y el día pasado no se ofrece como «el día que estás viendo»", async () => {
     await render();
     await click(porEtiqueta("Día anterior"));
-    await click(botonPorTexto("Nueva cita")!);
-    // Sin servicio Y en día pasado: se dice lo que no tiene arreglo aquí.
-    expect(motivo("buscar-hueco")!.textContent).toBe("Ese día ya ha pasado.");
+    await abrirDarCita();
+    await click(servicio("Corte de pelo"));
+    // Ofrecerlo sería ofrecer una hora que el motor va a rechazar.
+    expect(
+      container.querySelector('[data-test="cuando-el-dia-visto"]'),
+    ).toBeNull();
   });
 
   it("el motivo NUNCA va en un tooltip: ux-principles §6 los prohíbe", async () => {
     await render();
-    await tocarFranja(SOLE.userId, "12:00");
-    await click(botonPorTexto("cambiar")!);
+    await abrirDarCita();
     for (const b of Array.from(container.querySelectorAll("button"))) {
       expect(b.hasAttribute("title")).toBe(false);
     }
     // Y el motivo es texto que se lee sin tocar nada.
-    expect(texto()).toContain("Elige al menos un servicio.");
+    expect(texto()).toContain("Faltan el servicio y la hora.");
   });
 
   it("«Reservar» sin servicio lo dice, y se calla al elegirlo", async () => {
@@ -723,13 +791,15 @@ describe("F4 · un botón apagado dice qué le falta, en texto", () => {
 
   it("sin hora y sin servicio, lo dice de los dos de una vez", async () => {
     await render();
-    await click(botonPorTexto("Nueva cita")!);
-    expect(motivo("reservar")!.textContent).toBe("Faltan el servicio y la hora.");
+    await abrirDarCita();
+    expect(motivo("reservar")!.textContent).toBe(
+      "Faltan el servicio y la hora.",
+    );
   });
 
   it("con servicio pero sin hora, sólo la hora", async () => {
     await render();
-    await click(botonPorTexto("Nueva cita")!);
+    await abrirDarCita();
     await click(servicio("Corte de pelo"));
     expect(motivo("reservar")!.textContent).toBe("Falta la hora.");
   });
@@ -744,38 +814,51 @@ describe("F4 · un botón apagado dice qué le falta, en texto", () => {
     expect(texto()).not.toContain("Falta el cliente");
   });
 
-  it("el motivo vive en una ranura de alto fijo: no mueve los botones", async () => {
+  it("el motivo NO vive en la columna de los botones: no los puede mover", async () => {
     await render();
     await tocarFranja(SOLE.userId, "12:00");
-    const ranura = pieDelPanel().children[0] as HTMLElement;
-    expect(ranura.className).toContain("h-5");
-    expect(ranura.contains(motivo("reservar"))).toBe(true);
+    // agenda-1 · antes era una ranura de alto fijo encima del primario;
+    // ahora el motivo está en la OTRA mitad del pie (el resumen), así que
+    // aparecer o irse no puede mover el botón — el invariante se cumple
+    // por la forma y no por un alto a mano.
+    expect(botonesDelPie().contains(motivo("reservar"))).toBe(false);
+    const botones = botonesDelPie().children.length;
 
-    const filasConMotivo = pieDelPanel().children.length;
     await click(servicio("Corte de pelo"));
     expect(motivo("reservar")).toBeNull();
-    expect(pieDelPanel().children.length).toBe(filasConMotivo);
-    expect((pieDelPanel().children[0] as HTMLElement).className).toContain("h-5");
+    expect(botonesDelPie().children.length).toBe(botones);
   });
 });
 
 // ── F4 · sin duración no hay «fin» ────────────────────────────────────
 
 describe("F4 · «fin» sólo existe si hay algo que dure", () => {
-  it("con la hora puesta y CERO servicios no se dice ningún «fin»", async () => {
+  // agenda-1 · el fin se dice en el RESUMEN del pie («Mar 15 sept ·
+  // 12:00–12:30»), que es lo que la recepción le lee a la clienta antes de
+  // tocar «Reservar». El invariante es el del AP11 y no cambia: una hora
+  // de fin falsa es peor que ninguna.
+  function resumen(): string {
+    return (
+      container.querySelector('[data-test="resumen-de-la-cita"]')
+        ?.textContent ?? ""
+    );
+  }
+
+  it("con la hora puesta y CERO servicios no se dice ningún fin", async () => {
     await render();
     await tocarFranja(SOLE.userId, "12:00");
-    // Éste es el fallo del AP11: decía «Servicios · fin 12:00» para una cita
-    // que empieza a las 12:00 (docs/qa/2026-09-13-ap11/20-lunes-cita.png).
-    expect(texto()).not.toContain("fin");
+    // Éste es el fallo del AP11: decía «fin 12:00» para una cita que
+    // empieza a las 12:00 (docs/qa/2026-09-13-ap11/20-lunes-cita.png).
+    expect(resumen()).not.toContain("12:00–");
+    expect(resumen()).not.toContain("min");
   });
 
   it("al elegir un servicio aparece el fin de verdad", async () => {
     await render();
     await tocarFranja(SOLE.userId, "12:00");
     await click(servicio("Corte de pelo")); // 30 min
-    expect(texto()).toContain("30 min");
-    expect(texto()).toContain("fin 12:30");
+    expect(resumen()).toContain("12:00–12:30");
+    expect(resumen()).toContain("30 min");
   });
 
   it("dos servicios encadenados suman, y el fin lo dice", async () => {
@@ -783,17 +866,17 @@ describe("F4 · «fin» sólo existe si hay algo que dure", () => {
     await tocarFranja(SOLE.userId, "12:00");
     await click(servicio("Corte de pelo")); // 30
     await click(servicio("Tinte")); // 90
-    expect(texto()).toContain("120 min");
-    expect(texto()).toContain("fin 14:00");
+    expect(resumen()).toContain("12:00–14:00");
+    expect(resumen()).toContain("2 h");
   });
 
-  it("quitar el último servicio se lleva el «fin» con él", async () => {
+  it("quitar el último servicio se lleva el fin con él", async () => {
     await render();
     await tocarFranja(SOLE.userId, "12:00");
     await click(servicio("Corte de pelo"));
-    expect(texto()).toContain("fin 12:30");
+    expect(resumen()).toContain("12:00–12:30");
     await click(servicio("Corte de pelo")); // lo deselecciona
-    expect(texto()).not.toContain("fin");
+    expect(resumen()).not.toContain("12:00–");
   });
 });
 
@@ -857,7 +940,7 @@ describe("F5 · el nombre real aparece aunque el cliente llegue después", () =>
     await tocarFranja(SOLE.userId, "12:00");
 
     // Al abrir el selector, el mock dispara `onSelect` con Carmen.
-    await click(botonPorTexto("Buscar o crear cliente…")!);
+    await click(container.querySelector<HTMLButtonElement>('[data-test="elegir-paciente"]')!);
     expect(texto()).toContain("Carmen Ruiz");
 
     // Y la cita que se cree con ella ya sale con su nombre, sin esperar a
@@ -933,92 +1016,121 @@ describe("F5 · «Cliente» deja de leerse como un nombre", () => {
 
 // ── La rutina de Sole · reservas a SEMANAS vista ──────────────────────
 //
-// No sale de las capturas del 13-09 sino de cruzar lo que cubre la suite con
-// cómo trabaja el centro: Sole reserva con semanas de antelación. Hasta este
-// bloque sólo se podía cambiar de día con la tira de SIETE chips y con dos
-// flechas `hidden sm:flex`, así que un jueves de dentro de tres semanas
-// costaba veintiún toques en la tablet — y por debajo de 640 px, donde las
-// flechas no existen, era INALCANZABLE.
+// No sale de las capturas del 13-09 sino de cruzar lo que cubre la suite
+// con cómo trabaja el centro: Sole reserva con semanas de antelación.
+//
+// B-reservas-mostrador lo resolvió con un `type="date"` en la cabecera.
+// agenda-1 lo QUITA por decisión de Matías (27-10: «fuera el campo de
+// fecha, los chips de días y el selector Todos con una profesional») y lo
+// sustituye por la vista de SEMANA, que además enseña lo que hay dentro de
+// cada día en vez de sólo llevarte a él. El requisito que el campo
+// cumplía sigue en pie y es lo que estos tests miden:
+//
+//   · un día de dentro de tres semanas se alcanza en pocos toques;
+//   · el camino NO desaparece en compacto (las flechas dejaron de ser
+//     `hidden sm:flex` justo por esto);
+//   · la vuelta a HOY es un toque;
+//   · ningún control de la barra se come el área tocable de «Dar cita»;
+//   · y la agenda no ofrece reservar hacia atrás — el `min` del día vive
+//     ahora donde se pide una fecha de CITA: «¿Cuándo?» → «Otra fecha».
 
 describe("se llega a un día de dentro de tres semanas", () => {
   const DENTRO_DE_TRES_SEMANAS = "2026-10-06";
 
-  function irADia(): HTMLInputElement {
-    const el = container.querySelector<HTMLInputElement>("[data-ir-a-dia]");
-    if (!el) throw new Error("no hay control para ir a un día");
-    return el;
-  }
-
-  async function escribirFecha(valor: string) {
-    const input = irADia();
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      )!.set!;
-      setter.call(input, valor);
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await settle();
-  }
-
-  it("de un toque, sin tocar veintiuna veces una flecha", async () => {
-    await render();
-    await escribirFecha(DENTRO_DE_TRES_SEMANAS);
-    const pedidos = llamadas
+  function pedidos(): string[] {
+    return llamadas
       .filter((l) => l.path.startsWith("/agenda?"))
       .map((l) => l.path);
-    expect(pedidos[pedidos.length - 1]).toContain(DENTRO_DE_TRES_SEMANAS);
-  });
+  }
 
-  it("y el control NO es una de las flechas que desaparecen en compacto", async () => {
-    await render();
-    // Las flechas siguen siendo `hidden sm:flex`; el salto de fecha, no.
-    expect(porEtiqueta("Día anterior").className).toContain("hidden");
-    expect(irADia().className).not.toContain("hidden");
-    expect(irADia().className).not.toContain("sm:");
-  });
-
-  it("no ofrece días pasados: la agenda no reserva hacia atrás", async () => {
-    await render();
-    expect(irADia().getAttribute("min")).toBe(HOY);
-  });
-
-  it("el área tocable llega al peldaño de la casa (48 px)", async () => {
-    await render();
-    expect(irADia().className).toContain("h-11");
-  });
-
-  it("la vuelta a HOY sigue siendo UN toque, desde el chip de la tira", async () => {
-    await render();
-    await escribirFecha(DENTRO_DE_TRES_SEMANAS);
-    // Hay UN solo «Hoy», el de la tira: la cabecera no lleva otro. A 390 px
-    // ese botón de más cortaba «Nueva cita» por el borde, que es el fallo
-    // que B-5 F8 arregló. Esta barra no tiene píxeles de sobra.
-    const vuelta = Array.from(container.querySelectorAll("button")).filter(
-      (b) => (b.textContent ?? "").trim() === "Hoy",
+  async function verSemana() {
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-test="vista-semana"]')!,
     );
+  }
+
+  it("por la semana: tres toques de flecha y el día, no veintiuno", async () => {
+    await render();
+    await verSemana();
+    // 15-09 es martes; tres semanas adelante es la semana del 05-10, y el
+    // martes de esa semana es el 06-10.
+    for (let i = 0; i < 3; i++) await click(porEtiqueta("Semana siguiente"));
+    const dia = container.querySelector<HTMLButtonElement>(
+      `[data-ir-al-dia="${DENTRO_DE_TRES_SEMANAS}"]`,
+    );
+    expect(dia).not.toBeNull();
+    await click(dia!);
+    // El día pedido, no el último pedido que haya: tocar el día lleva a la
+    // vista de día Y la semana sigue cargando en paralelo, así que el
+    // orden de llegada no dice nada.
+    expect(
+      pedidos().some((x) => x.includes(`date=${DENTRO_DE_TRES_SEMANAS}`)),
+    ).toBe(true);
+    // Y la cabecera lo dice: 6 de octubre, y ya no «Hoy».
+    const rotulo = container.querySelector('[data-test="rotulo-fecha"]')!;
+    expect(rotulo.textContent).toContain("6 oct");
+    expect(rotulo.textContent).not.toContain("Hoy");
+  });
+
+  it("y el camino NO desaparece en compacto, como pasaba con las flechas", async () => {
+    await render();
+    // Las flechas de día dejaron de ser `hidden sm:flex` al irse la tira
+    // de chips: son el único modo de moverse un día.
+    expect(porEtiqueta("Día anterior").className).not.toContain("hidden");
+    expect(porEtiqueta("Día siguiente").className).not.toContain("hidden");
+    const semana = container.querySelector<HTMLElement>(
+      '[data-test="vista-semana"]',
+    )!;
+    expect(semana.className).not.toContain("hidden");
+  });
+
+  it("no ofrece días pasados donde se pide una fecha de cita", async () => {
+    await render();
+    await abrirDarCita();
+    await click(servicio("Corte de pelo"));
+    const otra = container.querySelector<HTMLInputElement>(
+      '[data-test="cuando-otra-fecha"]',
+    )!;
+    expect(otra.getAttribute("min")).toBe(HOY);
+  });
+
+  it("el área tocable de las flechas llega al peldaño de la casa", async () => {
+    await render();
+    for (const l of ["Día anterior", "Día siguiente"]) {
+      expect(porEtiqueta(l).className).toContain("h-11");
+    }
+  });
+
+  it("la vuelta a HOY es UN toque, y sólo hay un «Hoy» que tocar", async () => {
+    await render();
+    await click(porEtiqueta("Día siguiente"));
+    const vuelta = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button"),
+    ).filter((b) => (b.textContent ?? "").trim() === "Hoy");
     expect(vuelta).toHaveLength(1);
     await click(vuelta[0]!);
-    const pedidos = llamadas.filter((l) => l.path.startsWith("/agenda?"));
-    expect(pedidos[pedidos.length - 1]!.path).toContain(HOY);
+    expect(pedidos()[pedidos().length - 1]).toContain(HOY);
   });
 
-  it("y el salto de fecha no le quita su área tocable a «Nueva cita»", async () => {
+  it("y en HOY no hay botón «Hoy»: no se ofrece lo que ya está hecho", async () => {
     await render();
-    const nueva = botonPorTexto("Nueva cita")!;
-    // El estándar de la casa (`tailwind.config.js`, peldaño `touch`) y la
-    // lección de B-5 F8: nada de esta barra puede encogerse por debajo de su
-    // área tocable para hacerle sitio a otra cosa.
-    expect(nueva.className).toContain("shrink-0");
-    expect(irADia().className).toContain("shrink-0");
+    expect(
+      container.querySelector('[data-test="volver-a-hoy"]'),
+    ).toBeNull();
+    // El rótulo sí lo dice, que es la mitad informativa.
+    expect(
+      container.querySelector('[data-test="rotulo-fecha"]')!.textContent,
+    ).toContain("Hoy");
   });
 
-  it("el primer chip de la tira dice «Hoy», que es el ancla", async () => {
+  it("nada de la barra le quita su área tocable a «Dar cita»", async () => {
     await render();
-    const chips = Array.from(
-      container.querySelectorAll<HTMLElement>("div.flex-1.flex.gap-1 > button"),
-    );
-    expect(chips[0]!.textContent?.trim()).toBe("Hoy");
+    const dar = container.querySelector<HTMLElement>('[data-test="dar-cita"]')!;
+    // El estándar de la casa (`tailwind.config.js`, peldaño `touch-lg`) y
+    // la lección de B-5 F8: nada de esta barra puede encogerse por debajo
+    // de su área tocable para hacerle sitio a otra cosa.
+    expect(dar.className).toContain("shrink-0");
+    expect(dar.className).toContain("h-touch-lg");
+    expect(porEtiqueta("Volver").className).toContain("shrink-0");
   });
 });

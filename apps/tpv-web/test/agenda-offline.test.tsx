@@ -68,12 +68,25 @@ import {
   outboxAdd,
   outboxList,
 } from "../src/lib/outbox.js";
-import { AgendaPage } from "../src/pages/AgendaPage.js";
+import { AgendaPage, pxPorMinuto } from "../src/pages/AgendaPage.js";
+import { DEFAULT_SLOT_MINUTES } from "../src/lib/agenda.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 // 11:10 de pared en Madrid del 15-09-2026 (CEST, UTC+2).
 const AHORA = new Date("2026-09-15T09:10:00.000Z");
+// agenda-1 · DOS PROFESIONALES, a propósito: lo que este fichero mide es
+// la TARJETA de la rejilla (a rayas, en la mitad derecha, con su alto
+// real), y la rejilla es el día de VARIAS desde la decisión D1 de Matías.
+// Que la cita encolada y la rechazada se vean en la LISTA de una sola
+// profesional lo fija `agenda-1-dia-lista.test.tsx`.
+const BEA = {
+  userId: "00000000-0000-0000-0000-0000000000s9",
+  displayName: "Bea",
+  color: "#0ea5e9",
+  active: true,
+};
+
 const SOLE = {
   userId: "00000000-0000-0000-0000-0000000000s1",
   displayName: "Sole",
@@ -136,7 +149,7 @@ beforeEach(async () => {
   apiMock.apiWithCashier.mockReset();
   apiMock.apiWithCashier.mockImplementation(async (path: string) => {
     // El servidor NO conoce la cita: sigue en el outbox.
-    if (path.startsWith("/agenda?")) return { staff: [SOLE], appointments: [] };
+    if (path.startsWith("/agenda?")) return { staff: [SOLE, BEA], appointments: [] };
     throw new Error(`ruta no mockeada: ${path}`);
   });
   container = document.createElement("div");
@@ -186,9 +199,15 @@ describe("la cita creada sin red se ve en la agenda", () => {
     await encolarAlta();
     await render();
     const card = tarjetas().find((b) => b.textContent?.includes("11:00"));
-    // 30 min × 1,1 px/min = 33 px. Sale de `durationMin`, que viaja en el
-    // item del outbox y NO se envía al servidor.
-    expect(card!.style.height).toBe(`${30 * 1.1}px`);
+    // Sale de `durationMin`, que viaja en el item del outbox y NO se
+    // envía al servidor.
+    //
+    // agenda-1 · y la escala ya no es 1,1 px/min: se deriva de la
+    // retícula para que la franja más pequeña que se puede reservar sea
+    // tocable. Se importa en vez de copiarse.
+    expect(card!.style.height).toBe(
+      `${30 * pxPorMinuto(DEFAULT_SLOT_MINUTES)}px`,
+    );
   });
 
   it("el servidor manda: cuando la devuelve, no se pinta dos veces", async () => {
@@ -196,7 +215,7 @@ describe("la cita creada sin red se ve en la agenda", () => {
     apiMock.apiWithCashier.mockImplementation(async (path: string) => {
       if (path.startsWith("/agenda?")) {
         return {
-          staff: [SOLE],
+          staff: [SOLE, BEA],
           appointments: [
             {
               id: externalId,
