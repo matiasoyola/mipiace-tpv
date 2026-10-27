@@ -343,6 +343,18 @@ Céntimos enteros y no un decimal: el total es `Decimal(12,4)`, y un `number` co
 decimales que viaja por JSON y se suma en el front es cómo se consigue
 «57,999999 €» en una tarjeta.
 
+**Y costó un e2e rojo, que es la parte que hay que contar.** La primera versión
+comparaba `t.status = ANY($4::text[])`, y `tickets.status` es un **ENUM de
+Postgres**: Postgres no tiene operador `"TicketStatus" = text`, la consulta
+revienta y **`GET /agenda` contesta 500** — la agenda entera. Verde en el
+portátil (ningún test de unidad toca SQL en crudo) y rojo en el e2e contra
+Postgres de verdad. Arreglado con literales sin tipar, que es lo que
+`clinica/cobros-pendientes.ts` lleva meses haciendo con `t.status = 'DRAFT'`.
+
+Ahora tiene su e2e en `cita-a-caja.e2e.ts` (4b): la cifra del día es la del
+ticket que el test 3 acaba de cobrar (6300 céntimos), y una cita cuyo borrador
+sigue en DRAFT **no** cuenta como cobrada.
+
 **No viaja en la caché offline**, como sus cuatro vecinas y por la razón del
 dinero: una cifra vieja de «cobrado hoy» sobre un día que ha seguido cobrando es
 un número que parece bueno y no lo es. Sin red la fila dice «Hecha» y la tarjeta
@@ -520,6 +532,9 @@ pantalla reventaba al mirar el día de la cita.
 - **Suite entera desde la raíz**: `pnpm vitest run` → **478 ficheros, 6968
   tests, 10 saltados, 0 rojos.**
 - **`tsc` paquete a paquete**: `apps/tpv-web` y `apps/api`, los dos limpios.
+- **e2e contra Postgres real**: la primera pasada salió ROJA y encontró un 500
+  en `GET /agenda` que ningún test de unidad podía ver (ver §8). El e2e que lo
+  cubre está en `cita-a-caja.e2e.ts`.
 - Los dos ficheros puros, además, con `TZ=America/New_York`.
 
 ### Lo que se tocó de bancos existentes, y por qué

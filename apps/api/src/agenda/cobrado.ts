@@ -45,8 +45,24 @@ export interface RangoCobrado {
   hasta: Date;
 }
 
-/** Los estados de ticket en los que el dinero ya entró. */
+/**
+ * Los estados de ticket en los que el dinero ya entró.
+ *
+ * Van INCRUSTADOS en el SQL y no como parámetro, y hay un motivo que costó
+ * un e2e rojo: `tickets.status` es un ENUM de Postgres, no `text`. Pasarlo
+ * como `t.status = ANY($4::text[])` pide comparar `"TicketStatus" = text` y
+ * Postgres no tiene ese operador — la consulta revienta y `GET /agenda`
+ * contesta **500**, que en la agenda es la pantalla entera.
+ *
+ * Con literales sin tipar (como el `t.status = 'DRAFT'` de
+ * `clinica/cobros-pendientes.ts`, que lleva meses en producción) Postgres
+ * los resuelve contra el enum y no hay nada que castear.
+ *
+ * No hay superficie de inyección: la lista es una constante de este
+ * fichero y no la toca nadie de fuera.
+ */
 const COBRADOS = ["PAID", "PENDING_SYNC", "SYNCED", "SYNC_FAILED"] as const;
+const COBRADOS_SQL = COBRADOS.map((s) => `'${s}'`).join(", ");
 
 /**
  * `appointmentId` → céntimos cobrados, para las citas del rango que tienen
@@ -68,11 +84,10 @@ export async function cobradoPorCitaDe(
        JOIN tickets t ON t.id = a.ticket_id
       WHERE a.tenant_id = $1::uuid
         AND a.timeslot && tstzrange($2::timestamptz, $3::timestamptz, '[)')
-        AND t.status = ANY($4::text[])`,
+        AND t.status IN (${COBRADOS_SQL})`,
     input.tenantId,
     input.desde.toISOString(),
     input.hasta.toISOString(),
-    [...COBRADOS],
   );
   const fuera: Record<string, number> = {};
   for (const f of filas) fuera[f.id] = Number(f.total_cents);
