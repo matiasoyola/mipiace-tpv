@@ -117,9 +117,22 @@ export interface BloqueQuiropodia {
   actos: readonly string[];
   /** Lo que el programa propuso por esos actos. */
   nivelPropuesto: NivelDeQuiropodia;
-  /** Lo que se cobra. Distinto del propuesto = se cambió a mano, y queda
-   *  escrito: «propuesto completa, cobrado extra» (decisión 4). */
-  nivelElegido: NivelDeQuiropodia;
+  /**
+   * Lo que se cobra. Distinto del propuesto = se cambió a mano, y queda
+   * escrito: «propuesto completa, cobrado extra» (decisión 4).
+   *
+   * clinica-10 · y **`null` cuando hoy no se cobra ningún nivel**: la
+   * cita se reservó como «Cura» —un servicio de la categoría quiropodia
+   * que no es ninguno de los tres niveles— y la podóloga no ha marcado
+   * ningún acto. Antes de este bloque esa sesión nacía cobrando
+   * «Quiropodia básica · 25 €» que nadie había hecho, con la «Cura» de
+   * 13 € ahí al lado sin marcar (pasada del 27-10, captura 10b).
+   *
+   * `null` NO es «el centro no tiene servicio para ese nivel»: eso es
+   * `productoDelNivel: null` con un nivel escrito, y significa otra cosa
+   * (hay un nivel y no hay a qué cobrarlo). Aquí no hay nivel.
+   */
+  nivelElegido: NivelDeQuiropodia | null;
   /** El producto del catálogo del nivel elegido, o `null` si el centro no
    *  ha dicho cuál es el servicio de ese nivel. `null` es «sin cobro» para
    *  la quiropodia, no un cobro a cero. */
@@ -344,6 +357,134 @@ export function serviciosPorTipo(
     salida[s.tipo].push(s);
   }
   return salida;
+}
+
+// ── clinica-10 · LO RESERVADO NACE MARCADO ────────────────────────────
+//
+// Decisión de producto de Matías (27-10), «mínimos clics»: *lo que el
+// sistema ya sabe viene puesto; quien atiende sólo toca para quitar o
+// cambiar, nunca para confirmar lo obvio.*
+//
+// Lo que la pasada en hierro del 27-10 vio sin esto:
+//
+//   · una cita de «Consulta diagnóstico» abría la sesión con el servicio
+//     SIN marcar y el pie decía «Nada que cobrar · General: no has
+//     marcado nada» (capturas 18 y 24a). La primera visita de cada
+//     paciente nueva se cobraba sólo si alguien se acordaba de marcarla;
+//   · una cita de «Cura» abría con «Pasa a caja: Quiropodia básica
+//     25 €» —que nadie había hecho— y la «Cura» de 13 € como extra sin
+//     marcar (10b).
+//
+// Esto NO contradice la decisión de clinica-8 §1.2 («el cobro sale de las
+// líneas de la sesión cerrada, no de los servicios reservados»): lo que
+// se cobra sigue siendo lo que está marcado al cerrar. Lo que cambia es
+// con qué marcas NACE la pantalla, y se pueden quitar.
+
+export interface SemillaDeLoReservado {
+  /**
+   * Los servicios reservados de la cita que nacen marcados, por tipo.
+   *
+   * Sólo los que el catálogo de sesión conoce y tienen tipo: un bono o
+   * una crema reservados en la misma cita no son una línea de la sesión.
+   * Los TRES NIVELES de quiropodia tampoco entran aquí —no son chips, los
+   * pone el selector de nivel (ver `serviciosPorTipo`)—, pero sí cuentan
+   * para `seProponeNivel`.
+   */
+  servicios: Partial<Record<TipoDeVisita, readonly string[]>>;
+  /**
+   * ¿Se propone un nivel de quiropodia sin que nadie toque nada?
+   *
+   * `false` sólo en un caso: lo reservado de quiropodia **no es un
+   * nivel** (una cura, un papiloma, un domicilio). Ahí proponer «básica»
+   * es cobrar una quiropodia que nadie ha hecho encima de la que sí se
+   * reservó.
+   *
+   * Con un nivel reservado, o sin nada de quiropodia reservado, sigue
+   * valiendo lo de clinica-5: marcar «Quiropodia» cobra al menos la
+   * básica, porque una quiropodia es siempre al menos una quiropodia.
+   *
+   * Ojo a la palabra **quiropodia**: el prompt dice «o no hay nada
+   * reservado» y aquí se mira sólo lo reservado DE QUIROPODIA. Con una
+   * cita de «Consulta diagnóstico» (GENERAL), marcar quiropodia a mano
+   * tiene que seguir proponiendo la básica — la podóloga acaba de decir
+   * que hoy también hace quiropodia, y pedirle un toque más sería lo
+   * contrario de este bloque.
+   */
+  seProponeNivel: boolean;
+}
+
+/**
+ * Con qué nace marcada la sesión de una cita.
+ *
+ * `reservados` son los `serviceId` de la cita; `catalogo`, los servicios
+ * de sesión del centro con su tipo y su nivel. Lo que no esté en el
+ * catálogo se ignora en silencio, por lo mismo que `limpiarMarcas`: quien
+ * está delante de la pantalla no tiene nada que arreglar.
+ */
+export function semillaDeLoReservado(input: {
+  reservados: readonly string[];
+  /**
+   * Lo mínimo que hace falta saber de cada servicio, y no un
+   * `ServicioDeSesion` entero: la pantalla llama a esta función con lo
+   * que la API le manda, que **no trae precio ni IVA** cuando quien mira
+   * no ve importes (`verImportes: false`). Pedir el tipo completo habría
+   * obligado a rellenar dos ceros para una función que no mira el dinero.
+   */
+  catalogo: readonly {
+    serviceId: string;
+    tipo?: TipoDeVisita | null;
+    nivelQuiropodia?: NivelDeQuiropodia | null;
+  }[];
+}): SemillaDeLoReservado {
+  const porId = new Map(input.catalogo.map((s) => [s.serviceId, s]));
+  const servicios: Partial<Record<TipoDeVisita, string[]>> = {};
+  let nivelReservado = false;
+  let quiropodiaSinNivel = false;
+
+  for (const id of new Set(input.reservados)) {
+    const s = porId.get(id);
+    if (!s || s.tipo == null) continue;
+    if (s.nivelQuiropodia != null) {
+      nivelReservado = true;
+      continue;
+    }
+    (servicios[s.tipo] ??= []).push(id);
+    if (s.tipo === "QUIROPODIA") quiropodiaSinNivel = true;
+  }
+
+  return {
+    servicios,
+    seProponeNivel: nivelReservado || !quiropodiaSinNivel,
+  };
+}
+
+/**
+ * El nivel de quiropodia que se cobra hoy, o `null` si ninguno.
+ *
+ * Las tres reglas, en orden:
+ *
+ *   1. **Lo que la podóloga haya tocado manda.** Un nivel elegido a mano
+ *      se cobra, haya o no actos marcados.
+ *   2. **Con actos marcados, siempre hay nivel.** Marcar «deslaminado» es
+ *      decir que hoy se ha hecho quiropodia, y una quiropodia es siempre
+ *      al menos una quiropodia (`nivelPropuesto`). Por eso una cita de
+ *      «Cura» a la que se le marca un acto recupera el nivel sola: la
+ *      podóloga no tiene que tocar nada más.
+ *   3. **Y si no, lo que diga la semilla.** Ver `seProponeNivel`.
+ *
+ * La llaman la pantalla (para pintar) y el servidor (para escribir), que
+ * es la regla de la casa: una función, dos sitios.
+ */
+export function nivelCobrado(input: {
+  actos: readonly string[];
+  /** El nivel elegido a mano, o `null` si se sigue la propuesta. */
+  nivelAMano: NivelDeQuiropodia | null;
+  seProponeNivel: boolean;
+}): NivelDeQuiropodia | null {
+  if (input.nivelAMano != null) return input.nivelAMano;
+  const propuesta = nivelPropuesto(input.actos);
+  if (propuesta.actosMarcados === 0 && !input.seProponeNivel) return null;
+  return propuesta.nivel;
 }
 
 // ── LA DERIVACIÓN: de los bloques a las líneas de caja ────────────────
@@ -689,14 +830,38 @@ export function normalizarSesionV2(
     const b = input.bloques.QUIROPODIA ?? {};
     const actos = limpiarActos(b.actos);
     const propuesto = nivelPropuesto(actos).nivel;
-    const elegido = esNivelDeQuiropodia(b.nivelElegido)
+    // clinica-10 · TRES respuestas, no dos, y el `null` es EXPLÍCITO.
+    //
+    //   · un nivel de los tres          → ése se cobra;
+    //   · `null` escrito a propósito    → hoy no se cobra ningún nivel
+    //                                     (cita de «Cura» sin actos:
+    //                                     ver `nivelCobrado`);
+    //   · cualquier otra cosa, incluida
+    //     la clave que no viene         → la propuesta.
+    //
+    // La tercera rama es la de siempre y sigue siendo la segura: un
+    // cuerpo malformado cobra la quiropodia que marcar el tipo implica,
+    // en vez de dejar la visita sin línea sin que nadie lo haya pedido.
+    // Por eso `undefined` y `null` NO se tratan igual aquí.
+    let elegido: NivelDeQuiropodia | null = esNivelDeQuiropodia(
+      b.nivelElegido,
+    )
       ? b.nivelElegido
-      : propuesto;
+      : b.nivelElegido === null
+        ? null
+        : propuesto;
+    // Y el servidor no se cree un «sin nivel» con actos marcados: marcar
+    // un acto ES haber hecho quiropodia (regla 2 de `nivelCobrado`), y
+    // una pantalla que mandara las dos cosas estaría cobrando de menos
+    // una visita que sí se hizo. Lo decide quien escribe la historia, no
+    // quien la teclea.
+    if (elegido == null && actos.length > 0) elegido = propuesto;
     bloques.QUIROPODIA = {
       actos,
       nivelPropuesto: propuesto,
       nivelElegido: elegido,
-      productoDelNivel: productoDelNivel(input.catalogo, elegido),
+      productoDelNivel:
+        elegido == null ? null : productoDelNivel(input.catalogo, elegido),
       servicios: limpiarServicios(b.servicios, "QUIROPODIA"),
     };
   }

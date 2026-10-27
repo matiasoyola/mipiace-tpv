@@ -143,6 +143,14 @@ export function TarjetaQuiropodia(props: {
    *  SIGA moviéndose al tocar más actos: con una copia, el primer toque
    *  congelaría el nivel para siempre. */
   nivelAMano: NivelDeQuiropodia | null;
+  /**
+   * clinica-10 · el nivel que de verdad se cobra, `null` si hoy ninguno.
+   *
+   * Lo calcula `nivelCobrado` en el padre —la misma función que usa el
+   * servidor al escribir— y no se vuelve a decidir aquí: la tarjeta
+   * pinta lo que se va a cobrar, no una segunda opinión sobre ello.
+   */
+  elegido: NivelDeQuiropodia | null;
   niveles: readonly ServicioDeSesion[];
   servicios: ServiciosDelTipo;
   avisos: readonly string[];
@@ -151,8 +159,9 @@ export function TarjetaQuiropodia(props: {
   onNivel: (n: NivelDeQuiropodia) => void;
 }) {
   const propuesta = nivelPropuesto(props.actos);
-  const elegido = props.nivelAMano ?? propuesta.nivel;
-  const cambiado = textoDelCambioDeNivel(propuesta.nivel, elegido);
+  const elegido = props.elegido;
+  const cambiado =
+    elegido == null ? null : textoDelCambioDeNivel(propuesta.nivel, elegido);
   const precioDe = (n: NivelDeQuiropodia) =>
     props.niveles.find((s) => s.nivelQuiropodia === n)?.precio;
 
@@ -211,7 +220,13 @@ export function TarjetaQuiropodia(props: {
           })}
         </div>
         <div className="text-[13px] text-slate-200 mt-2">
-          {cambiado ?? propuesta.motivo}
+          {/* clinica-10 · sin nivel, la frase dice POR QUÉ y qué hacer.
+              Un recuadro con los tres botones apagados y el motivo de la
+              propuesta debajo («se propone la básica») sería la pantalla
+              diciendo una cosa y cobrando otra. */}
+          {elegido == null
+            ? "Hoy no se cobra nivel: la cita es de otro servicio de quiropodia. Marca lo que haces (o toca un nivel) si además haces quiropodia."
+            : (cambiado ?? propuesta.motivo)}
         </div>
       </div>
 

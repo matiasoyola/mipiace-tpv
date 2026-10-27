@@ -96,16 +96,52 @@ export function leerDispositivo(
 }
 
 /**
+ * clinica-10 (paso 38) · ¿ESTE «NOMBRE» ES UN USER-AGENT?
+ *
+ * Porque hasta este bloque lo era. `PairScreen` emparejaba mandando
+ * `deviceName: navigator.userAgent.slice(0, 80)`, así que la fila nacía
+ * con el user-agent CRUDO en la columna del nombre — y
+ * `nombreDeDispositivo` hace lo correcto con un nombre puesto a mano:
+ * respetarlo. De ahí que la pasada del 27-10 siguiera viendo
+ * «Mozilla/5.0 (Linux; Android 14; TB311FU…» después de que clinica-8
+ * (fase B, 18) escribiera el lector: el lector no se llegaba a usar.
+ *
+ * Lo arregla `PairScreen`, que ya no manda nombre. Esto es para las
+ * tablets **que ya están emparejadas**: no hay migración que correr ni
+ * fila que reescribir, se ignora al leer. Es la misma decisión que el
+ * alias de clinica-9 (4): nada de `UPDATE` masivos para arreglar lo que
+ * la lectura puede arreglar sola.
+ *
+ * El criterio es estrecho a propósito —empezar por `Mozilla/` o traer
+ * dentro un motor de navegador— porque el coste de equivocarse es tirar
+ * un nombre que una persona escribió. «Caja 1», «Tablet de Rosario» o
+ * «Mostrador» no se parecen a esto ni por accidente.
+ */
+export function pareceUserAgent(nombre: string): boolean {
+  return (
+    /^Mozilla\//i.test(nombre) ||
+    /\b(AppleWebKit|Gecko\/|Chrome\/|Safari\/)/.test(nombre)
+  );
+}
+
+/**
  * El nombre con el que se pinta una fila de Dispositivos.
  *
  * El orden es el de siempre: manda el nombre que alguien le puso. Lo que
- * cambia es el respaldo.
+ * cambia es el respaldo — y, desde clinica-10, que un user-agent metido
+ * en la columna del nombre no cuenta como nombre puesto.
  */
 export function nombreDeDispositivo(d: {
   name?: string | null;
   userAgent?: string | null;
 }): string {
   const puesto = d.name?.trim();
-  if (puesto) return puesto;
-  return leerDispositivo(d.userAgent)?.titulo ?? "Dispositivo sin nombre";
+  if (puesto && !pareceUserAgent(puesto)) return puesto;
+  // El user-agent de la columna `name` vale para leerlo si el de verdad
+  // no viene: lo que se tira es el sitio donde estaba, no el dato.
+  return (
+    leerDispositivo(d.userAgent)?.titulo ??
+    (puesto ? (leerDispositivo(puesto)?.titulo ?? puesto) : null) ??
+    "Dispositivo sin nombre"
+  );
 }

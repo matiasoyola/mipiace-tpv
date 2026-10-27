@@ -605,7 +605,23 @@ function ProfileEditor({
     row.profile != null &&
     (displayName.trim() !== (row.profile.displayName ?? "") ||
       color !== row.profile.color ||
-      active !== row.profile.active);
+      active !== row.profile.active ||
+      // clinica-10 (H1) · Y CUANDO EL ALIAS TODAVÍA NO ES EL NOMBRE.
+      //
+      // clinica-9 (5) puso el puente: guardar en Personal escribe las dos
+      // columnas, `staff_profiles.display_name` y `users.alias`, y para
+      // las cuentas que ya existían «el primer guardado lo arregla».
+      // Sólo que ese guardado no llegaba a salir: esta sección se salta
+      // cuando no está sucia, y en una cuenta vieja no hay NADA que
+      // cambiar en el formulario — el nombre de la agenda ya es
+      // «Rosario». La pasada del 27-10 lo resolvió a mano cambiando el
+      // nombre, guardando, y volviéndolo a cambiar (H1).
+      //
+      // Así que la pregunta correcta no es «¿has tecleado algo?», es
+      // «¿dicen las dos columnas lo mismo?». Mientras no lo digan, hay
+      // algo que guardar, y el gesto que la dueña ya hace —entrar a su
+      // ficha y pulsar Guardar— lo arregla a la primera.
+      (row.alias ?? "") !== (row.profile.displayName ?? ""));
 
   async function save() {
     if (displayName.trim().length === 0) {

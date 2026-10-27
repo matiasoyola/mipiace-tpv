@@ -14,13 +14,17 @@
 // `/admin/tag-sections` (v1.4-Bar-Operativa). No es pereza: es que el
 // panel reutiliza la forma y la dueña reconoce la pantalla.
 //
-// ── La puerta: `ensureClinicaEnabled`, no `ensureCajaEnabled` ────────
+// ── La puerta: la de la HISTORIA CLÍNICA, no la de caja ─────────────
 //
 // Las hermanas (`tag-aliases`, `tag-sections`) van tras la capability de
 // caja. Ésta va tras la de la HISTORIA CLÍNICA, y con ella la 404 que se
 // hace pasar por ruta inexistente (clinica-1 §1): un tipo de visita sólo
 // significa algo donde hay historia, y una ruta que contestara 403 le
 // diría a un bar que en este sistema existe un módulo de datos de salud.
+//
+// clinica-10 (H2) · pero en la variante `ensureClinicaConfigurable`: el
+// módulo encendido se exige igual, y la impersonación del superadmin NO
+// se corta. Ver la cabecera de esa función.
 //
 // ── Y lo que esta ruta NO hace: comprobar los servicios ──────────────
 //
@@ -44,10 +48,18 @@ import {
 } from "@mipiacetpv/clinica-sesion";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
-import { ensureClinicaEnabled } from "../clinica/gate.js";
+import { ensureClinicaConfigurable } from "../clinica/gate.js";
 import { getPrisma } from "../context.js";
 
-const guard = { preHandler: [requireOwnerOrManager, ensureClinicaEnabled] };
+// clinica-10 (H2) · `ensureClinicaConfigurable` y no
+// `ensureClinicaEnabled`: el módulo tiene que estar encendido, pero el
+// implantador de Mi Piace —que carga el catálogo y crea estas mismas
+// filas desde super-admin— tiene que poder verlas. Aquí no hay datos de
+// salud: hay dos columnas de texto del catálogo. Ver la cabecera de la
+// función en `clinica/gate.ts`.
+const guard = {
+  preHandler: [requireOwnerOrManager, ensureClinicaConfigurable],
+};
 
 export async function registerAdminTagVisitTypesRoutes(
   app: FastifyInstance,

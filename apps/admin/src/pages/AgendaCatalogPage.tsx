@@ -1077,14 +1077,34 @@ function TiposDeVisitaSection({
   onCambio: () => void;
 }) {
   const [items, setItems] = useState<TipoDeCategoria[] | null>(null);
+  // clinica-10 (H2) · LEER MAL NO ES ESTAR VACÍO.
+  //
+  // La pasada del 27-10 vio «Todavía no has asignado ninguna categoría»
+  // en una cuenta cuyo check «Catálogo clínico completo» estaba EN VERDE
+  // —y ese check cuenta exactamente estas filas (`tagVisitType`,
+  // `medirCatalogoClinico`)—. No era un texto desafortunado: era un
+  // `.catch(() => setItems([]))` convirtiendo un fallo de lectura en una
+  // lista vacía, y la pantalla contando a la dueña que su catálogo está
+  // sin configurar cuando lo que pasa es que no se pudo preguntar.
+  //
+  // Un estado más, y la pantalla dice lo que sabe: tres respuestas
+  // (cargando / no se pudo / de verdad vacío) y no dos.
+  const [falloAlLeer, setFalloAlLeer] = useState<string | null>(null);
   const [slug, setSlug] = useState("");
   const [tipo, setTipo] = useState<TipoDeVisita>("QUIROPODIA");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api<{ items: TipoDeCategoria[] }>("/admin/tag-visit-types")
-      .then((r) => setItems(r.items))
-      .catch(() => setItems([]));
+      .then((r) => {
+        setFalloAlLeer(null);
+        setItems(r.items);
+      })
+      .catch((err) =>
+        setFalloAlLeer(
+          err instanceof ApiError ? err.message : "Error inesperado",
+        ),
+      );
   }, []);
 
   async function onAdd(e: React.FormEvent) {
@@ -1223,7 +1243,18 @@ function TiposDeVisitaSection({
           ))}
         </div>
       )}
-      {items !== null && items.length === 0 && (
+      {falloAlLeer !== null && (
+        <p
+          role="status"
+          data-test="tipos-no-se-pudieron-leer"
+          className="text-[13px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 mt-4"
+        >
+          No se han podido leer los tipos de visita de tus categorías, así
+          que esta lista no dice nada: puede haberlos. Vuelve a abrir la
+          pantalla. ({falloAlLeer})
+        </p>
+      )}
+      {falloAlLeer === null && items !== null && items.length === 0 && (
         <p className="text-[13px] text-slate-400 mt-4">
           Todavía no has asignado ninguna categoría. Sin esto, los servicios
           no se pueden marcar como tratamiento de la sesión.

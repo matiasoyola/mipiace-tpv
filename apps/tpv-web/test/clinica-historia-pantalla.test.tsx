@@ -44,6 +44,7 @@ import {
   COLUMNA_DEL_PIE_PX,
   HistoriaViva,
 } from "../src/clinica/HistoriaViva.js";
+import { __resetBackGuardForTests } from "../src/hooks/useBackGuard.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -281,6 +282,8 @@ async function montar(
     detalle?: unknown;
     /** clinica-8 (fase B, 15) · ¿está firmado el de fotos? */
     conConsentimientoDeFotos?: boolean;
+    /** clinica-10 (H3) · quién sabe cerrar esta historia. */
+    onCerrar?: () => void;
   } = {},
 ) {
   empezadas = [];
@@ -358,6 +361,7 @@ async function montar(
             ? undefined
             : (tipos) => empezadas.push([...tipos])
         }
+        onCerrar={opciones.onCerrar}
       />,
     );
   });
@@ -391,12 +395,21 @@ async function pestania(nombre: string) {
 
 beforeEach(() => {
   apiMock.apiWithCashier.mockReset();
+  __resetBackGuardForTests();
 });
 
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  __resetBackGuardForTests();
 });
+
+/** El Atrás del sistema llega como `popstate` (ver `useBackGuard`). */
+async function atras() {
+  await act(async () => {
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+  });
+}
 
 // ── 1 · En 10 segundos ───────────────────────────────────────────────
 
@@ -786,5 +799,51 @@ describe("clinica-8 (15) · desde Historia → Fotos se firma el consentimiento"
     expect(host.querySelector('[data-test="ir-a-firmar-fotos"]')).toBeNull();
     // Y dice dónde se hacen las fotos, que es la decisión de clinica-6.
     expect(texto()).toContain("Las fotos se hacen desde la sesión");
+  });
+});
+
+// ── clinica-10 (H3) · EL ATRÁS DE ANDROID SALE DE LA HISTORIA ────────
+//
+// La pasada del 27-10: dentro de la historia de una paciente, el Atrás
+// **no hacía nada**. Esta pantalla no registraba ninguna capa, así que
+// el gesto caía en el guardia de fondo —que con el turno abierto se lo
+// traga para no echar a nadie de la aplicación— y para quien tiene la
+// tablet en la mano eso es un botón roto.
+
+describe("clinica-10 (H3) · el Atrás de Android, en la historia", () => {
+  it("sin nada abierto dentro, cierra la historia", async () => {
+    let cerrada = 0;
+    await montar(vista({}), { onCerrar: () => (cerrada += 1) });
+    await atras();
+    expect(cerrada).toBe(1);
+  });
+
+  it("con la hoja de «¿qué visita es hoy?» abierta, cierra la hoja primero", async () => {
+    let cerrada = 0;
+    await montar(vista({ conPendiente: true }), {
+      onCerrar: () => (cerrada += 1),
+    });
+    await pulsar(botonQueContiene("Nueva visita"));
+    expect(texto()).toContain("¿Qué visita es hoy?");
+
+    await atras();
+    expect(texto()).not.toContain("¿Qué visita es hoy?");
+    expect(cerrada).toBe(0);
+
+    // Y el siguiente ya sale.
+    await atras();
+    expect(cerrada).toBe(1);
+  });
+
+  it("sin quién la cierre, el Atrás no se inventa una salida", async () => {
+    // Desde donde la historia se monta sin `onCerrar`, salir de aquí no
+    // lo sabe nadie: el Atrás sigue cerrando lo de dentro y nada más.
+    await montar(vista({ conPendiente: true }));
+    await pulsar(botonQueContiene("Nueva visita"));
+    await atras();
+    expect(texto()).not.toContain("¿Qué visita es hoy?");
+    await atras();
+    // Sigue en pie, que es lo honesto.
+    expect(texto()).toContain("Carmen");
   });
 });

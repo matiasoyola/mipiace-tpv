@@ -31,6 +31,12 @@
 import type { ReactNode } from "react";
 import { Star } from "lucide-react";
 
+import {
+  ANCHO_UTIL_RAIL,
+  CUERPOS_DE_RAIL,
+  cuerpoQueCabe,
+} from "../lib/ancho-del-texto.js";
+
 export interface RailCategory {
   tag: string;
   label: string;
@@ -47,8 +53,14 @@ export interface RailCategory {
  */
 export const CATEGORY_RAIL_WIDTH = 144;
 
+// clinica-10 (paso 33) · el `text-[14px]` se va de aquí al `style` de
+// cada botón: la etiqueta baja un peldaño cuando a 14 no cabe. En la
+// clínica de Rosario, «Biomecánica» pide 91 px de los 88 que hay y el
+// rail la enseñaba como «Biomecáni…» (captura 33). Ver
+// `ancho-del-texto.ts`, y la nota de `CATEGORY_RAIL_WIDTH` sobre de
+// dónde salen esos 88.
 const ITEM_BASE =
-  "h-touch w-full px-3.5 rounded-2xl border text-[14px] font-medium flex items-center gap-2.5 shrink-0 text-left";
+  "h-touch w-full px-3.5 rounded-2xl border font-medium flex items-center gap-2.5 shrink-0 text-left";
 // Mismo lenguaje de selección que los chips de v1.14.1: coral SUAVE. El
 // coral pleno del área de trabajo es de "Cobrar" y de nadie más.
 const ITEM_IDLE =
@@ -96,6 +108,7 @@ export function CategoryRail({
         type="button"
         onClick={() => onSelect(null)}
         aria-pressed={selectedTag === null}
+        style={{ fontSize: `${CUERPOS_DE_RAIL[0]}px` }}
         className={`${ITEM_BASE} ${selectedTag === null ? ITEM_SELECTED : ITEM_IDLE}`}
       >
         <Star
@@ -117,6 +130,13 @@ export function CategoryRail({
             onClick={() => onSelect(c.tag)}
             aria-pressed={active}
             data-tone-item="true"
+            style={{
+              fontSize: `${cuerpoQueCabe(
+                c.label,
+                ANCHO_UTIL_RAIL,
+                CUERPOS_DE_RAIL,
+              )}px`,
+            }}
             className={`${ITEM_BASE} ${active ? ITEM_SELECTED : ITEM_IDLE}`}
           >
             {c.icon}

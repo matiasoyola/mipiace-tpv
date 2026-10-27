@@ -125,9 +125,23 @@ export function CashiersPage() {
       {cashiers.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-7 text-center">
           <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" strokeWidth={1.6} />
+          {/* clinica-10 · aquí decía «Crea al menos un cajero para que
+              pueda iniciar sesión en el TPV con su PIN», y en una clínica
+              de una sola persona eso es falso y además da miedo: Rosario
+              entra al TPV con SU PIN —sale en «Cajeros recientes» y la
+              pasada del 27-10 lo vio— y esta pantalla le estaba pidiendo
+              crear un acceso para nadie. Vale igual para el bar que lleva
+              el dueño solo.
+
+              Lo que esta lista tiene de verdad es gente DISTINTA del
+              propietario: cajeros y encargados. Vacía significa que no la
+              hay, no que falte nada. */}
           <p className="text-[13.5px] text-slate-500">
-            Crea al menos un cajero para que pueda iniciar sesión en el TPV
-            con su PIN.
+            No hay nadie más con acceso al TPV.{" "}
+            {isOwner
+              ? "Tú entras con tu propio PIN, así que no hace falta crear ninguno:"
+              : "El propietario entra con su propio PIN;"}{" "}
+            añade un cajero cuando quieras que entre otra persona.
           </p>
         </div>
       ) : (

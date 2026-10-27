@@ -92,7 +92,10 @@ vi.mock("../src/hooks/useClientPicker.js", () => ({
   }),
 }));
 
+import { MAPA_PIE_V1 } from "@mipiacetpv/clinica-sesion";
+
 import { __resetOutboxForTests } from "../src/lib/outbox.js";
+import { __resetBackGuardForTests } from "../src/hooks/useBackGuard.js";
 import { AgendaPage } from "../src/pages/AgendaPage.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -140,6 +143,47 @@ const DIA = {
   absences: [],
 };
 
+/**
+ * clinica-10 (H3) · la historia de Carmen, con lo justo para montarse.
+ *
+ * Lo que la historia PINTA tiene su banco (`clinica-historia-pantalla`).
+ * Lo que este fichero necesita es que se monte dentro de la agenda, que es
+ * el único sitio donde se puede comprobar que el Atrás tiene salida.
+ */
+const HISTORIA = {
+  cabecera: {
+    paciente: {
+      id: "cl-carmen",
+      nombre: "Carmen Prueba Demo",
+      iniciales: "CP",
+      edad: 78,
+      telefono: null,
+      desde: "2026-09-01T08:00:00.000Z",
+    },
+    alertas: [],
+    alertaIds: [],
+    alertasPorValidar: false,
+  },
+  enDiezSegundos: {
+    hoyToca: null,
+    dolor: { puntos: [], ultimo: null, anterior: null, texto: "" },
+    ultimaVez: null,
+    ojoHoy: null,
+  },
+  zonas: [],
+  sensibilidad: null,
+  visitas: [],
+  totalDeVisitas: 0,
+  documentos: [],
+  fotos: [],
+  comparador: [],
+  consentimientoDeFotos: { puede: false, plantillaId: "fotos-clinicas" },
+  recomendada: null,
+  pendientes: [],
+  listas: { mapa: MAPA_PIE_V1 },
+  ahora: "2026-10-19T07:10:00.000Z",
+};
+
 let llamadas: Array<{ path: string; init?: any }>;
 let sesionesPorCobrar: string[];
 /** clinica-9 (9) · las propuestas de próxima cita que manda la API. */
@@ -156,6 +200,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(async () => {
+  __resetBackGuardForTests();
   vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
   vi.setSystemTime(AHORA);
   (globalThis as Record<string, unknown>).indexedDB = new IDBFactory();
@@ -185,6 +230,13 @@ beforeEach(async () => {
     if (path.startsWith("/agenda/appointments/")) {
       return { appointment: { ...CITA, status: init?.body?.status ?? "CONFIRMED" } };
     }
+    // clinica-10 (H3) · lo justo para que la historia del paciente se
+    // monte dentro de la agenda. Lo que pinte es del banco de
+    // `HistoriaViva`; lo que este fichero mira es el Atrás.
+    if (path.includes("/clinica/contrato")) {
+      return { aceptado: true, version: 2, debeAceptar: false };
+    }
+    if (path.endsWith("/historia")) return HISTORIA;
     throw new Error(`ruta no mockeada: ${path}`);
   });
   container = document.createElement("div");
@@ -195,6 +247,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
+  __resetBackGuardForTests();
 });
 
 async function settle() {
@@ -450,5 +503,65 @@ describe("clinica-9 · la próxima cita propuesta se ofrece en la agenda", () =>
     expect(
       container.querySelector('[data-test="proximas-citas-propuestas"]'),
     ).toBeNull();
+  });
+});
+
+// ── clinica-10 (H3) · EL ATRÁS SALE DE LA HISTORIA ──────────────────
+//
+// La pasada del 27-10: dentro de la historia de un paciente, el Atrás de
+// Android **no hacía nada**. `HistoriaViva` ya registra sus capas —la
+// hoja de «¿qué visita es hoy?», la zona del pie—, pero la última, la de
+// cerrar la historia entera, sólo existe si quien la monta dice cómo
+// cerrarla: salir de aquí es volver a la pantalla de la que se vino, y
+// eso no lo sabe la historia.
+//
+// Este banco es el de la agenda a propósito. El camino de `ClientsPage`
+// lo cubre `clinica-historia-pantalla` montando `HistoriaViva` suelta, y
+// ahí el `onCerrar` lo pone el test: un fichero que pasara la prop por su
+// cuenta estaría probando el test, no la pantalla. Lo que se rompe si
+// alguien quita la línea de `AgendaPage` es esto, y sólo esto.
+
+describe("clinica-10 (H3) · el Atrás de Android, en la historia de la agenda", () => {
+  async function atras() {
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    await settle();
+  }
+
+  /** El overlay va en un portal a `document.body` (`AlFrente`), así que
+   *  no cuelga del contenedor del test. */
+  function historiaAbierta(): boolean {
+    return [...document.querySelectorAll("h1")].some((h) =>
+      (h.textContent ?? "").startsWith("Historia ·"),
+    );
+  }
+
+  async function abrirHistoria() {
+    // La historia sólo se ofrece donde hay módulo clínico y a quien lleva
+    // la marca sanitaria.
+    cacheMock.clinica = true;
+    await render({ esSanitario: true });
+    await abrirDetalle();
+    await click(porTexto("Historia del paciente")!);
+    expect(historiaAbierta()).toBe(true);
+  }
+
+  it("se abre desde la cita y el Atrás la cierra", async () => {
+    await abrirHistoria();
+    await atras();
+    expect(historiaAbierta()).toBe(false);
+  });
+
+  it("y deja la agenda donde estaba, no se sale del TPV", async () => {
+    // Lo que `useBackGuard` existe para impedir desde v1.12: el Atrás no
+    // puede echar a nadie de la aplicación con el turno abierto.
+    await abrirHistoria();
+    await atras();
+    expect(
+      [...container.querySelectorAll("button")].some((b) =>
+        (b.textContent ?? "").includes("Carmen Prueba Demo"),
+      ),
+    ).toBe(true);
   });
 });

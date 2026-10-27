@@ -330,6 +330,68 @@ describe("v1.22 §4 · tablet: todas las categorías en el rail", () => {
   });
 });
 
+// ── clinica-10 (paso 33) · y que la etiqueta se lea entera ──────────
+//
+// La pasada del 27-10 vio el rail de la clínica de Rosario diciendo
+// «Biomecáni…»: `CATEGORY_RAIL_WIDTH` deja 88 px de texto y
+// «Biomecánica» a 14 px pide 91. Lo que se prueba aquí es que la
+// etiqueta larga BAJA de cuerpo; que con ese cuerpo cabe, lo prueba
+// `clinica-10-puras` con las cinco categorías de Rosario.
+
+describe("clinica-10 (33) · la etiqueta larga del rail baja de cuerpo", () => {
+  function cuerpoDe(b: HTMLButtonElement): number {
+    return Number.parseFloat(b.style.fontSize);
+  }
+
+  it("«Biomecánica» se pinta más pequeña que «Cirugía»", async () => {
+    await render(["biomecánica", "cirugía", "quiropodia"]);
+    const porEtiqueta = (t: string) =>
+      railBotones().find((b) => (b.textContent ?? "").trim() === t)!;
+    expect(cuerpoDe(porEtiqueta("Biomecánica"))).toBeLessThan(
+      cuerpoDe(porEtiqueta("Cirugía")),
+    );
+  });
+
+  it("y las cortas se quedan en el cuerpo de v1.22 §4 (14 px)", async () => {
+    await render(["biomecánica", "cirugía", "quiropodia"]);
+    for (const t of ["Todos", "Cirugía", "Quiropodia"]) {
+      const b = railBotones().find((x) => (x.textContent ?? "").trim() === t)!;
+      expect(cuerpoDe(b)).toBe(14);
+    }
+  });
+});
+
+describe("clinica-10 (33) · y el nombre de la tarjeta tampoco se recorta", () => {
+  /** El `span` del nombre dentro de una tarjeta de producto. */
+  function nombreEnTarjeta(texto: string): HTMLElement {
+    const el = [...container.querySelectorAll("span")].find(
+      (x) => (x.textContent ?? "").trim() === texto,
+    );
+    if (!el) throw new Error(`no hay tarjeta de «${texto}»`);
+    return el as HTMLElement;
+  }
+
+  it("el nombre con la palabra larga se pinta más pequeño", async () => {
+    await render(["biomecánica", "cura"]);
+    const largo = nombreEnTarjeta("Producto de biomecánica");
+    const corto = nombreEnTarjeta("Producto de cura");
+    expect(Number.parseFloat(largo.style.fontSize)).toBeLessThan(
+      Number.parseFloat(corto.style.fontSize),
+    );
+    expect(Number.parseFloat(corto.style.fontSize)).toBe(16.5);
+  });
+
+  it("y lleva `break-words`, que es el suelo: una palabra no se recorta", async () => {
+    // El cuerpo es la primera capa y es una ESTIMACIÓN. `break-words`
+    // es la garantía: si la estimación se queda corta, la palabra se
+    // parte y se sigue leyendo entera, que es lo que se pedía.
+    await render(["biomecánica"]);
+    const el = nombreEnTarjeta("Producto de biomecánica");
+    expect(el.className).toContain("break-words");
+    expect(el.className).toContain("line-clamp-3");
+  });
+});
+
 describe("v1.22 §4 · handheld: el chip dice en qué categoría estás", () => {
   it("al elegir una del sheet, el chip de desbordamiento lleva SU nombre", async () => {
     await render();

@@ -2541,3 +2541,66 @@ describe("clinica-9 · la cita de otro día no se firma hoy", () => {
     });
   });
 });
+
+// ── clinica-10 (1) · EL «SIN NIVEL» LLEGA ENTERO HASTA LA HISTORIA ───
+//
+// La pantalla manda `nivelElegido: null` cuando la cita se reservó como
+// «Cura» —un servicio de la categoría quiropodia que no es ninguno de
+// los tres niveles— y no se ha marcado ningún acto (captura 10b de la
+// pasada del 27-10: la sesión abría cobrando «Quiropodia básica · 25 €»
+// que nadie había hecho).
+//
+// Este banco es por el esquema de Fastify, no por la regla: la regla
+// tiene su fichero en el paquete. Con `additionalProperties: false`, una
+// clave que el esquema no declare no da 400 — se borra en silencio y la
+// ruta no se entera (es la trampa de la casa). Aquí el `null` está
+// declarado, y lo que se comprueba es que llega.
+
+describe("clinica-10 (1) · el nivel de quiropodia puede no haberlo", () => {
+  it("`nivelElegido: null` cruza el esquema y la historia se escribe sin nivel", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: {
+        tipos: ["QUIROPODIA"],
+        bloques: { QUIROPODIA: { servicios: [VERRUGA], nivelElegido: null } },
+        dolor: 2,
+      },
+    });
+    expect(r.statusCode).toBe(201);
+    const cuerpo = await cuerpoClaroDe(
+      entradas.find((e) => e.kind === "TREATMENT_SESSION")!,
+      fakePrisma,
+    );
+    expect((cuerpo.bloques as any).QUIROPODIA.nivelElegido).toBeNull();
+    expect((cuerpo.bloques as any).QUIROPODIA.productoDelNivel).toBeNull();
+    // Y a caja va sólo lo que se marcó.
+    expect(cuerpo.tratamientos).toEqual([VERRUGA]);
+  });
+
+  it("sin la clave, el nivel se propone como siempre", async () => {
+    // La otra mitad: `undefined` NO es `null`. Un cuerpo malformado cobra
+    // la quiropodia que marcar el tipo implica.
+    conValoracionValidada();
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: {
+        tipos: ["QUIROPODIA"],
+        bloques: { QUIROPODIA: { servicios: [VERRUGA] } },
+        dolor: 2,
+      },
+    });
+    expect(r.statusCode).toBe(201);
+    const cuerpo = await cuerpoClaroDe(
+      entradas.find((e) => e.kind === "TREATMENT_SESSION")!,
+      fakePrisma,
+    );
+    expect((cuerpo.bloques as any).QUIROPODIA.nivelElegido).toBe(1);
+  });
+});

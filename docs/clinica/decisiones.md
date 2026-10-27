@@ -130,6 +130,26 @@ Mockup: `docs/mockups/clinica-historia-v2.html` (sustituye a `clinica-historia-f
 - **Sesión por tipo de visita** (mockup `docs/mockups/clinica-sesion-v2.html`): **una visita puede tener varios tipos** (Matías, 07-10: «permitimos, se anotan y se cobran»). Cada tipo marcado añade su tarjeta y su línea a caja (p. ej. quiropodia completa + cura de la cirugía). Quiropodia propone el nivel por lo hecho; pie de riesgo calcula el riesgo y propone el plazo de revisión; la revisión de cirugía valora la herida. Alertas cruzadas con lo que se hace (anticoagulada + cortar; diabética + infección). Reglas y precios del mockup son de ejemplo hasta validarlos con Rosario.
 - Referencia del software actual de Rosario: `docs/clinica/referencia-cogecop.md`. Gancho de venta: migración desde COGECOP (Firebird + carpeta de adjuntos), con contrato de encargado firmado antes.
 
+## Mínimos clics (Matías, 27-10-2026) — no se re-debate
+
+Salió de la pasada en hierro de clinica-9, viendo dar una cita y cobrar una
+primera visita: **mínimos clics posibles**.
+
+> Lo que el sistema ya sabe —el servicio reservado, la paciente, la fecha
+> propuesta— **viene puesto**; quien atiende sólo toca para **quitar o
+> cambiar**, nunca para confirmar lo obvio.
+
+Alcance: toda pantalla que Rosario toque decenas de veces al día. Primer bloque
+que la aplica, `clinica-10` (`docs/blocks/clinica-10-done.md`): los servicios
+reservados nacen marcados en la sesión. Lo siguiente que la pide es el embudo de
+«Nueva cita» (~10 toques; 5 tocando la rejilla), que va al bloque común de
+agenda.
+
+Lo que la regla **no** permite: marcar por el paciente algo que nadie eligió. La
+diabetes recomienda «Pie de riesgo» y no lo marca (clinica-8, fase B, 13b),
+porque el tipo de visita queda ESCRITO en la historia. La regla es «no pidas que
+confirmen lo que ya está dicho», no «decide tú».
+
 ## Pendiente
 - `clinica-1`: CI verde → merge del PR #7 → copia de la BD → despliegue (lleva migración).
 - Siguiente bloque: valoración inicial (pieza 1), con su mockup antes.

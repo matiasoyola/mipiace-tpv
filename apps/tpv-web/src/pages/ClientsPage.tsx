@@ -427,6 +427,9 @@ function ClientDetailDrawer({
               <div className="max-w-[1180px] mx-auto">
                 <HistoriaViva
                   clientId={clientId}
+                  // clinica-10 (H3) · el Atrás de Android cierra la
+                  // historia, igual que el botón de la cabecera.
+                  onCerrar={() => setHistoriaAbierta(false)}
                   // Sin `onEmpezarVisita`: desde la ficha de un cliente no
                   // hay CITA, y una sesión clínica cuelga de una cita desde
                   // clinica-3 (§8.6). La tarjeta de «Hoy toca» se ve igual

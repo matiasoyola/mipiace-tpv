@@ -7,7 +7,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { leerDispositivo, nombreDeDispositivo } from "../src/lib/nombre-de-dispositivo.js";
+import {
+  leerDispositivo,
+  nombreDeDispositivo,
+  pareceUserAgent,
+} from "../src/lib/nombre-de-dispositivo.js";
 
 // El user-agent EXACTO de la Lenovo Tab M11 con la APK 1.26.0, que es lo
 // que la auditoría del 18-10 vio en la lista de Dispositivos.
@@ -87,6 +91,55 @@ describe("clinica-8 (18) · un dispositivo con nombre legible", () => {
     expect(nombreDeDispositivo({ userAgent: "curl/8.4.0" })).toBe(
       "Dispositivo sin nombre",
     );
+  });
+});
+
+// ── clinica-10 (paso 38) · y por qué no se veía nada de lo de arriba ──
+//
+// La pasada del 27-10 volvió a ver «Mozilla/5.0 (Linux; Android 14;
+// TB311FU…» en Dispositivos, con todo lo de arriba ya escrito y en
+// verde. El lector no se llegaba a usar: `PairScreen` emparejaba
+// mandando `deviceName: navigator.userAgent.slice(0, 80)`, o sea el
+// user-agent CRUDO y cortado a 80 en la columna del NOMBRE — y un
+// nombre puesto manda, que es lo correcto.
+//
+// Lo arregla `PairScreen` (ya no manda nombre) y lo de aquí es para las
+// tablets que YA están emparejadas: nada de migración, se ignora al
+// leer.
+
+describe("clinica-10 (38) · un user-agent en la columna del nombre no es un nombre", () => {
+  /** Lo que la Lenovo escribió al emparejarse: la cadena cortada a 80. */
+  const NOMBRE_HEREDADO = LENOVO_APK.slice(0, 80);
+
+  it("la fila que ya existe se lee igual que si no tuviera nombre", () => {
+    expect(
+      nombreDeDispositivo({ name: NOMBRE_HEREDADO, userAgent: LENOVO_APK }),
+    ).toBe("Android 14 · TB311FU · app");
+  });
+
+  it("y si el user-agent de verdad no viene, se lee del nombre", () => {
+    // Una fila vieja puede tener el user-agent sólo en `name`. Lo que se
+    // tira es el SITIO donde estaba, no el dato.
+    expect(nombreDeDispositivo({ name: NOMBRE_HEREDADO })).toBe(
+      "Android 14 · TB311FU · app",
+    );
+  });
+
+  it("el criterio es estrecho: un nombre de persona no se parece a esto", () => {
+    expect(pareceUserAgent(NOMBRE_HEREDADO)).toBe(true);
+    expect(pareceUserAgent(LENOVO_APK)).toBe(true);
+    for (const puesto of [
+      "Caja 1",
+      "Tablet de Rosario",
+      "Mostrador",
+      "Consulta · Lenovo",
+      "iPad de la sala",
+    ]) {
+      expect(pareceUserAgent(puesto)).toBe(false);
+      expect(nombreDeDispositivo({ name: puesto, userAgent: LENOVO_APK })).toBe(
+        puesto,
+      );
+    }
   });
 });
 
