@@ -11,7 +11,7 @@
 // día— antes de pedir el fondo de caja del turno nuevo.
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, Lock } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 
 import {
   apiWithCashier,
@@ -497,60 +497,15 @@ export function App() {
   // navegador abierta llega a `/tickets` igual.
   if (cashier.cashier.role === "CLINICIAN") {
     return (
-      <LoggedInWrapper
+      <AgendaDelSanitario
+        cashier={cashier.cashier}
         autoLogoutMinutes={tenant.cashierAutoLogoutMinutes}
-        onAutoLogout={() => {
+        bonoEtiqueta={tenant.bonoEtiqueta}
+        onSalir={() => {
           clearCashierSession();
           setCashier({ kind: "needsLogin" });
         }}
-        // ── pin-1 (punto 1) · EL SANITARIO TAMBIÉN CAMBIA SU PIN ──────
-        //
-        // Su TPV es la agenda y nada más: no tiene el cajón de la venta,
-        // que es donde está «Cambiar mi PIN» para todos los demás. Sin
-        // esto, la única persona que entra con PIN y no puede cambiarlo
-        // sería justo la que no tiene otra puerta — al panel no entra
-        // (`CASHIER_NOT_ALLOWED_IN_ADMIN`).
-        //
-        // Va como un botón flotante de `LoggedInWrapper` y no dentro de
-        // la agenda por una razón de propiedad: la agenda la pinta
-        // `AgendaPage`, y el PIN no es de la agenda. Es de la sesión,
-        // igual que el chip del outbox y la banda del ensayo, que ya
-        // viven en este mismo wrapper por lo mismo.
-        conCambiarMiPin={cashierDisplayLabel(cashier.cashier)}
-      >
-        <AgendaPage
-          // B-reservas-8 · la palabra del centro para los bonos. El
-          // sanitario sin caja ve la agenda y puede dar la próxima cita,
-          // así que necesita la etiqueta igual que el mostrador — lo que
-          // no ve son los euros, y eso lo decide la API.
-          bonoEtiqueta={tenant.bonoEtiqueta}
-          // clinica-2 · lleva la marca por construcción: `role=CLINICIAN`
-          // implica `isClinician` por CHECK de la base
-          // (`users_clinician_implies_flag`). Se lee del login de todos
-          // modos en vez de darlo por hecho — el día que el rol y la marca
-          // se desacoplaran, esta pantalla no tendría que acordarse.
-          esSanitario={cashier.cashier.isClinician ?? true}
-          // Su día, de entrada. La decisión de producto es «ve su agenda,
-          // con sus citas por defecto»: el filtro arranca puesto en él y
-          // se puede quitar — las citas de las compañeras no son datos de
-          // salud (la agenda sólo enseña contacto), y necesita verlas para
-          // saber si la sala está ocupada.
-          staffFilterInicial={cashier.cashier.id}
-          // Sin `SalePage` detrás, «Volver» no tiene a dónde volver: es
-          // la salida de la sesión. Es la misma decisión que el botón
-          // Bloquear del cajero, con el único botón que esta pantalla
-          // tiene.
-          onClose={() => {
-            clearCashierSession();
-            setCashier({ kind: "needsLogin" });
-          }}
-          // Y cobrar una cita no se le ofrece: el botón no se pinta. Si
-          // alguien llamara al endpoint a mano, la API lo rechaza igual
-          // — esconder el botón es por no ofrecer una acción que siempre
-          // falla, no por seguridad.
-          puedeCobrar={false}
-        />
-      </LoggedInWrapper>
+      />
     );
   }
 
@@ -685,22 +640,100 @@ function applyShiftState(
   }
 }
 
+// ── clinica-1 · EL TPV DEL SANITARIO, EN SU PROPIO COMPONENTE ───────
+//
+// Era el cuerpo de un `if` dentro de `App`. Sale aquí porque necesita
+// estado propio —si tiene la hoja del PIN abierta— y un `useState` dentro
+// de un `if` sería un hook condicional.
+//
+// Lo que pinta es la agenda y nada más: ni venta, ni turno, ni cajón, ni
+// informes. La caja la cierra la API (`ensureCajaEnabled`); esconder la
+// pantalla no es gatear, y un sanitario con curiosidad y la consola del
+// navegador abierta llega a `/tickets` igual.
+//
+// Exportado por lo mismo que `TpvHome`: lo que hay que poder medir es que
+// esta rama PASA `onCambiarMiPin`, y eso no se ve desde `AgendaPage`
+// (pin-1 · «verde pero nadie la llama»). En producción sólo lo monta
+// `App`.
+export function AgendaDelSanitario({
+  cashier,
+  autoLogoutMinutes,
+  bonoEtiqueta,
+  onSalir,
+}: {
+  cashier: CashierUser;
+  autoLogoutMinutes: number;
+  bonoEtiqueta?: string;
+  /** Salir de la sesión. Sin `SalePage` detrás, «Volver» no tiene a dónde
+   *  volver: es la misma decisión que el botón Bloquear del cajero, con
+   *  el único botón que esta pantalla tiene. */
+  onSalir: () => void;
+}) {
+  // pin-1 · «Cambiar mi PIN». El estado vive AQUÍ y el botón lo pinta la
+  // cabecera de la agenda (`onCambiarMiPin`): es la única pantalla que
+  // esta persona tiene, así que es donde tiene que estar.
+  const [cambiandoPin, setCambiandoPin] = useState(false);
+  return (
+    <LoggedInWrapper
+      autoLogoutMinutes={autoLogoutMinutes}
+      onAutoLogout={onSalir}
+    >
+      <AgendaPage
+        // B-reservas-8 · la palabra del centro para los bonos. El
+        // sanitario sin caja ve la agenda y puede dar la próxima cita,
+        // así que necesita la etiqueta igual que el mostrador — lo que
+        // no ve son los euros, y eso lo decide la API.
+        bonoEtiqueta={bonoEtiqueta}
+        // clinica-2 · lleva la marca por construcción: `role=CLINICIAN`
+        // implica `isClinician` por CHECK de la base
+        // (`users_clinician_implies_flag`). Se lee del login de todos
+        // modos en vez de darlo por hecho — el día que el rol y la marca
+        // se desacoplaran, esta pantalla no tendría que acordarse.
+        esSanitario={cashier.isClinician ?? true}
+        // Su día, de entrada. La decisión de producto es «ve su agenda,
+        // con sus citas por defecto»: el filtro arranca puesto en él y
+        // se puede quitar — las citas de las compañeras no son datos de
+        // salud (la agenda sólo enseña contacto), y necesita verlas para
+        // saber si la sala está ocupada.
+        staffFilterInicial={cashier.id}
+        onClose={onSalir}
+        // pin-1 · EL PIN, EN LA CABECERA DE LA AGENDA.
+        //
+        // En la primera pasada del bloque era un botón flotante colgado
+        // de `LoggedInWrapper`, porque `AgendaPage` era de la rama
+        // `agenda-1` esa tarde. Ya no: el prop existe, lo pinta la
+        // cabecera junto al ⋯ de las ausencias, y sólo se pinta cuando se
+        // pasa — la cajera no pierde píxeles por un botón que ya tiene en
+        // el cajón de la venta.
+        onCambiarMiPin={() => setCambiandoPin(true)}
+        // Y cobrar una cita no se le ofrece: el botón no se pinta. Si
+        // alguien llamara al endpoint a mano, la API lo rechaza igual
+        // — esconder el botón es por no ofrecer una acción que siempre
+        // falla, no por seguridad.
+        puedeCobrar={false}
+      />
+      {cambiandoPin && (
+        <CambiarPinSheet
+          contexto={{ modo: "cambiar" }}
+          nombre={cashierDisplayLabel(cashier)}
+          onHecho={() => setCambiandoPin(false)}
+          onCancelar={() => setCambiandoPin(false)}
+        />
+      )}
+    </LoggedInWrapper>
+  );
+}
+
 function LoggedInWrapper({
   autoLogoutMinutes,
   onAutoLogout,
   children,
-  conCambiarMiPin,
 }: {
   autoLogoutMinutes: number;
   onAutoLogout: () => void;
   children: React.ReactNode;
-  /** pin-1 · el nombre de quien está dentro, cuando esta pantalla tiene
-   *  que ofrecer «Cambiar mi PIN» por su cuenta. Sólo lo pasa la rama
-   *  del sanitario: el resto lo tiene en el cajón de la venta. */
-  conCambiarMiPin?: string;
 }) {
   useInactivityLogout(true, autoLogoutMinutes, onAutoLogout);
-  const [cambiandoPin, setCambiandoPin] = useState(false);
   // puesta-en-marcha (ADR-021) · la banda del ensayo, encima de TODAS las
   // pantallas con cajero dentro: venta, mapa de sala, apertura y cierre de
   // turno, agenda. Va aquí y no en cada pantalla por lo mismo que el chip
@@ -724,31 +757,6 @@ function LoggedInWrapper({
         children
       )}
       <OutboxChip />
-      {/* pin-1 · abajo a la IZQUIERDA. El chip del outbox vive abajo a la
-          derecha (`bottom-3 right-3`) y lo único que la agenda pinta
-          abajo es un aviso centrado, así que este rincón está libre. El
-          z-index sube por encima del `z-40` de la agenda, que es lo que
-          lo hace alcanzable desde ella. */}
-      {conCambiarMiPin !== undefined && (
-        <button
-          type="button"
-          data-testid="sanitario-cambiar-mi-pin"
-          onClick={() => setCambiandoPin(true)}
-          title="Cambiar mi PIN"
-          className="fixed bottom-3 left-3 z-[45] h-11 px-3.5 rounded-full bg-white border border-slate-200 shadow-lg text-[12.5px] font-medium text-slate-600 flex items-center gap-2"
-        >
-          <KeyRound className="w-4 h-4 shrink-0" strokeWidth={2.1} />
-          Mi PIN
-        </button>
-      )}
-      {cambiandoPin && (
-        <CambiarPinSheet
-          contexto={{ modo: "cambiar" }}
-          nombre={conCambiarMiPin ?? ""}
-          onHecho={() => setCambiandoPin(false)}
-          onCancelar={() => setCambiandoPin(false)}
-        />
-      )}
     </>
   );
 }

@@ -20,6 +20,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  KeyRound,
   Loader2,
   MoreVertical,
   Plus,
@@ -392,6 +393,22 @@ export interface AgendaPageProps {
    * clínica «bono». Ausente → «bono», el default de la columna.
    */
   bonoEtiqueta?: string;
+  /**
+   * pin-1 · «CAMBIAR MI PIN», PARA QUIEN SÓLO TIENE ESTA PANTALLA.
+   *
+   * El sanitario sin caja entra al TPV con su PIN y lo único que ve es la
+   * agenda: no tiene el cajón de la venta, que es donde «Cambiar mi PIN»
+   * está para todos los demás. Y al panel no entra —el login se lo dice
+   * con `CASHIER_NOT_ALLOWED_IN_ADMIN`—, así que sin esto sería la única
+   * persona que entra con PIN y no puede cambiarlo.
+   *
+   * **Sólo lo pasa la rama del sanitario** (`App.tsx`). Ausente, el botón
+   * no se pinta: esta barra no tiene píxeles de sobra a 390 (la lección
+   * de B-reservas-5 F8 es que lo que se cortaba era la acción principal),
+   * y a la cajera no se le quita sitio para un botón que ya tiene en el
+   * cajón.
+   */
+  onCambiarMiPin?: () => void;
   onEnterDraft?: (entry: {
     appointmentId: string;
     ticketId: string;
@@ -404,6 +421,7 @@ export interface AgendaPageProps {
 
 export function AgendaPage({
   onClose,
+  onCambiarMiPin,
   onEnterDraft,
   notice,
   onNoticeShown,
@@ -1696,6 +1714,22 @@ export function AgendaPage({
             aria-label={`Opciones de ${unaSola.displayName}`}
           >
             <MoreVertical className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* pin-1 · el PIN de quien sólo tiene esta pantalla. Ver
+            `onCambiarMiPin` en los props: sólo se pinta para el sanitario
+            sin caja, que no tiene cajón de venta ni panel al que entrar.
+            `aria-label` y no `title` — en la agenda los tooltips están
+            prohibidos (ux-principles §6) y hay un banco que lo vigila. */}
+        {onCambiarMiPin && (
+          <button
+            data-test="cambiar-mi-pin"
+            onClick={onCambiarMiPin}
+            className="h-11 w-11 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-200 flex items-center justify-center text-slate-600"
+            aria-label="Cambiar mi PIN"
+          >
+            <KeyRound className="w-5 h-5" strokeWidth={2.1} />
           </button>
         )}
       </div>
