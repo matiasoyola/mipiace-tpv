@@ -358,7 +358,7 @@ es lo que queda para la pasada en hierro (§9).
 
 ## 7 · El bucle visual
 
-11 capturas en `docs/blocks/pin-1-shots/`: cinco del TPV (1280×800 y el N1 a 360×648) y seis del
+13 capturas en `docs/blocks/pin-1-shots/`: cinco del TPV (1280×800 y el N1 a 360×648) y seis del
 panel (1280×900). Sin errores de consola en ninguna.
 
 Para sacarlas hizo falta **un banco visual del panel** (`apps/admin/visual/`), que no existía: es
@@ -494,6 +494,7 @@ es volver a ese problema. La cajera tiene su «Cambiar mi PIN» en el cajón de 
 | A3 | `AgendaDelSanitario` deja de pasar `onCambiarMiPin` | 2 / 9 |
 | A4 | El botón usa `title` en vez de `aria-label` | 1 / 9 |
 | A5 | El botón se pinta FUERA de la barra, suelto en la raíz | 1 / 9 |
+| A6 | El botón vuelve al FINAL de la barra (donde se cae a 390) | 1 / 10 |
 
 **A5 salió verde a la primera, y por eso está escrito.** La comprobación de «está en la barra»
 hacía `botón.parentElement.querySelector('[data-test="dar-cita"]')`, y la raíz de la pantalla
@@ -504,3 +505,31 @@ medía otra cosa.
 
 El `A3` es el que cierra «verde pero nadie la llama»: un prop que `AgendaPage` sabe pintar y que
 nadie pasa es un botón que no existe.
+
+### El botón va a la IZQUIERDA, y es una medida
+
+La primera versión lo puso al final de la barra, junto al ⋯ de las ausencias. El banco visual lo
+midió y lo devolvió:
+
+| Pantalla | Ancho de la barra | «Dar cita» | «Mi PIN» |
+|---|---|---|---|
+| agenda **sin** el botón · 1280 | 1280 | cabe (1256) | — |
+| agenda **sin** el botón · **390** | **567** | **FUERA (567)** | — |
+| con el botón al final · 390 | 619 | FUERA | **FUERA (619)** |
+| con el botón pegado a «Volver» · 390 | 619 | FUERA | **cabe (108)** |
+
+Dos cosas, y conviene no confundirlas:
+
+1. **La barra de la agenda ya no cabe a 390 sin este bloque.** Con dos profesionales mide 567 px y
+   «Dar cita» —la acción principal— se sale por la derecha. **Es anterior a pin-1** (se mide con
+   `?screen=agenda`, que no lleva el botón) y **no se toca aquí**: es la barra de agenda-1 y
+   arreglarla es de su rama. Queda dicho porque está medido, no porque se sospeche (ver §9.4).
+2. **Lo que sí es de este bloque**: no añadir un botón al final de una barra que ya se desborda.
+   Al final habría sido el primero en caerse, y el de la sanitaria es justo el que no puede
+   caerse — no tiene otro camino. Pegado a «Volver» queda a 108 px del borde izquierdo y no
+   depende de lo que haga el resto de la barra.
+
+Y es donde le toca por significado: «Volver» es su salida de la sesión y «Mi PIN» su credencial.
+Las dos son de ella; lo de en medio es de la agenda.
+
+Capturas: `pin-06-agenda-sanitaria.png` (1280×800) y `pin-07-agenda-sanitaria-390.png`.
