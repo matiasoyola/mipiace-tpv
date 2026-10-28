@@ -1748,7 +1748,6 @@ export function AgendaPage({
             <MoreVertical className="w-5 h-5" />
           </button>
         )}
-
       </div>
 
       {/* B-reservas-6a frente O · un alta que el servidor rechazó no puede
