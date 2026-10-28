@@ -29,6 +29,7 @@
 //   3. `AgendaDelSanitario` deja de pasar `onCambiarMiPin` ····· caen 2
 //   4. el botón usa `title` en vez de `aria-label` ············· cae 1
 //   5. el botón se pinta FUERA de la barra, suelto en la raíz ·· cae 1
+//   6. el botón vuelve al FINAL de la barra (donde se cae a 390) · cae 1
 //
 // El 5 salió verde a la primera y por eso está escrito: la comprobación
 // de «está en la barra» usaba `querySelector` sobre el padre, y la raíz
@@ -236,6 +237,27 @@ describe("está en la barra de la cabecera, y se llama", () => {
     // tablet no existe el hover). El icono solo no es un nombre.
     expect(boton()!.getAttribute("aria-label")).toBe("Cambiar mi PIN");
     expect(boton()!.getAttribute("title")).toBeNull();
+  });
+
+  it("va pegado a «Volver», no al final de la barra", async () => {
+    // Y esto es una medida, no un gusto. A 390 px la barra de la agenda
+    // mide 567 y «Dar cita» ya se sale por la derecha SIN este botón
+    // (medido en el banco visual el 28-10). Un botón más al final sería
+    // el primero en caerse, y el de la sanitaria es justo el que no
+    // puede caerse: no tiene otro camino.
+    //
+    // Se mira el ORDEN en el documento, que es lo que decide quién se
+    // cae cuando la barra no cabe.
+    const barra = boton()!.parentElement!;
+    const hijos = [...barra.children];
+    const iVolver = hijos.findIndex((h) => h.matches('[aria-label="Volver"]'));
+    const iPin = hijos.indexOf(boton()!);
+    const iDarCita = hijos.findIndex((h) =>
+      h.matches('[data-test="dar-cita"]'),
+    );
+    expect(iVolver).toBeGreaterThanOrEqual(0);
+    expect(iPin).toBe(iVolver + 1);
+    expect(iPin).toBeLessThan(iDarCita);
   });
 
   it("mide lo que mide un objetivo táctil de la casa", async () => {

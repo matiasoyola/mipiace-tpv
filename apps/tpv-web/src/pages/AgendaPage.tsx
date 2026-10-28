@@ -1607,6 +1607,38 @@ export function AgendaPage({
           <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
         </button>
 
+        {/* ── pin-1 · «CAMBIAR MI PIN», PEGADO A «VOLVER» ─────────────
+
+            Sólo se pinta para el sanitario sin caja (ver `onCambiarMiPin`
+            en los props): es el único que no tiene cajón de venta ni
+            panel al que entrar, así que esta pantalla es su único sitio.
+
+            **Va a la IZQUIERDA y no al final de la barra**, y es una
+            medida y no un gusto. A 390 px esta barra mide 567 y «Dar
+            cita» ya se sale por la derecha sin este botón (medido en el
+            banco visual el 28-10, con dos profesionales). Un botón más
+            al final sería el primero en caerse — y el de la sanitaria es
+            justo el que no puede caerse, porque no tiene otro. Pegado a
+            «Volver» está a 100 px del borde izquierdo y no depende de lo
+            que haga el resto de la barra.
+
+            Y es donde le toca por significado: «Volver» es su salida de
+            la sesión y esto es su credencial. Las dos son de ella; lo de
+            en medio es de la agenda.
+
+            `aria-label` y no `title` — en la agenda los tooltips están
+            prohibidos (ux-principles §6) y hay un banco que lo vigila. */}
+        {onCambiarMiPin && (
+          <button
+            data-test="cambiar-mi-pin"
+            onClick={onCambiarMiPin}
+            className="h-11 w-11 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-200 flex items-center justify-center text-slate-600"
+            aria-label="Cambiar mi PIN"
+          >
+            <KeyRound className="w-5 h-5" strokeWidth={2.1} />
+          </button>
+        )}
+
         {/* agenda-1 · EL TÍTULO SE VA DE LA VISTA, NO DEL DOCUMENTO.
             El tablero 1 no lleva «Agenda» escrito: el rótulo de la fecha y
             el conmutador Día|Semana ya dicen dónde estás, y esos 66 px son
@@ -1717,21 +1749,6 @@ export function AgendaPage({
           </button>
         )}
 
-        {/* pin-1 · el PIN de quien sólo tiene esta pantalla. Ver
-            `onCambiarMiPin` en los props: sólo se pinta para el sanitario
-            sin caja, que no tiene cajón de venta ni panel al que entrar.
-            `aria-label` y no `title` — en la agenda los tooltips están
-            prohibidos (ux-principles §6) y hay un banco que lo vigila. */}
-        {onCambiarMiPin && (
-          <button
-            data-test="cambiar-mi-pin"
-            onClick={onCambiarMiPin}
-            className="h-11 w-11 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-200 flex items-center justify-center text-slate-600"
-            aria-label="Cambiar mi PIN"
-          >
-            <KeyRound className="w-5 h-5" strokeWidth={2.1} />
-          </button>
-        )}
       </div>
 
       {/* B-reservas-6a frente O · un alta que el servidor rechazó no puede

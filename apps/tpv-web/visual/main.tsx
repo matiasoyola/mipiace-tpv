@@ -64,8 +64,10 @@
 //     «biomecánica» se salía de la tarjeta.
 //   pin-1: `cambiar-pin` (PIN actual + nuevo + repetir, desde el cajón del
 //     TPV), `elegir-pin` (la pantalla que obliga a elegir el propio tras
-//     entrar con un PIN provisional: sin el campo del actual) y
-//     `pin-login` (la pantalla de entrada, para ver que no se movió)
+//     entrar con un PIN provisional: sin el campo del actual),
+//     `pin-login` (la pantalla de entrada, para ver que no se movió) y
+//     `agenda-sanitaria` (la agenda con «Cambiar mi PIN» en la cabecera:
+//     es la única pantalla que la sanitaria sin caja tiene)
 //   catalogo-local: `?sin-holded=1` apaga el interruptor de Holded (la venta
 //     del comercio que no lo usa: sin "Cliente" en el menú del ticket y sin
 //     "Fiado" en el cobro) y `?fiado=1` enciende la venta a crédito, que
@@ -2282,6 +2284,19 @@ function Bench() {
   // El punto de ENTRADA a la agenda: la venta de Sole con el botón
   // "Agenda" en la barra. La mudanza cambia a quién llama ese botón, así
   // que la captura tiene que salir igual antes y después.
+  // pin-1 · la agenda de la SANITARIA: la misma pantalla, con el botón
+  // de «Cambiar mi PIN» en la cabecera. Es lo único que ella ve del TPV.
+  if (screen === "agenda-sanitaria") {
+    return (
+      <Screens.AgendaPage
+        onClose={() => {}}
+        esSanitario
+        puedeCobrar={false}
+        onCambiarMiPin={() => {}}
+      />
+    );
+  }
+
   if (screen === "agenda-entrada") {
     return <AgendaEntrada Screens={Screens} />;
   }

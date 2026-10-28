@@ -32,11 +32,11 @@ veces en la misma mañana: las dos hubo que ir a super-admin → «Configurar co
 | «PIN provisional del propietario», sólo en sesión de soporte | la misma (`PinDeSoporteSection`) |
 | La hoja del PIN del TPV, en sus dos modos | `apps/tpv-web/src/components/CambiarPinSheet.tsx` |
 | «Cambiar mi PIN» en el cajón del TPV | `apps/tpv-web/src/pages/SalePage.tsx` |
-| «Mi PIN» flotante para el sanitario (sólo tiene la agenda) | `apps/tpv-web/src/App.tsx` (`LoggedInWrapper`) |
+| «Cambiar mi PIN» en la cabecera de la agenda, para el sanitario | `apps/tpv-web/src/pages/AgendaPage.tsx` (`onCambiarMiPin`) · `App.tsx` (`AgendaDelSanitario`) |
 | El cuarto estado del panel de soporte: `PIN_PROVISIONAL` | `apps/api/src/superadmin/tenant-cashiers.ts` · `CashiersPanel.tsx` |
 | Banco visual del panel (nuevo) | `apps/admin/visual/` |
 
-**Tests nuevos: 8 ficheros, 144 casos.**
+**Tests nuevos: 9 ficheros, 153 casos.**
 
 | Fichero | Casos |
 |---|---|
@@ -48,6 +48,7 @@ veces en la misma mañana: las dos hubo que ir a super-admin → «Configurar co
 | `apps/api/test/pin-1-correos.test.ts` | 8 |
 | `apps/tpv-web/test/pin-1-cambiar-pin.test.tsx` | 15 |
 | `apps/admin/test/pin-1-mi-cuenta.test.tsx` | 13 |
+| `apps/tpv-web/test/pin-1-agenda-mi-pin.test.tsx` | 9 |
 
 Y **cinco bancos de la casa ampliados, no bajados**: `contrato-lectura-completa-pin` (su
 invariante sale más fuerte: ahora NINGÚN camino genera un PIN), `h1-activacion-sin-caja`,
@@ -83,8 +84,10 @@ Dónde está el botón:
 * **panel** → Mi cuenta → «Mi PIN del TPV», con los tres campos a la vista (sin abrir nada: la
   decisión del bloque es «mínimos clics»);
 * **TPV** → el cajón → «Cambiar mi PIN», justo encima de «Bloquear»;
-* **TPV del sanitario** → un botón flotante abajo a la izquierda. Su TPV es sólo la agenda, y la
-  agenda es de otra sesión esta pasada (ver §9).
+* **TPV del sanitario** → la cabecera de la agenda, junto al ⋯ de las ausencias. Su TPV es sólo
+  la agenda, así que es donde tiene que estar. El botón lo pinta `AgendaPage` con el prop
+  `onCambiarMiPin`, y **sólo lo pasa su rama**: esa barra no tiene píxeles de sobra a 390 (la
+  lección de B-reservas-5 F8), y la cajera ya lo tiene en el cajón.
 
 ### 2 · Olvidé mi PIN, la propietaria
 
@@ -437,13 +440,7 @@ su razón escrita en el barrido del inventario) y cambiar el formato (4-8 cifras
      NULL` tiene que fallar;
    * revocar un cajero con PIN provisional (S25 contra la base de verdad);
    * el ciclo completo en el N1: alta con PIN provisional → login → elegir → entrar → vender.
-2. **El TPV del sanitario.** «Cambiar mi PIN» le llega por un botón flotante de
-   `LoggedInWrapper`, porque su única pantalla es la agenda y `AgendaPage.tsx` es de la sesión
-   `agenda-1` esta pasada. Lo natural, cuando esa rama cierre, es una entrada en la cabecera de la
-   agenda (un prop `onCambiarMiPin` y una línea en su menú) y quitar el flotante. **No es un
-   hueco funcional**: puede cambiar su PIN hoy, y la pantalla que le obliga a elegirlo tras un
-   provisional funciona igual para él.
-3. **La pantalla de `pin_changes`.** La tabla se llena desde el primer cambio; no hay dónde
+2. **La pantalla de `pin_changes`.** La tabla se llena desde el primer cambio; no hay dónde
    mirarla más que en la base. Es deliberado (§2.7).
 
 ---
@@ -458,6 +455,52 @@ su razón escrita en el barrido del inventario) y cambiar el formato (4-8 cifras
 | `f2e1275` | El bucle visual: dos columnas en mostrador, cabe en la mano, banco visual del panel, 11 capturas |
 | `9cfb7bf` | Merge de `origin/master` (`503354a`, clinica-10) — suite verde después |
 | `b42d19f` | Este documento |
+| `893086c` | «Cambiar mi PIN» sube a la cabecera de la agenda (ver §11) |
+| `e540d2b` | El sabotaje A5: el botón tiene que estar en la barra, no sólo en la pantalla |
 
 **PR [#52](https://github.com/matiasoyola/mipiace-tpv/pull/52)**, con la CI en verde: `ci`, `e2e`
 y `smoke` pasan en los dos runs (el del push y el del PR, que mergea el master de ahora).
+
+---
+
+## 11 · El botón del sanitario, a su sitio (28-10)
+
+Cuando se escribió el bloque, `AgendaPage.tsx` era de la sesión `agenda-1` y no se podía tocar, así
+que «Cambiar mi PIN» de la sanitaria se resolvió con un botón flotante colgado de
+`LoggedInWrapper`. Con agenda-1 en master (PR #51), la rama se **rebasa sobre `origin/master`** y
+el botón se va a donde le tocaba: **la cabecera de la agenda**, junto al ⋯ de las ausencias.
+
+| Qué | Dónde |
+|---|---|
+| El prop | `AgendaPage.tsx` · `onCambiarMiPin?: () => void` |
+| El botón | la barra de la cabecera, `h-11 w-11`, `aria-label` (en la agenda los tooltips están prohibidos, ux-principles §6) |
+| Quién lo pasa | `App.tsx` · `AgendaDelSanitario`, **y sólo él** |
+
+**La rama del `CLINICIAN` sale de un `if` dentro de `App` a su propio componente.** No es
+cosmética: necesita estado propio (si la hoja del PIN está abierta) y un `useState` dentro de un
+`if` sería un hook condicional. Se exporta por lo mismo que `TpvHome` — lo que hay que poder medir
+es que esta rama **pasa** el prop, y eso no se ve desde `AgendaPage`.
+
+**El prop es opcional y la cajera no lo recibe.** Esa barra es la que B-reservas-5 F8 tuvo que
+rescatar a 390 px, y lo que se cortaba era la acción principal: un control más para todo el mundo
+es volver a ese problema. La cajera tiene su «Cambiar mi PIN» en el cajón de la venta.
+
+**Sabotajes nuevos (5), cada uno con el fichero entero en rojo:**
+
+| # | Sabotaje | Casos en rojo |
+|---|---|---|
+| A1 | El botón se pinta siempre, sin mirar el prop | 1 / 9 |
+| A2 | El botón no se pinta nunca | 7 / 9 |
+| A3 | `AgendaDelSanitario` deja de pasar `onCambiarMiPin` | 2 / 9 |
+| A4 | El botón usa `title` en vez de `aria-label` | 1 / 9 |
+| A5 | El botón se pinta FUERA de la barra, suelto en la raíz | 1 / 9 |
+
+**A5 salió verde a la primera, y por eso está escrito.** La comprobación de «está en la barra»
+hacía `botón.parentElement.querySelector('[data-test="dar-cita"]')`, y la raíz de la pantalla
+contiene la cabecera entera: un botón colgado de la raíz pasaba igual. Ahora se compara el padre
+**inmediato** con el de «Dar cita» y el de «Volver». Es la misma trampa que
+`scrollWidth miente con overflow-y-auto`: la comprobación parecía medir dónde está el botón y
+medía otra cosa.
+
+El `A3` es el que cierra «verde pero nadie la llama»: un prop que `AgendaPage` sabe pintar y que
+nadie pasa es un botón que no existe.
