@@ -25,9 +25,15 @@
 // ── Tabla de sabotajes (cada uno visto en rojo, fichero entero) ──────
 //
 //   1. el botón se pinta siempre (sin mirar el prop) ··········· cae 1
-//   2. el botón no se pinta nunca ····························· caen 4
+//   2. el botón no se pinta nunca ····························· caen 7
 //   3. `AgendaDelSanitario` deja de pasar `onCambiarMiPin` ····· caen 2
 //   4. el botón usa `title` en vez de `aria-label` ············· cae 1
+//   5. el botón se pinta FUERA de la barra, suelto en la raíz ·· cae 1
+//
+// El 5 salió verde a la primera y por eso está escrito: la comprobación
+// de «está en la barra» usaba `querySelector` sobre el padre, y la raíz
+// de la pantalla contiene la cabecera entera. Se compara el padre
+// INMEDIATO.
 //
 // Lo que este banco NO puede ver: si el botón cabe a 390 px. Eso lo
 // contestan las capturas del bloque.
@@ -207,11 +213,22 @@ describe("está en la barra de la cabecera, y se llama", () => {
   });
 
   it("vive en la MISMA barra que «Volver» y «Dar cita»", async () => {
-    // No vale con que exista: tiene que estar donde se mira. La barra se
-    // identifica por los dos controles que la definen.
-    const barra = boton()!.parentElement!;
-    expect(barra.querySelector('[data-test="dar-cita"]')).not.toBeNull();
-    expect(barra.querySelector('[aria-label="Volver"]')).not.toBeNull();
+    // No vale con que exista: tiene que estar donde se mira.
+    //
+    // Y se compara el padre INMEDIATO, no `barra.querySelector(...)`: con
+    // la búsqueda por descendientes, un botón colgado suelto de la raíz
+    // de la pantalla pasaba en verde —la raíz contiene la cabecera, así
+    // que «Dar cita» se encontraba igual—. Medido con el sabotaje A5, que
+    // sacaba el botón de la barra y no ponía nada rojo.
+    const barra = boton()!.parentElement;
+    const barraDeDarCita = container.querySelector(
+      '[data-test="dar-cita"]',
+    )!.parentElement;
+    const barraDeVolver = container.querySelector(
+      '[aria-label="Volver"]',
+    )!.parentElement;
+    expect(barra).toBe(barraDeDarCita);
+    expect(barra).toBe(barraDeVolver);
   });
 
   it("dice cómo se llama, y con `aria-label` — en la agenda no hay tooltips", async () => {
