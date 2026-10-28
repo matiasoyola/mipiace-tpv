@@ -288,7 +288,13 @@ export async function saveServiceStaff(
 
 /** Cuántos servicios no puede hacer nadie, o null si no se sabe. */
 export function serviciosSinNadie(health: AgendaHealth | null): number | null {
-  const card = health?.cards.find((c) => c.key === CARD_SIN_PROFESIONAL);
+  // agenda-1 · `cards?.` y no `cards.`: una respuesta sin `cards` —un
+  // servidor a medio desplegar, un 200 vacío de un proxy— tumbaba la
+  // cabecera entera de la agenda con un TypeError. La foto de salud es lo
+  // ÚLTIMO que puede tirar esta pantalla: sin cifra no pasa nada, sin
+  // agenda no se atiende a nadie. Lo encontró un doble de test que
+  // devolvía `{}`.
+  const card = health?.cards?.find((c) => c.key === CARD_SIN_PROFESIONAL);
   return card && card.status === "ok" ? card.value : null;
 }
 

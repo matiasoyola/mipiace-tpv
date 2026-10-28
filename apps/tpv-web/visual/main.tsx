@@ -465,6 +465,27 @@ function benchColores(): boolean {
   return new URLSearchParams(window.location.search).get("colores") === "matriz";
 }
 
+// ── agenda-1 · EL CENTRO DE LA CLÍNICA ────────────────────────────────
+//
+// `?centro=clinica` cambia el centro entero del banco: UNA profesional
+// (Rosario), el catálogo de podología y el día del tablero 1 del diseño.
+// Es lo que hace falta para fotografiar la decisión D1 de Matías —una
+// profesional es una LISTA, varias son la rejilla— sin un segundo banco:
+// el mismo `AgendaPage` con otros datos.
+//
+// Con el reloj del banco en 10:40 (`?at=10:40`), Antonia está en sala, se
+// han ido 25 minutos sin vender entre las 10:05 y las 10:30, y quedan los
+// dos huecos del diseño: el de 25 minutos y el de 20.
+function benchCentro(): "peluqueria" | "clinica" {
+  return new URLSearchParams(window.location.search).get("centro") === "clinica"
+    ? "clinica"
+    : "peluqueria";
+}
+
+const ROSARIO_STAFF = [
+  { userId: "st-rosario", displayName: "Rosario", color: "#e8663c", active: true },
+];
+
 const SOLE_STAFF = benchColores()
   ? [
       { userId: "st-sole", displayName: "Sole", color: "#4c1d95", active: true },
@@ -476,6 +497,10 @@ const SOLE_STAFF = benchColores()
       { userId: "st-marta", displayName: "Marta", color: "#ec4899", active: true },
       { userId: "st-nuria", displayName: "Nuria", color: "#0ea5e9", active: true },
     ];
+
+/** Las columnas del día del banco: una en la clínica, tres en el salón. */
+const STAFF_DEL_BANCO =
+  benchCentro() === "clinica" ? ROSARIO_STAFF : SOLE_STAFF;
 
 function mkService(
   id: string,
@@ -500,7 +525,7 @@ function mkService(
   };
 }
 
-const SOLE_CATALOG = [
+const SALON_CATALOG = [
   mkService("sv-corte", "Corte de pelo", "CORTE", 18, 30),
   mkService("sv-lavado", "Lavado y peinado", "PEINADO", 15, 30),
   mkService("sv-tinte", "Tinte completo", "TINTE", 45, 90),
@@ -508,6 +533,23 @@ const SOLE_CATALOG = [
   mkService("sv-manicura", "Manicura", "MANI", 22, 45),
   mkService("sv-recogido", "Recogido de novia", "RECOGIDO", 90, 120),
 ];
+
+// agenda-1 · el catálogo de Rosario, con las categorías de la clínica: es
+// lo que hace que «¿Qué viene a hacer?» salga agrupado y que un hueco de
+// 25 minutos diga «cabe un Papiloma o una Cura».
+const CLINICA_CATALOG = [
+  mkService("sv-consulta", "Consulta diagnóstico", "CONSULTA", 20, 20),
+  mkService("sv-quiro-basica", "Quiropodia básica", "QUIROPODIA", 25, 30),
+  mkService("sv-quiro-completa", "Quiropodia completa", "QUIROPODIA", 35, 30),
+  mkService("sv-cura", "Cura", "CIRUGIA", 13, 15),
+  mkService("sv-papiloma", "Sesión papiloma", "CIRUGIA", 30, 20),
+  mkService("sv-avulsion", "Avulsión ungueal", "CIRUGIA", 180, 120),
+  mkService("sv-biomec", "Exploración biomecánica", "BIOMECANICA", 40, 30),
+  mkService("sv-biomec-ninos", "Revisión biomecánica niños", "BIOMECANICA", 25, 10),
+];
+
+const SOLE_CATALOG =
+  benchCentro() === "clinica" ? CLINICA_CATALOG : SALON_CATALOG;
 
 function mkClient(id: string, firstName: string, lastName: string, phone: string) {
   return {
@@ -533,7 +575,17 @@ function mkClient(id: string, firstName: string, lastName: string, phone: string
 // el nombre de pila como Sole apunta a sus clientas. Sirve para mirar dos
 // cosas: que el nombre no deja un espacio colgando y que el A–Z la coloca en
 // la S y no la primera de la lista.
-const SOLE_CLIENTS = [
+const CLINICA_CLIENTS = [
+  mkClient("cl-carmen", "Carmen", "Prueba", "600 111 222"),
+  mkClient("cl-pilar", "Pilar", "Gómez", "600 222 333"),
+  mkClient("cl-lucia", "Lucía", "Prueba", "600 333 444"),
+  mkClient("cl-antonia", "Antonia", "Ruiz", "600 444 555"),
+  mkClient("cl-jose", "José", "Martín", "600 555 666"),
+  mkClient("cl-hugo", "Hugo", "Sanz", "600 666 777"),
+  mkClient("cl-manuel", "Manuel", "Ortega", "600 777 888"),
+];
+
+const SALON_CLIENTS = [
   mkClient("cl-carmen", "Carmen", "Ruiz", "600 111 222"),
   mkClient("cl-lucia", "Lucía", "Prieto", "600 333 444"),
   mkClient("cl-anabelen", "Ana Belén", "Soto", "600 555 666"),
@@ -546,6 +598,9 @@ const SOLE_CLIENTS = [
       ]
     : []),
 ];
+
+const SOLE_CLIENTS =
+  benchCentro() === "clinica" ? CLINICA_CLIENTS : SALON_CLIENTS;
 
 function mkAppt(
   id: string,
@@ -588,7 +643,52 @@ function mkAppt(
   };
 }
 
-const SOLE_DAY = {
+// agenda-1 · EL DÍA DE ROSARIO, el del tablero 1 del diseño.
+//
+// Tres cobradas por la mañana, Antonia en sala a las 10:30, y los dos
+// huecos que el diseño enseña: 25 minutos a las 10:05 (que a las 10:40 ya
+// han pasado) y 20 a las 11:30. La avulsión de las 12:00 son dos horas y
+// cierra la mañana exactamente a las 14:00.
+const CLINICA_DAY = {
+  from: madridIso(0, 0),
+  to: madridIso(23, 59),
+  staff: ROSARIO_STAFF,
+  appointments: [
+    mkAppt("ap-c1", "cl-carmen", "st-rosario", "COMPLETED", 9, 0, [["sv-quiro-basica", 30]], "tk-c1"),
+    mkAppt("ap-c2", "cl-pilar", "st-rosario", "COMPLETED", 9, 30, [["sv-cura", 15]], "tk-c2"),
+    mkAppt("ap-c3", "cl-lucia", "st-rosario", "COMPLETED", 9, 45, [["sv-consulta", 20]], "tk-c3"),
+    mkAppt("ap-c4", "cl-antonia", "st-rosario", "IN_SERVICE", 10, 30, [["sv-quiro-completa", 30]]),
+    mkAppt("ap-c5", "cl-jose", "st-rosario", "CONFIRMED", 11, 0, [["sv-biomec", 30]]),
+    mkAppt("ap-c6", "cl-hugo", "st-rosario", "CONFIRMED", 11, 50, [["sv-biomec-ninos", 10]]),
+    mkAppt("ap-c7", "cl-manuel", "st-rosario", "CONFIRMED", 12, 0, [["sv-avulsion", 120]]),
+  ],
+  // Lo cobrado de VERDAD, del ticket de cada cita (ver `agenda/cobrado.ts`
+  // en la API): 25 + 13 + 20 = 58 €, que es la cifra del diseño.
+  cobradoPorCita: { "ap-c1": 2500, "ap-c2": 1300, "ap-c3": 2000 },
+  // clinica-9 (9) · Carmen se fue sin la próxima cita, con cuatro semanas
+  // propuestas. Es lo que «Dársela» tiene que traer puesto.
+  proximasCitas: [
+    {
+      appointmentId: "ap-c1",
+      clientId: "cl-carmen",
+      propuesta: "S4",
+      desde: enCuatroSemanas(),
+    },
+  ],
+  // clinica-2 · a Lucía le falta contestar el test de salud.
+  valoracionesPendientes: ["cl-lucia"],
+  sesionesPorCobrar: [],
+  esSanitario: true,
+};
+
+/** El lunes de dentro de cuatro semanas, para la propuesta de Carmen. */
+function enCuatroSemanas(): string {
+  const hoy = benchToday();
+  const t = Date.parse(`${hoy}T12:00:00Z`) + 28 * 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+const SALON_DAY = {
   from: madridIso(0, 0),
   to: madridIso(23, 59),
   staff: SOLE_STAFF,
@@ -607,6 +707,8 @@ const SOLE_DAY = {
     mkAppt("ap-7", "cl-carmen", "st-sole", "CONFIRMED", 17, 0, [["sv-recogido", 120]]),
   ],
 };
+
+const SOLE_DAY = benchCentro() === "clinica" ? CLINICA_DAY : SALON_DAY;
 
 // El DRAFT que abriría el puente cita→caja: una línea por servicio del
 // visit, resuelta por `serviceId`, units 1 y sin descuento — igual que
@@ -694,7 +796,22 @@ function benchReticula(): number {
 function benchDayInfo() {
   const dia = benchDia();
   const todos = (r: Array<{ startTime: string; endTime: string }>) =>
-    Object.fromEntries(SOLE_STAFF.map((s) => [s.userId, r]));
+    Object.fromEntries(STAFF_DEL_BANCO.map((s) => [s.userId, r]));
+
+  // agenda-1 · la clínica de Rosario abre de 9:00 a 14:00. Es lo que hace
+  // que la lista acabe en «Cerrado desde las 14:00» y que los huecos midan
+  // lo que el diseño dice.
+  if (benchCentro() === "clinica") {
+    const tramo = [{ startTime: "09:00", endTime: "14:00" }];
+    return {
+      date: benchToday(),
+      open: tramo,
+      closed: null,
+      specialName: null,
+      staffOpen: todos(tramo),
+      absences: [],
+    };
+  }
 
   if (dia === "sin-techo") {
     // El centro que no ha configurado nada: sin techo, como antes de este
@@ -837,6 +954,13 @@ function stubSession(): void {
   localStorage.setItem(
     "mipiacetpv-catalog-crm-enabled",
     isAgendaScreen() ? "1" : "0",
+  );
+  // agenda-1 · y la historia clínica, por lo mismo: `AgendaPage` la lee en
+  // el primer pintado (`getCachedClinicaEnabled`) para decidir el orden de
+  // la cita, y la caché está puesta antes de que esta pantalla exista.
+  localStorage.setItem(
+    "mipiacetpv-catalog-clinica-enabled",
+    benchCentro() === "clinica" ? "1" : "0",
   );
   // catalogo-local · `?sin-holded=1` apaga el interruptor de Holded. Se
   // lee en el PRIMER pintado, como el vertical y las capabilities: de él
@@ -1268,6 +1392,59 @@ function estadoCocinaDelBanco(lineas: Array<Record<string, unknown>>) {
   };
 }
 
+/**
+ * El día (o el rango) que pide la agenda, con el horario del banco.
+ *
+ * Un `?date=` devuelve una fecha; un `from`+`to`, todas las del rango —
+ * que es lo que el servidor hace y lo que la semana y las «Mejores horas»
+ * necesitan. Las citas sembradas son las de HOY: los demás días salen
+ * vacíos, que es justo lo que enseña los huecos.
+ */
+function diasPedidos(query: string) {
+  const q = new URLSearchParams(query);
+  const info = benchDayInfo();
+  const desde = q.get("from") ?? q.get("date") ?? benchToday();
+  const hasta = q.get("to") ?? desde;
+  const fechas: string[] = [];
+  for (
+    let t = Date.parse(`${desde}T12:00:00Z`);
+    t <= Date.parse(`${hasta}T12:00:00Z`) && fechas.length < 40;
+    t += 86_400_000
+  ) {
+    fechas.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return fechas.map((date) => ({ ...info, date }));
+}
+
+/**
+ * Los huecos de «Dar cita», en el día que la sanitaria propuso.
+ *
+ * Tres a propósito, y con la forma del caso que `proponer()` tiene que
+ * ordenar bien: uno que llena un hueco justo, uno que es el primero de la
+ * mañana y uno de otro día.
+ */
+function huecosDelBanco() {
+  if (benchCentro() !== "clinica") return [];
+  const dia = enCuatroSemanas();
+  const slot = (fecha: string, hhmm: string, min: number) => {
+    const [hh, mm] = hhmm.split(":").map(Number);
+    const base = Date.parse(`${fecha}T${hhmm}:00Z`) - 3_600_000;
+    return {
+      start: new Date(base).toISOString(),
+      end: new Date(base + min * 60_000).toISOString(),
+      options: 1,
+    };
+  };
+  const siguiente = new Date(Date.parse(`${dia}T12:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  return [
+    slot(dia, "09:00", 20),
+    slot(dia, "11:30", 20),
+    slot(siguiente, "10:00", 20),
+  ];
+}
+
 function stubFetch(): void {
   const routes: Record<string, unknown> = {
     "/tpv/health/holded": {
@@ -1313,16 +1490,22 @@ function stubFetch(): void {
       holdedEnabled: benchParam("sin-holded") !== "1",
       crmEnabled: isAgendaScreen() || benchScreen() === "clientes",
       agendaEnabled: isAgendaScreen(),
+      // agenda-1 · con `?centro=clinica` el centro tiene historia clínica:
+      // es lo que pone «Abrir sesión» en la tarjeta de Ahora y lo que
+      // cambia el orden de la cita (clinica-8).
+      clinicalRecordsEnabled: benchCentro() === "clinica",
     },
     // B-reservas-5 · el día de la peluquería. La query (`?date=`) la
     // recorta el dispatcher, así que la clave es la ruta pelada.
     // B-reservas-7a · el día lleva ahora la retícula y el horario. Se
     // compone en cada petición porque depende de los parámetros del banco.
-    "/agenda": {
-      ...SOLE_DAY,
-      slotMinutes: benchReticula(),
-      days: [benchDayInfo()],
-    },
+    // agenda-1 · `/agenda` ya no está aquí: la vista de SEMANA y las
+    // «Mejores horas» piden un RANGO (`from`+`to`) y la respuesta depende
+    // de él, así que se resuelve arriba, donde se ve la query.
+    // agenda-1 · los huecos que el motor dice que caben. Tres, en el día
+    // propuesto: con ellos «Dar cita» tiene algo que ordenar y las
+    // «Mejores horas» salen con sus etiquetas.
+    "/agenda/availability": { slots: huecosDelBanco() },
     // B-reservas-9 · el panel de salud y la matriz.
     "/agenda/health": {
       generatedAt: new Date().toISOString(),
@@ -1397,6 +1580,79 @@ function stubFetch(): void {
     const url = typeof input === "string" ? input : String((input as Request).url ?? input);
     if (!url.includes("/api/")) return real(input as RequestInfo, init);
     const path = url.slice(url.indexOf("/api/") + 4).split("?")[0]!;
+    // agenda-1 · el ALTA de una cita. Va aquí y no en `routes` porque lo
+    // que la distingue del `GET /agenda` es el método, y porque la
+    // respuesta tiene que llevar la cita (`{appointment}`): con un `{}`
+    // el panel se cierra y la pantalla revienta al mirar su día.
+    if (path === "/agenda/appointments" && init?.method === "POST") {
+      const b = JSON.parse(String(init.body ?? "{}")) as {
+        clientId?: string | null;
+        start?: string;
+        items?: Array<{ serviceId: string; staffUserId?: string | null }>;
+      };
+      const items = b.items ?? [];
+      const duracion = items.reduce(
+        (t, it) =>
+          t + (SOLE_CATALOG.find((s) => s.id === it.serviceId)?.durationMin ?? 0),
+        0,
+      );
+      const start = b.start ?? madridIso(12, 0);
+      // El banco intercepta `window.fetch` DENTRO de la página, así que
+      // una alta no sale a la red y no se puede contar desde fuera. Se
+      // dice por consola, que es lo que el script de toques escucha.
+      // eslint-disable-next-line no-console
+      console.log("[banco-visual] alta", start);
+      return new Response(
+        JSON.stringify({
+          appointment: {
+            id: `ap-nueva-${Math.round(Date.parse(start) / 1000)}`,
+            clientId: b.clientId ?? null,
+            status: "CONFIRMED",
+            source: "PRESENCIAL",
+            start,
+            end: new Date(Date.parse(start) + duracion * 60_000).toISOString(),
+            ticketId: null,
+            notes: null,
+            items: items.map((it, i) => ({
+              id: `nueva-i${i}`,
+              serviceId: it.serviceId,
+              durationMin:
+                SOLE_CATALOG.find((s) => s.id === it.serviceId)?.durationMin ?? 30,
+              sortOrder: i,
+              startOffsetMin: 0,
+            })),
+            assignments: [
+              {
+                reservableType: "STAFF",
+                staffUserId: STAFF_DEL_BANCO[0]!.userId,
+                resourceId: null,
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // agenda-1 · el día o el rango. Va aquí porque la respuesta DEPENDE de
+    // la query, y `routes` es una tabla de rutas peladas.
+    if (path === "/agenda" && (init?.method ?? "GET") === "GET") {
+      const query = url.includes("?") ? url.slice(url.indexOf("?") + 1) : "";
+      const dias = diasPedidos(query);
+      const hoy = benchToday();
+      return new Response(
+        JSON.stringify({
+          ...SOLE_DAY,
+          slotMinutes: benchReticula(),
+          days: dias,
+          // Las citas sembradas son las de hoy: fuera de hoy, el día sale
+          // vacío y la semana enseña sus huecos.
+          appointments: dias.some((d) => d.date === hoy)
+            ? SOLE_DAY.appointments
+            : [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (/^\/tables\/[^/]+\/lines$/.test(path) && init?.method === "POST") {
       const b = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
       draftLines.push({
@@ -1670,9 +1926,23 @@ function stubFetch(): void {
     if (ficha && (init?.method ?? "GET") === "GET") {
       const cliente = SOLE_CLIENTS.find((c) => c.id === ficha[1]);
       if (cliente) {
+        // agenda-1 · el historial de verdad: de él sale el chip «Su
+        // último» de «¿Qué viene a hacer?». Sin esto, toda paciente se
+        // lee como nueva.
+        const suyas = SOLE_DAY.appointments
+          .filter((a) => a.clientId === ficha[1])
+          .map((a) => ({
+            kind: "APPOINTMENT" as const,
+            id: a.id,
+            at: a.start,
+            end: a.end,
+            status: a.status,
+            ticketId: a.ticketId,
+            serviceIds: a.items.map((it) => it.serviceId),
+          }));
         const cuerpo =
           ficha[3] === "history"
-            ? { entries: [], appointments: [], voucherMovements: [] }
+            ? { entries: suyas, appointments: suyas, voucherMovements: [] }
             : ficha[3] === "vouchers"
               ? { balance: { sessionsLeft: 0, amountLeftCents: 0 }, vouchers: [] }
               : { client: cliente, consents: [], technicalNotes: [] };
@@ -1966,7 +2236,14 @@ function Bench() {
   // Ese es justo el punto de la MUDANZA SIN REFORMA: esta captura tiene
   // que salir idéntica antes y después de que la agenda suba a `App`.
   if (screen === "agenda") {
-    return <Screens.AgendaPage onClose={() => {}} />;
+    return (
+      <Screens.AgendaPage
+        onClose={() => {}}
+        // agenda-1 · en la clínica quien mira es la sanitaria: es lo que
+        // le ofrece «Abrir sesión» en la tarjeta de Ahora del tablero 1.
+        esSanitario={benchCentro() === "clinica"}
+      />
+    );
   }
 
   // ── B-reservas-9 · el panel de salud y la matriz ───────────────────

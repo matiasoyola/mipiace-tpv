@@ -193,6 +193,21 @@ export interface AgendaDay {
   // marca, y lo que decide de verdad quién ve una historia es la API en
   // cada ruta, no esto.
   esSanitario?: boolean;
+  /**
+   * agenda-1 · LO COBRADO DE CADA CITA, en céntimos. `appointmentId` →
+   * céntimos, y sólo las citas con un ticket ya cobrado: una cita que no
+   * está en el mapa no es «0 €», es «todavía nada».
+   *
+   * Sale del TICKET y no del catálogo (ver `agenda/cobrado.ts` en la API):
+   * sumar el precio de los servicios RESERVADOS es cobrar la previsión en
+   * vez del trabajo, que es justo lo que clinica-8 cerró.
+   *
+   * FUERA DE LA CACHÉ OFFLINE, como sus cuatro vecinas de arriba y por la
+   * razón del dinero: una cifra vieja de «cobrado hoy» sobre un día que ha
+   * seguido cobrando es un número que parece bueno y no lo es. Sin red la
+   * fila dice «Hecha» y la tarjeta del día no enseña euros.
+   */
+  cobradoPorCita?: Record<string, number>;
 }
 
 /** La retícula del día, con el valor de B4 como último recurso: caché
@@ -295,6 +310,7 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       valoracionesPendientes?: string[];
       sesionesPorCobrar?: string[];
       proximasCitas?: AgendaDay["proximasCitas"];
+      cobradoPorCita?: Record<string, number>;
       esSanitario?: boolean;
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
@@ -319,6 +335,9 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       valoracionesPendientes: res.valoracionesPendientes ?? [],
       sesionesPorCobrar: res.sesionesPorCobrar ?? [],
       proximasCitas: res.proximasCitas ?? [],
+      // agenda-1 · tampoco se cachea: es dinero, y un importe viejo es
+      // peor que ninguno. Ver la nota del campo.
+      cobradoPorCita: res.cobradoPorCita ?? {},
       // Fuera de la caché, igual que las dos de arriba: se añade DESPUÉS
       // de `writeDay`.
       ...(res.esSanitario === undefined
@@ -407,6 +426,41 @@ async function mergePendingLocal(day: AgendaDay): Promise<AgendaAppointment[]> {
     });
   }
   return [...day.appointments, ...locales];
+}
+
+/**
+ * agenda-1 · LA SEMANA ENTERA, de una vez.
+ *
+ * El tablero 2 pinta los días que abre el centro en columnas, con sus
+ * citas y sus huecos dentro. `GET /agenda` ya aceptaba `from`+`to` desde
+ * B4 —lo usaba la tira de semana— y lo que devuelve es exactamente lo que
+ * la semana necesita: las citas del rango y un `days[]` por fecha.
+ *
+ * NO pasa por la caché offline, y es a propósito. La caché está indexada
+ * por DÍA (`writeDay`) y guardar siete días desde aquí dejaría dos
+ * escritores del mismo registro con formas distintas. Sin red la semana no
+ * se pinta y lo dice; el día, que es el que se usa con la clienta delante,
+ * sigue saliendo de la caché como siempre.
+ */
+export async function fetchAgendaRange(
+  from: string,
+  to: string,
+): Promise<AgendaDay> {
+  const res = await apiWithCashier<{
+    staff: AgendaStaff[];
+    appointments: AgendaAppointment[];
+    slotMinutes?: number;
+    days?: AgendaDayInfo[];
+    cobradoPorCita?: Record<string, number>;
+  }>(`/agenda?from=${from}&to=${to}`);
+  return {
+    date: from,
+    staff: res.staff,
+    appointments: res.appointments,
+    slotMinutes: res.slotMinutes ?? DEFAULT_SLOT_MINUTES,
+    days: res.days ?? [],
+    cobradoPorCita: res.cobradoPorCita ?? {},
+  };
 }
 
 export async function searchAvailability(input: {

@@ -67,7 +67,7 @@ vi.mock("../src/hooks/useClientPicker.js", () => ({
 }));
 
 import { __resetOutboxForTests } from "../src/lib/outbox.js";
-import { AgendaPage } from "../src/pages/AgendaPage.js";
+import { AgendaPage, pxPorMinuto } from "../src/pages/AgendaPage.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -83,6 +83,24 @@ const ANA = {
   active: true,
 };
 
+// agenda-1 · DOS PROFESIONALES, a propósito. Desde este bloque el día de
+// UNA es una LISTA (decisión D1 de Matías) y la REJILLA —que es lo que
+// este fichero mide: el toque en una franja, las bandas de lo no
+// reservable, la regla de horas— es el día de VARIAS (tablero 4). Las
+// reglas del horario son las mismas en las dos; lo que cambia es el DOM.
+// La lista tiene su banco propio en `agenda-1-dia-lista.test.tsx`.
+//
+// Bea NO tiene entrada en `staffOpen`, y es a propósito: su columna queda
+// «sin techo» (`open === null`, el comportamiento de antes de B-7a) y no
+// añade ni una banda ni un hueco a lo que estos tests cuentan. Lo que se
+// mide sigue siendo la columna de Ana, que es la primera.
+const BEA = {
+  userId: "00000000-0000-0000-0000-0000000000a2",
+  displayName: "Bea",
+  color: "#0ea5e9",
+  active: true,
+};
+
 /** ISO UTC de una hora de pared de Madrid ese día (CEST = UTC+2). */
 function madrid(hhmm: string): string {
   const [hh, mm] = hhmm.split(":").map(Number);
@@ -91,7 +109,12 @@ function madrid(hhmm: string): string {
   ).toISOString();
 }
 
-const PX_PER_MIN = 1.1;
+// agenda-1 · la escala ya no es una constante: sale de la retícula, para
+// que la franja más pequeña que se puede reservar sea tocable. Se calcula
+// con la retícula que el test ha puesto en la respuesta.
+function pxPorMin(): number {
+  return pxPorMinuto(respuesta.slotMinutes ?? 15);
+}
 
 interface Dia {
   open: Array<{ startTime: string; endTime: string }> | null;
@@ -137,7 +160,7 @@ beforeEach(async () => {
   llamadas = [];
   slotsDeBusqueda = [];
   respuesta = {
-    staff: [ANA],
+    staff: [ANA, BEA],
     appointments: [],
     slotMinutes: 15,
     days: [{ ...DIA_ABIERTO }],
@@ -214,7 +237,7 @@ async function tocarFranja(hhmm: string) {
     toJSON: () => ({}),
   } as DOMRect);
   const [hh, mm] = hhmm.split(":").map(Number);
-  const y = ((hh ?? 0) * 60 + (mm ?? 0) - origenMin()) * PX_PER_MIN;
+  const y = ((hh ?? 0) * 60 + (mm ?? 0) - origenMin()) * pxPorMin();
   await act(async () => {
     col.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: y }));
   });
@@ -233,9 +256,8 @@ function texto(): string {
 }
 
 function hayPanelDeAlta(): boolean {
-  return Array.from(container.querySelectorAll("h2")).some(
-    (h) => h.textContent?.trim() === "Nueva cita",
-  );
+  // agenda-1 · el panel se llama «Dar cita» y tiene su propio gancho.
+  return container.querySelector('[data-test="panel-dar-cita"]') !== null;
 }
 
 function botonPorTexto(text: string): HTMLButtonElement {
@@ -534,9 +556,16 @@ describe("poner una ausencia desde la agenda", () => {
       },
     ];
     await render();
-    const menus = container.querySelectorAll("[data-ausencia-menu]");
+    const menus = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-ausencia-menu]"),
+    );
     // Uno por profesional de verdad, ninguno para "Sin asignar".
-    expect(menus.length).toBe(1);
+    expect(menus.map((m) => m.dataset.ausenciaMenu).sort()).toEqual(
+      [ANA.userId, BEA.userId].sort(),
+    );
+    expect(
+      menus.some((m) => m.dataset.ausenciaMenu === "__unassigned__"),
+    ).toBe(false);
   });
 });
 
@@ -625,15 +654,25 @@ describe("«no hay huecos» distingue tres causas", () => {
   // panel de Personal, u otro día— así que decirlas igual mandaría a la
   // cajera al sitio equivocado.
 
-  /** Abre "Nueva cita", elige el servicio y busca hueco. Es el camino sin
-   *  profesional fijada: el de "¿tienes algo ese día?". */
-  async function buscarDesdeNuevaCita() {
-    await click(botonPorTexto("Nueva cita"));
+  /** Abre «Dar cita», elige el servicio y pide las horas. Es el camino sin
+   *  profesional fijada: el de «¿tienes algo ese día?».
+   *
+   *  agenda-1 · ya no hay un botón «Buscar hueco»: la búsqueda sale de
+   *  contestar «¿Cuándo?», que es un toque menos (ver la cuenta de toques
+   *  en `AgendaPage.darCita.tsx`). */
+  async function buscarDesdeDarCita() {
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-test="dar-cita"]')!,
+    );
     const servicio = Array.from(container.querySelectorAll("button")).find(
       (b) => (b.textContent ?? "").trim().startsWith("Corte de pelo"),
     )!;
     await click(servicio);
-    await click(botonPorTexto("Buscar hueco"));
+    await click(
+      container.querySelector<HTMLButtonElement>(
+        '[data-test="cuando-esta-semana"]',
+      )!,
+    );
   }
 
   it("1 · el centro cerrado se dice con su nombre", async () => {
@@ -647,7 +686,7 @@ describe("«no hay huecos» distingue tres causas", () => {
       },
     ];
     await render();
-    await buscarDesdeNuevaCita();
+    await buscarDesdeDarCita();
     expect(texto()).toContain("El centro está cerrado ese día");
     expect(texto()).toContain("Virgen del Prado");
   });
@@ -655,14 +694,14 @@ describe("«no hay huecos» distingue tres causas", () => {
   it("2 · nadie con turno es OTRA causa, y otra frase", async () => {
     respuesta.days = [{ ...DIA_ABIERTO, staffOpen: { [ANA.userId]: [] } }];
     await render();
-    await buscarDesdeNuevaCita();
+    await buscarDesdeDarCita();
     expect(texto()).toContain("Ese día no hay nadie con turno");
     expect(texto()).not.toContain("cerrado");
   });
 
   it("3 · y si el día está lleno, la frase de siempre", async () => {
     await render();
-    await buscarDesdeNuevaCita();
+    await buscarDesdeDarCita();
     expect(texto()).toContain("No hay huecos ese día");
     expect(texto()).not.toContain("cerrado");
     expect(texto()).not.toContain("nadie con turno");

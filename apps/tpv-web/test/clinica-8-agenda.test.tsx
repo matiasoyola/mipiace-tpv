@@ -427,12 +427,12 @@ describe("clinica-9 · la cita de otro día no dice «Sesión de hoy»", () => {
       },
     ];
     await render({ esSanitario: true });
-    // La tira de siete días: «mar 20».
-    const chip = [...container.querySelectorAll<HTMLElement>("button")].find(
-      (b) => (b.textContent ?? "").trim().toLowerCase().includes("20"),
+    // agenda-1 · la tira de siete chips se fue de la cabecera (decisión de
+    // Matías, 27-10) y su trabajo lo hace la vista de Semana. Para moverse
+    // un día están las flechas, que ya no desaparecen en compacto.
+    await click(
+      container.querySelector<HTMLElement>('[data-test="siguiente"]')!,
     );
-    if (!chip) throw new Error("no hay chip del día 20");
-    await click(chip);
     await abrirDetalle();
     expect(porTexto("Sesión de hoy")).toBeNull();
     expect(porTexto("Ver la sesión")).not.toBeNull();
@@ -467,17 +467,22 @@ describe("clinica-9 · la próxima cita propuesta se ofrece en la agenda", () =>
   });
 
   it("con una, dice de quién y cuántas semanas propuso la sanitaria", async () => {
+    // agenda-1 · con UNA profesional la propuesta vive en la tarjeta
+    // «Pendiente de recepción» de la columna izquierda (tablero 1), no en
+    // una banda a todo lo ancho que empuja la agenda hacia abajo. La banda
+    // se queda para los layouts sin columna izquierda — la rejilla de
+    // varias y la semana. El gancho del botón es el MISMO en los dos.
     proximasCitas = [PROPUESTA];
     await render();
-    const banda = container.querySelector(
-      '[data-test="proximas-citas-propuestas"]',
+    const tarjeta = container.querySelector(
+      '[data-test="pendiente-de-recepcion"]',
     );
-    expect(banda).not.toBeNull();
-    expect(banda!.textContent).toContain("4 semanas");
-    expect(banda!.textContent).toContain("Dársela ahora");
+    expect(tarjeta).not.toBeNull();
+    expect(tarjeta!.textContent).toContain("4 semanas");
+    expect(tarjeta!.textContent).toContain("Dársela");
   });
 
-  it("«Dársela ahora» lleva la agenda al día propuesto y abre la cita", async () => {
+  it("«Dársela» abre el panel con la paciente y el día propuestos", async () => {
     proximasCitas = [PROPUESTA];
     await render();
     const boton = container.querySelector<HTMLElement>(
@@ -485,13 +490,31 @@ describe("clinica-9 · la próxima cita propuesta se ofrece en la agenda", () =>
     );
     if (!boton) throw new Error("no hay botón de dar la próxima cita");
     await click(boton);
-    // La agenda se ha ido al día propuesto: es el punto de partida de
-    // «Buscar hueco», que busca sobre el día que se está viendo.
+    // agenda-1 · la agenda NO se mueve del día que se estaba viendo.
+    // clinica-9 (9) la llevaba al propuesto porque «Buscar hueco» buscaba
+    // sobre el día visible; el panel de este bloque lleva su propia
+    // ventana, y moverla tenía un precio — cerrar el panel dejaba a la
+    // recepción en el 16 de noviembre.
     expect(
       llamadas.some((l) => l.path === `/agenda?date=${PROPUESTA.desde}`),
+    ).toBe(false);
+    expect(
+      container.querySelector('[data-test="rotulo-fecha"]')!.textContent,
+    ).toContain("Hoy");
+    // La ventana del propuesto SÍ se pide, para las mejores horas: del 16
+    // de noviembre y los seis días siguientes.
+    expect(
+      llamadas.some((l) =>
+        l.path.startsWith(`/agenda?from=${PROPUESTA.desde}`),
+      ),
     ).toBe(true);
-    // Y la hoja de «Nueva cita» está abierta.
-    expect(container.textContent).toContain("Nueva cita");
+    // Y el panel de «Dar cita» está abierto, con la paciente puesta.
+    expect(
+      container.querySelector('[data-test="panel-dar-cita"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-test="paso-paciente-plegado"]'),
+    ).not.toBeNull();
   });
 
   it("sólo para quien cobra: a un sanitario sin caja no se le ofrece", async () => {

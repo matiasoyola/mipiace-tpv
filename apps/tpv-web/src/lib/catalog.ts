@@ -55,6 +55,24 @@ export interface CatalogProduct {
   // servicios sin scheduling. El TPV la pinta informativa por línea de
   // servicio cuando el tenant tiene `agendaEnabled` (base visual para B4).
   durationMin?: number | null;
+  /**
+   * agenda-1 · ¿es ESTE el servicio con el que se empieza?
+   *
+   * La marca «Es la primera valoración» de Agenda · Catálogo (clinica-8),
+   * que vive en `service_scheduling.primera_valoracion`. En la Clínica
+   * demo la lleva «Consulta diagnóstico».
+   *
+   * Con ella, «¿Qué viene a hacer?» le propone a una paciente SIN citas
+   * anteriores su primera visita YA MARCADA, en vez de dejarle la lista
+   * entera delante. Es el único dato del sistema que dice cuál es: sin
+   * esta marca no se puede adivinar, y adivinarla sería peor que no
+   * proponer nada.
+   *
+   * Opcional como `esBono` y `allergens`: un terminal con el catálogo
+   * cacheado de antes del bloque no la trae, y ausente se lee `false` —
+   * que es lo que era todo servicio hasta ahora.
+   */
+  primeraValoracion?: boolean;
   // B-reservas-8 · ¿este producto ES un bono de sesiones? Opcional por lo
   // mismo que `allergens`: un terminal con el catálogo cacheado de antes
   // del bloque no lo trae, y ausente se lee como `false` — que es lo que

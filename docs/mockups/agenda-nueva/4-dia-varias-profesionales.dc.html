@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>El día de Sole</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#C75A45}a:hover{color:#9E4434}
+</style>
+</helmet>
+<div style="width: 1280px; height: 800px; box-sizing: border-box; background: #F8F6F3; font-family: 'DM Sans', system-ui, sans-serif; color: #1F2937; display: flex; flex-direction: column">
+
+  <header style="height: 72px; background: #FFFFFF; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; gap: 16px; padding: 0 24px; box-sizing: border-box">
+    <button aria-label="Volver a la venta" style="width: 44px; height: 44px; border: 0; background: #F1F5F9; border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div style="display: flex; align-items: center; gap: 4px; background: #F1F5F9; border-radius: 14px; padding: 4px">
+      <button aria-label="Día anterior" style="width: 44px; height: 44px; border: 0; background: transparent; border-radius: 10px; font-size: 20px; cursor: pointer">‹</button>
+      <div style="min-width: 220px; text-align: center; font-weight: 600; font-size: 17px">Sábado 31 oct <span style="color: #C75A45">· Hoy</span></div>
+      <button aria-label="Día siguiente" style="width: 44px; height: 44px; border: 0; background: transparent; border-radius: 10px; font-size: 20px; cursor: pointer">›</button>
+    </div>
+    <div role="group" aria-label="Vista" style="display: flex; background: #F1F5F9; border-radius: 14px; padding: 4px">
+      <button style="height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: #1F2937; color: #FFFFFF; font-weight: 600; font-size: 15px; cursor: pointer">Día</button>
+      <button style="height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: transparent; color: #475569; font-weight: 500; font-size: 15px; cursor: pointer">Semana</button>
+    </div>
+    <div style="flex: 1"></div>
+    <button style="height: 52px; padding: 0 28px; border: 0; border-radius: 16px; background: #E97058; color: #FFFFFF; font-weight: 600; font-size: 17px; display: flex; align-items: center; gap: 10px; cursor: pointer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      Dar cita
+    </button>
+  </header>
+
+  <div style="flex: 1; padding: 20px 24px; box-sizing: border-box; min-height: 0; display: flex; flex-direction: column">
+    <div style="display: grid; grid-template-columns: 64px repeat(3, minmax(0, 1fr)); gap: 0 12px; margin-bottom: 8px">
+      <div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 10px 14px"><div style="font-size: 16px; font-weight: 700">Sole</div><div style="font-size: 13px; color: #047857">Ahora: Mari Carmen · tinte</div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 10px 14px"><div style="font-size: 16px; font-weight: 700">Ana</div><div style="font-size: 13px; color: #B45309">Libre hasta las 11:00</div></div>
+      <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; padding: 10px 14px"><div style="font-size: 16px; font-weight: 700">Isa</div><div style="font-size: 13px; color: #047857">Ahora: Paula · mechas</div></div>
+    </div>
+
+    <div style="flex: 1; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 20px; padding: 8px 12px; display: grid; grid-template-columns: 64px repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(10, minmax(0, 1fr)); gap: 4px 12px">
+
+      <div style="grid-column: 1; grid-row: 1; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">9:00</div>
+      <div style="grid-column: 1; grid-row: 2; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">9:30</div>
+      <div style="grid-column: 1; grid-row: 3; font-size: 14px; font-weight: 600; color: #C75A45; padding-top: 6px">10:00</div>
+      <div style="grid-column: 1; grid-row: 4; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">10:30</div>
+      <div style="grid-column: 1; grid-row: 5; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">11:00</div>
+      <div style="grid-column: 1; grid-row: 6; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">11:30</div>
+      <div style="grid-column: 1; grid-row: 7; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">12:00</div>
+      <div style="grid-column: 1; grid-row: 8; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">12:30</div>
+      <div style="grid-column: 1; grid-row: 9; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">13:00</div>
+      <div style="grid-column: 1; grid-row: 10; font-size: 14px; font-weight: 600; color: #64748B; padding-top: 6px">13:30</div>
+
+      <div style="grid-column: 2; grid-row: 1 / span 1; border-radius: 12px; background: #ECFDF5; padding: 6px 12px; opacity: .6"><div style="font-size: 14px; font-weight: 600">Lola · corte</div><div style="font-size: 12px; color: #047857">Cobrada</div></div>
+      <div style="grid-column: 2; grid-row: 2 / span 3; border-radius: 12px; background: #E97058; color: #FFFFFF; padding: 8px 12px"><div style="font-size: 15px; font-weight: 700">Mari Carmen</div><div style="font-size: 13px">Tinte + corte · 1 h 30 · en sala</div></div>
+      <a href="DarCita.dc.html" style="grid-column: 2; grid-row: 5; border-radius: 12px; border: 2px dashed #CBD5E1; font-size: 13px; color: #475569; display: flex; align-items: center; padding: 0 12px; text-decoration: none">Libre · + cita</a>
+      <div style="grid-column: 2; grid-row: 6 / span 2; border-radius: 12px; background: #EFF6FF; padding: 8px 12px"><div style="font-size: 14px; font-weight: 600">Reme · peinado</div><div style="font-size: 12px; color: #475569">1 h · por llegar</div></div>
+      <div style="grid-column: 2; grid-row: 8 / span 3; border-radius: 12px; background: #EFF6FF; padding: 8px 12px"><div style="font-size: 14px; font-weight: 600">Conchi · mechas</div><div style="font-size: 12px; color: #475569">1 h 30 · por llegar</div></div>
+
+      <a href="DarCita.dc.html" style="grid-column: 3; grid-row: 1 / span 4; border-radius: 12px; border: 2px dashed #FCD34D; background: #FFFBEB; font-size: 14px; color: #92400E; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; text-decoration: none">Libre de 9:00 a 11:00<br>+ Dar cita aquí</a>
+      <div style="grid-column: 3; grid-row: 5 / span 2; border-radius: 12px; background: #EFF6FF; padding: 8px 12px"><div style="font-size: 14px; font-weight: 600">Bea · alisado</div><div style="font-size: 12px; color: #475569">1 h · por llegar</div></div>
+      <div style="grid-column: 3; grid-row: 7; border-radius: 12px; background: #EFF6FF; padding: 6px 12px"><div style="font-size: 14px; font-weight: 600">Nuria · corte</div><div style="font-size: 12px; color: #475569">30 min</div></div>
+      <a href="DarCita.dc.html" style="grid-column: 3; grid-row: 8 / span 3; border-radius: 12px; border: 2px dashed #CBD5E1; font-size: 13px; color: #475569; display: flex; align-items: center; padding: 0 12px; text-decoration: none">Libre 1 h 30 · + cita</a>
+
+      <div style="grid-column: 4; grid-row: 1 / span 2; border-radius: 12px; background: #ECFDF5; padding: 8px 12px; opacity: .6"><div style="font-size: 14px; font-weight: 600">Elena · color</div><div style="font-size: 12px; color: #047857">Cobrada</div></div>
+      <div style="grid-column: 4; grid-row: 3 / span 4; border-radius: 12px; background: #E97058; color: #FFFFFF; padding: 8px 12px"><div style="font-size: 15px; font-weight: 700">Paula</div><div style="font-size: 13px">Mechas · 2 h · en sala</div></div>
+      <div style="grid-column: 4; grid-row: 7; border-radius: 12px; background: #FEF2F2; padding: 6px 12px"><div style="font-size: 14px; font-weight: 600">Rocío · corte</div><div style="font-size: 12px; color: #991B1B">No vino la última vez</div></div>
+      <div style="grid-column: 4; grid-row: 8 / span 2; border-radius: 12px; background: #EFF6FF; padding: 8px 12px"><div style="font-size: 14px; font-weight: 600">Sonia · peinado</div><div style="font-size: 12px; color: #475569">1 h</div></div>
+      <div style="grid-column: 4; grid-row: 10; border-radius: 12px; background: #F1F5F9; padding: 6px 12px; font-size: 13px; color: #64748B; display: flex; align-items: center">Descanso</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

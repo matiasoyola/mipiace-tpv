@@ -67,7 +67,8 @@ vi.mock("../src/hooks/useClientPicker.js", () => ({
 
 import { ApiError } from "../src/api.js";
 import { __resetOutboxForTests } from "../src/lib/outbox.js";
-import { AgendaPage } from "../src/pages/AgendaPage.js";
+import { DEFAULT_SLOT_MINUTES } from "../src/lib/agenda.js";
+import { AgendaPage, pxPorMinuto } from "../src/pages/AgendaPage.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -83,6 +84,20 @@ const SOLE = {
   active: true,
 };
 
+// agenda-1 · DOS PROFESIONALES, a propósito. Desde este bloque el día de
+// UNA es una LISTA de filas tocables (decisión D1 de Matías) y la REJILLA
+// —que es lo que este fichero mide: la geometría del suelo, la regla de
+// horas y el toque en una franja— es el día de VARIAS (tablero 4). Las
+// reglas del suelo son las mismas en las dos superficies; lo que cambia es
+// el DOM. La lista tiene su propio banco (`agenda-1-dia-lista.test.tsx`) y
+// la aritmética, el suyo (`agenda-1-dia-filas.test.ts`).
+const BEA = {
+  userId: "00000000-0000-0000-0000-0000000000s2",
+  displayName: "Bea",
+  color: "#0ea5e9",
+  active: true,
+};
+
 /** ISO UTC de una hora de pared de Madrid ese día (CEST = UTC+2). */
 function madrid(hhmm: string): string {
   const [hh, mm] = hhmm.split(":").map(Number);
@@ -91,10 +106,13 @@ function madrid(hhmm: string): string {
   ).toISOString();
 }
 
-// Geometría de la columna, la misma que pinta `AgendaPage`: el día empieza a
-// las 08:00 y cada minuto son 1,1 px. Así se puede "tocar" una hora concreta.
+// Geometría de la columna, la misma que pinta `AgendaPage`: el día empieza
+// a las 08:00. La escala ya NO es 1,1 px/min: agenda-1 la deriva de la
+// retícula para que la franja más pequeña que se puede reservar sea
+// tocable (44 px). Se importa en vez de copiarse — si cambia, el test la
+// sigue en vez de medir otra pantalla.
 const DAY_START_MIN = 8 * 60;
-const PX_PER_MIN = 1.1;
+const PX_PER_MIN = pxPorMinuto(DEFAULT_SLOT_MINUTES);
 function yDe(hhmm: string): number {
   const [hh, mm] = hhmm.split(":").map(Number);
   return ((hh ?? 0) * 60 + (mm ?? 0) - DAY_START_MIN) * PX_PER_MIN;
@@ -116,7 +134,7 @@ beforeEach(async () => {
   apiMock.apiWithCashier.mockReset();
   apiMock.apiWithCashier.mockImplementation(async (path: string) => {
     if (path.startsWith("/agenda?")) {
-      return { staff: [SOLE], appointments: [] };
+      return { staff: [SOLE, BEA], appointments: [] };
     }
     throw new Error(`ruta no mockeada: ${path}`);
   });
@@ -182,8 +200,15 @@ function textoDe(sel: string): string {
 }
 
 function hayPanelDeAlta(): boolean {
-  return Array.from(container.querySelectorAll("h2")).some(
-    (h) => h.textContent?.trim() === "Nueva cita",
+  // agenda-1 · el panel se llama «Dar cita».
+  return container.querySelector('[data-test="panel-dar-cita"]') !== null;
+}
+
+/** El resumen del pie del panel: el día y la hora que se van a guardar. */
+function resumenDeLaCita(): string {
+  return (
+    container.querySelector('[data-test="resumen-de-la-cita"]')?.textContent ??
+    ""
   );
 }
 
@@ -226,7 +251,7 @@ describe("AgendaPage · el suelo en la superficie", () => {
     await tocarFranja("11:00");
     expect(hayPanelDeAlta()).toBe(true);
     // Y la hora que fija es la de la franja, no la del reloj.
-    expect(textoDe(".text-\\[14px\\].font-semibold")).toContain("11:00");
+    expect(resumenDeLaCita()).toContain("11:00");
   });
 
   it("una franja futura abre el panel, como siempre", async () => {
@@ -271,7 +296,7 @@ describe("AgendaPage · el 409 del suelo se enseña con su frase", () => {
     await click(botonQueEmpieza("Corte de pelo"));
     apiMock.apiWithCashier.mockImplementation(async (path: string) => {
       if (path.startsWith("/agenda?")) {
-        return { staff: [SOLE], appointments: [] };
+        return { staff: [SOLE, BEA], appointments: [] };
       }
       if (path === "/agenda/appointments") throw errorDelServidor;
       throw new Error(`ruta no mockeada: ${path}`);
@@ -318,7 +343,7 @@ describe("AgendaPage · el 409 del suelo se enseña con su frase", () => {
     );
     await click(botonPorTexto("11:30"));
     expect(container.textContent).not.toContain("Esa hora ya ha pasado");
-    expect(textoDe(".text-\\[14px\\].font-semibold")).toContain("11:30");
+    expect(resumenDeLaCita()).toContain("11:30");
   });
 
   it("y el 409 de la retícula se enseña igual (no hay error genérico)", async () => {

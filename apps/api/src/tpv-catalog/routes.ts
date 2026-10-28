@@ -240,7 +240,12 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           // sobre el product de Holded). El TPV la pinta informativa por
           // línea de servicio cuando el tenant tiene `agendaEnabled`. Null
           // si el servicio no tiene fila `service_scheduling`.
-          scheduling: { select: { durationMin: true } },
+          // agenda-1 · y `primeraValoracion`, la marca que el centro pone
+          // en Agenda · Catálogo («Es la primera valoración»). El TPV la
+          // necesita para proponerle a una paciente SIN citas anteriores
+          // el servicio con el que se empieza, ya marcado: es un toque
+          // menos y es el único dato que dice cuál es.
+          scheduling: { select: { durationMin: true, primeraValoracion: true } },
           // B-reservas-8 · ¿este producto ES un bono? Lo es si tiene
           // plantilla (1:1). El TPV lo necesita para poder decir «confirma
           // la numeración» EN EL MOMENTO DE TOCARLO, que es cuando la
@@ -302,6 +307,10 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // duración; el resto (productos, servicios sin scheduling) va
         // como null y el TPV no pinta nada.
         durationMin: p.scheduling?.durationMin ?? null,
+        // agenda-1 · `false` en todo lo que no tenga la marca, que es el
+        // catálogo entero menos un servicio por centro clínico. Ver el
+        // `select`.
+        primeraValoracion: p.scheduling?.primeraValoracion ?? false,
         // B-reservas-8 · ver el `select`. `false` en todo lo demás, que es
         // el catálogo entero de los quince comercios de hoy.
         esBono: p.voucherTemplate != null,

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>La semana de Rosario</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#C75A45}a:hover{color:#9E4434}
+</style>
+</helmet>
+<div style="width: 1280px; height: 800px; box-sizing: border-box; background: #F8F6F3; font-family: 'DM Sans', system-ui, sans-serif; color: #1F2937; display: flex; flex-direction: column">
+
+  <header style="height: 72px; background: #FFFFFF; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; gap: 16px; padding: 0 24px; box-sizing: border-box">
+    <button aria-label="Volver a la venta" style="width: 44px; height: 44px; border: 0; background: #F1F5F9; border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div style="display: flex; align-items: center; gap: 4px; background: #F1F5F9; border-radius: 14px; padding: 4px">
+      <button aria-label="Semana anterior" style="width: 44px; height: 44px; border: 0; background: transparent; border-radius: 10px; font-size: 20px; cursor: pointer">‹</button>
+      <div style="min-width: 220px; text-align: center; font-weight: 600; font-size: 17px">26 – 30 oct <span style="color: #C75A45">· Esta semana</span></div>
+      <button aria-label="Semana siguiente" style="width: 44px; height: 44px; border: 0; background: transparent; border-radius: 10px; font-size: 20px; cursor: pointer">›</button>
+    </div>
+    <div role="group" aria-label="Vista" style="display: flex; background: #F1F5F9; border-radius: 14px; padding: 4px">
+      <a href="Main.dc.html" style="height: 44px; padding: 0 20px; border-radius: 10px; color: #475569; font-weight: 500; font-size: 15px; display: flex; align-items: center; text-decoration: none">Día</a>
+      <button style="height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: #1F2937; color: #FFFFFF; font-weight: 600; font-size: 15px; cursor: pointer">Semana</button>
+    </div>
+    <div style="flex: 1"></div>
+    <button style="height: 52px; padding: 0 28px; border: 0; border-radius: 16px; background: #E97058; color: #FFFFFF; font-weight: 600; font-size: 17px; display: flex; align-items: center; gap: 10px; cursor: pointer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      Dar cita
+    </button>
+  </header>
+
+  <div style="flex: 1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 20px 24px; box-sizing: border-box; min-height: 0">
+
+    <section aria-label="Lunes 26" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 8px; opacity: .6">
+      <div><div style="font-size: 16px; font-weight: 700">Lun 26</div><div style="font-size: 13px; color: #64748B">6 citas · lleno</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">9:00 · Rosa Díaz</div><div style="font-size: 12px; color: #64748B">Quiropodia completa</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">9:30 · Luis Prado</div><div style="font-size: 12px; color: #64748B">Cura</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">10:00 · Ana Ruiz</div><div style="font-size: 12px; color: #64748B">Cirugía fenol 1 borde</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">12:00 · Elena Vidal</div><div style="font-size: 12px; color: #64748B">Exploración biomecánica</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">12:30 · Juan Cano</div><div style="font-size: 12px; color: #64748B">Quiropodia básica</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">13:00 · Mar Soto</div><div style="font-size: 12px; color: #64748B">Órtesis de silicona</div></div>
+    </section>
+
+    <section aria-label="Martes 27, hoy" style="background: #FFFFFF; border: 2px solid #E97058; border-radius: 20px; padding: 13px; display: flex; flex-direction: column; gap: 8px">
+      <a href="Main.dc.html" style="text-decoration: none; color: #1F2937"><div style="font-size: 16px; font-weight: 700">Mar 27 <span style="color: #C75A45">· Hoy</span></div><div style="font-size: 13px; color: #64748B">7 citas · 45 min libres</div></a>
+      <div style="border-radius: 12px; background: #ECFDF5; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">9:00 · Carmen Prueba</div><div style="font-size: 12px; color: #047857">Cobrada</div></div>
+      <div style="border-radius: 12px; background: #ECFDF5; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">9:30 · Pilar Gómez</div><div style="font-size: 12px; color: #047857">Cobrada</div></div>
+      <div style="border-radius: 12px; background: #ECFDF5; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">9:45 · Lucía Prueba</div><div style="font-size: 12px; color: #047857">Cobrada</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">10:05 · libre 25 min</div>
+      <div style="border-radius: 12px; background: #E97058; color: #FFFFFF; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 700">10:30 · Antonia Ruiz</div><div style="font-size: 12px">En sala</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">11:00 · José Martín</div><div style="font-size: 12px; color: #64748B">Exploración biomecánica</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">11:30 · libre 20 min</div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">11:50 · Hugo Sanz</div><div style="font-size: 12px; color: #64748B">Revisión niños</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">12:00 · Manuel Ortega</div><div style="font-size: 12px; color: #64748B">Avulsión ungueal · 2 h</div></div>
+    </section>
+
+    <section aria-label="Miércoles 28" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+      <div><div style="font-size: 16px; font-weight: 700">Mié 28</div><div style="font-size: 13px; color: #64748B">3 citas · 3 h 10 min libres</div></div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">9:00 · Teresa Gil</div><div style="font-size: 12px; color: #64748B">Quiropodia completa</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">9:30 · libre 1 h 30 min</div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">11:00 · Ramón Peña</div><div style="font-size: 12px; color: #64748B">Pie de riesgo</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">11:30 · libre 1 h</div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">12:30 · Sara León</div><div style="font-size: 12px; color: #64748B">Consulta diagnóstico</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">12:50 · libre 1 h 10 min</div>
+    </section>
+
+    <section aria-label="Jueves 29" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+      <div><div style="font-size: 16px; font-weight: 700">Jue 29</div><div style="font-size: 13px; color: #64748B">2 citas · casi libre</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">9:00 · libre 1 h</div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">10:00 · Carmen Prueba</div><div style="font-size: 12px; color: #64748B">Cura</div></div>
+      <div style="border-radius: 12px; border: 2px dashed #CBD5E1; padding: 6px 10px; min-height: 40px; box-sizing: border-box; font-size: 12px; color: #64748B; display: flex; align-items: center">10:15 · libre 1 h 45 min</div>
+      <div style="border-radius: 12px; background: #F8FAFC; padding: 8px 10px; min-height: 44px; box-sizing: border-box"><div style="font-size: 13px; font-weight: 600">12:00 · Iván Mora</div><div style="font-size: 12px; color: #64748B">Cirugía fenol 2 bordes · 3 h</div></div>
+    </section>
+
+    <section aria-label="Viernes 30" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+      <div><div style="font-size: 16px; font-weight: 700">Vie 30</div><div style="font-size: 13px; color: #64748B">Sin citas</div></div>
+      <a href="DarCita.dc.html" style="flex: 1; border-radius: 12px; border: 2px dashed #CBD5E1; box-sizing: border-box; font-size: 14px; color: #475569; display: flex; align-items: center; justify-content: center; text-decoration: none; text-align: center; padding: 12px">Libre de 9:00 a 14:00<br>+ Dar cita aquí</a>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
