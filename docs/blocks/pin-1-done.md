@@ -469,11 +469,18 @@ y `smoke` pasan en los dos runs (el del push y el del PR, que mergea el master d
 aserciones de `residencia-3`, `residencia-4` y `residencia-5`. **No es de esta rama**, y la
 prueba es que **`master` falló a las 06:07 UTC con las mismas cinco aserciones y los mismos
 números de línea** (`residencia-3:1065/1129/1179`, `residencia-4:1115`, `residencia-5:713`;
-«3 failed | 50 passed (53)» las dos). Es el falso rojo conocido de la franja 00:00–08:00 UTC
-—`residencia-5` construye un instante con el día UTC y una hora de pared, que de madrugada cae
-en el futuro— y esta rama no toca ni un fichero de `residencia` ni de `fichaje`
-(`git diff --name-only origin/master...HEAD` sale vacío para los dos). Se relanza pasada la
-franja.
+«3 failed | 50 passed (53)» las dos). Es el falso rojo conocido de la franja de madrugada —`residencia-5` (línea 689) construye un
+instante con el día **UTC** y una hora de **pared**, que hasta las 10:00 de Madrid cae en el
+futuro— y esta rama no toca ni un fichero de `residencia` ni de `fichaje`
+(`git diff --name-only origin/master...HEAD` sale vacío para los dos).
+
+**Y la franja se mide en hora de PARED, no en UTC.** El primer relanzamiento, a las 08:05 UTC,
+volvió a salir rojo: la nota que tenía apuntada decía «hasta las 08:00 UTC» porque se midió el
+24-10, con España todavía en CEST (UTC+2). Desde el cambio de hora del 25-10 (CET, UTC+1), las
+10:00 de Madrid son las **09:00 UTC**, así que la franja dura una hora más. En esa pasada de
+las 08:06 ya iban en verde `residencia-3` (62 tests) y `residencia-4` (67) y sólo quedaba
+`residencia-5:713` — que dos de los tres se arreglen no significa que se pueda mirar el
+resultado. Se relanza pasadas las 10:00 de Madrid.
 
 ---
 
