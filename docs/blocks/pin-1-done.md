@@ -465,6 +465,16 @@ su razón escrita en el barrido del inventario) y cambiar el formato (4-8 cifras
 **PR [#52](https://github.com/matiasoyola/mipiace-tpv/pull/52)**, con la CI en verde: `ci`, `e2e`
 y `smoke` pasan en los dos runs (el del push y el del PR, que mergea el master de ahora).
 
+**Nota del 28-10, tras el rebase.** La pasada de las 06:29 UTC dio `e2e` rojo con cinco
+aserciones de `residencia-3`, `residencia-4` y `residencia-5`. **No es de esta rama**, y la
+prueba es que **`master` falló a las 06:07 UTC con las mismas cinco aserciones y los mismos
+números de línea** (`residencia-3:1065/1129/1179`, `residencia-4:1115`, `residencia-5:713`;
+«3 failed | 50 passed (53)» las dos). Es el falso rojo conocido de la franja 00:00–08:00 UTC
+—`residencia-5` construye un instante con el día UTC y una hora de pared, que de madrugada cae
+en el futuro— y esta rama no toca ni un fichero de `residencia` ni de `fichaje`
+(`git diff --name-only origin/master...HEAD` sale vacío para los dos). Se relanza pasada la
+franja.
+
 ---
 
 ## 11 · El botón del sanitario, a su sitio (28-10)
