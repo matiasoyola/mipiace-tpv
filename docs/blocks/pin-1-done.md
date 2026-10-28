@@ -1,9 +1,12 @@
 # Bloque pin-1 · mi PIN lo elijo yo — DONE
 
 Origen: `docs/code-prompts/bloque-pin-1-mi-pin.md`, escrito el 27-10-2026. Rama `pin-1-mi-pin`,
-worktree `mipiacetpv-pin-1`. Base `134d16f` (el merge de `personal-1` en master). **Con UNA
-migración** — ver §6. **Sin despliegue.** Con `origin/master` mergeado al final (`503354a`, el
-merge de `clinica-10`), para que la CI del PR vea la combinación de verdad.
+worktree `mipiacetpv-pin-1`. **Con UNA migración** — ver §6. **Sin despliegue.**
+
+**Rebasada sobre `origin/master`** el 28-10, con clinica-10 (#49), personal-1 (#50) y agenda-1
+(#51) dentro: la rama es lineal sobre master y la CI del PR ve la combinación de verdad. El rebase
+es lo que destapó el §11 — con agenda-1 dentro, «Cambiar mi PIN» de la sanitaria se va del botón
+flotante a la cabecera de la agenda.
 
 **Lo que este bloque compra.** Cada persona que entra con PIN —propietaria, encargado, cajero,
 sanitario— **entra con un PIN que ha elegido ella y que recuerda**, y quien lo olvida lo recupera
@@ -36,7 +39,7 @@ veces en la misma mañana: las dos hubo que ir a super-admin → «Configurar co
 | El cuarto estado del panel de soporte: `PIN_PROVISIONAL` | `apps/api/src/superadmin/tenant-cashiers.ts` · `CashiersPanel.tsx` |
 | Banco visual del panel (nuevo) | `apps/admin/visual/` |
 
-**Tests nuevos: 9 ficheros, 153 casos.**
+**Tests nuevos: 9 ficheros, 154 casos.**
 
 | Fichero | Casos |
 |---|---|
@@ -48,7 +51,7 @@ veces en la misma mañana: las dos hubo que ir a super-admin → «Configurar co
 | `apps/api/test/pin-1-correos.test.ts` | 8 |
 | `apps/tpv-web/test/pin-1-cambiar-pin.test.tsx` | 15 |
 | `apps/admin/test/pin-1-mi-cuenta.test.tsx` | 13 |
-| `apps/tpv-web/test/pin-1-agenda-mi-pin.test.tsx` | 9 |
+| `apps/tpv-web/test/pin-1-agenda-mi-pin.test.tsx` | 10 |
 
 Y **cinco bancos de la casa ampliados, no bajados**: `contrato-lectura-completa-pin` (su
 invariante sale más fuerte: ahora NINGÚN camino genera un PIN), `h1-activacion-sin-caja`,
@@ -56,9 +59,10 @@ invariante sale más fuerte: ahora NINGÚN camino genera un PIN), `h1-activacion
 con `pinProvisional`; lo que no baja es lo prohibido) y `clinica-8-cajeros` / `cashiers-alias`
 (sus PIN de atrezzo dejan de ser triviales).
 
-**Suite: 496 ficheros, 7 396 verdes, 10 saltados** (`pnpm test` desde la raíz, tras
-`pnpm db:generate`, con master mergeado). Base en este árbol antes de la primera línea:
-**482 / 7 171 / 10**. Ni un saltado nuevo. `tsc --noEmit` limpio en los tres paquetes, uno a uno.
+**Suite: 501 ficheros, 7 483 verdes, 10 saltados** (`pnpm test` desde la raíz, tras
+`pnpm db:generate`, rebasado sobre `origin/master` con agenda-1 dentro). Base en este árbol antes
+de la primera línea: **482 / 7 171 / 10**. Ni un saltado nuevo. `tsc --noEmit` limpio en los tres
+paquetes, uno a uno.
 
 ---
 
