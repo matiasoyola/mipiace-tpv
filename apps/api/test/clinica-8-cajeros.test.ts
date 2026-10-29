@@ -144,9 +144,15 @@ const fakePrisma = {
     updateMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(async ({ create }: any) => create),
   },
-  // clinica-9 (5) · las dos columnas del nombre se escriben juntas.
-  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
-} as const;
+  // pin-1 · cambiar un PIN escribe también su línea de `pin_changes`.
+  pinChange: { create: vi.fn(async () => ({ id: "pc" })) },
+  // clinica-9 (5) · las dos columnas del nombre se escriben juntas (forma
+  // de array). pin-1 · y el alta usa la forma de función, así que este
+  // falso entiende las dos.
+  $transaction: vi.fn(async (arg: any) =>
+    typeof arg === "function" ? arg(fakePrisma) : Promise.all(arg),
+  ),
+} as any;
 
 vi.mock("../src/context.js", () => ({
   getPrisma: () => fakePrisma,
@@ -336,7 +342,10 @@ describe("clinica-8 · y las rutas que ESCRIBEN tampoco los alcanzan", () => {
       method: "PATCH",
       url: `/cashiers/${marta.id}/pin`,
       headers: { authorization: `Bearer ${ownerToken()}` },
-      payload: { pin: "9876" },
+      // pin-1 · un PIN que no sea de los que el filtro rechaza: lo que
+      // este test mide es que a una persona de verdad se le puede
+      // cambiar el PIN, no cómo de fácil es el PIN.
+      payload: { pin: "9473" },
     });
     expect(pin.statusCode).toBe(200);
     const del = await app.inject({

@@ -423,6 +423,9 @@ export async function purgeTestData(
         deletedAt: new Date(),
         tokenVersion: { increment: 1 },
         pinHash: null,
+        // pin-1 · la marca de provisional se va con el PIN. El CHECK
+        // `users_pin_provisional_exige_pin` no admite la marca sin PIN.
+        pinProvisionalAt: null,
       },
     });
     cashierDeleted = true;

@@ -19,6 +19,7 @@ import {
   ApiError,
   registerSessionExpiredHandler,
 } from "./api.js";
+import { CambiarPinSheet } from "./components/CambiarPinSheet.js";
 import { ReloginPinModal } from "./components/ReloginPinModal.js";
 import { EnsayoBanner } from "./components/EnsayoBanner.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
@@ -496,46 +497,15 @@ export function App() {
   // navegador abierta llega a `/tickets` igual.
   if (cashier.cashier.role === "CLINICIAN") {
     return (
-      <LoggedInWrapper
+      <AgendaDelSanitario
+        cashier={cashier.cashier}
         autoLogoutMinutes={tenant.cashierAutoLogoutMinutes}
-        onAutoLogout={() => {
+        bonoEtiqueta={tenant.bonoEtiqueta}
+        onSalir={() => {
           clearCashierSession();
           setCashier({ kind: "needsLogin" });
         }}
-      >
-        <AgendaPage
-          // B-reservas-8 · la palabra del centro para los bonos. El
-          // sanitario sin caja ve la agenda y puede dar la próxima cita,
-          // así que necesita la etiqueta igual que el mostrador — lo que
-          // no ve son los euros, y eso lo decide la API.
-          bonoEtiqueta={tenant.bonoEtiqueta}
-          // clinica-2 · lleva la marca por construcción: `role=CLINICIAN`
-          // implica `isClinician` por CHECK de la base
-          // (`users_clinician_implies_flag`). Se lee del login de todos
-          // modos en vez de darlo por hecho — el día que el rol y la marca
-          // se desacoplaran, esta pantalla no tendría que acordarse.
-          esSanitario={cashier.cashier.isClinician ?? true}
-          // Su día, de entrada. La decisión de producto es «ve su agenda,
-          // con sus citas por defecto»: el filtro arranca puesto en él y
-          // se puede quitar — las citas de las compañeras no son datos de
-          // salud (la agenda sólo enseña contacto), y necesita verlas para
-          // saber si la sala está ocupada.
-          staffFilterInicial={cashier.cashier.id}
-          // Sin `SalePage` detrás, «Volver» no tiene a dónde volver: es
-          // la salida de la sesión. Es la misma decisión que el botón
-          // Bloquear del cajero, con el único botón que esta pantalla
-          // tiene.
-          onClose={() => {
-            clearCashierSession();
-            setCashier({ kind: "needsLogin" });
-          }}
-          // Y cobrar una cita no se le ofrece: el botón no se pinta. Si
-          // alguien llamara al endpoint a mano, la API lo rechaza igual
-          // — esconder el botón es por no ofrecer una acción que siempre
-          // falla, no por seguridad.
-          puedeCobrar={false}
-        />
-      </LoggedInWrapper>
+      />
     );
   }
 
@@ -668,6 +638,90 @@ function applyShiftState(
       shift: res.shiftState.shift,
     });
   }
+}
+
+// ── clinica-1 · EL TPV DEL SANITARIO, EN SU PROPIO COMPONENTE ───────
+//
+// Era el cuerpo de un `if` dentro de `App`. Sale aquí porque necesita
+// estado propio —si tiene la hoja del PIN abierta— y un `useState` dentro
+// de un `if` sería un hook condicional.
+//
+// Lo que pinta es la agenda y nada más: ni venta, ni turno, ni cajón, ni
+// informes. La caja la cierra la API (`ensureCajaEnabled`); esconder la
+// pantalla no es gatear, y un sanitario con curiosidad y la consola del
+// navegador abierta llega a `/tickets` igual.
+//
+// Exportado por lo mismo que `TpvHome`: lo que hay que poder medir es que
+// esta rama PASA `onCambiarMiPin`, y eso no se ve desde `AgendaPage`
+// (pin-1 · «verde pero nadie la llama»). En producción sólo lo monta
+// `App`.
+export function AgendaDelSanitario({
+  cashier,
+  autoLogoutMinutes,
+  bonoEtiqueta,
+  onSalir,
+}: {
+  cashier: CashierUser;
+  autoLogoutMinutes: number;
+  bonoEtiqueta?: string;
+  /** Salir de la sesión. Sin `SalePage` detrás, «Volver» no tiene a dónde
+   *  volver: es la misma decisión que el botón Bloquear del cajero, con
+   *  el único botón que esta pantalla tiene. */
+  onSalir: () => void;
+}) {
+  // pin-1 · «Cambiar mi PIN». El estado vive AQUÍ y el botón lo pinta la
+  // cabecera de la agenda (`onCambiarMiPin`): es la única pantalla que
+  // esta persona tiene, así que es donde tiene que estar.
+  const [cambiandoPin, setCambiandoPin] = useState(false);
+  return (
+    <LoggedInWrapper
+      autoLogoutMinutes={autoLogoutMinutes}
+      onAutoLogout={onSalir}
+    >
+      <AgendaPage
+        // B-reservas-8 · la palabra del centro para los bonos. El
+        // sanitario sin caja ve la agenda y puede dar la próxima cita,
+        // así que necesita la etiqueta igual que el mostrador — lo que
+        // no ve son los euros, y eso lo decide la API.
+        bonoEtiqueta={bonoEtiqueta}
+        // clinica-2 · lleva la marca por construcción: `role=CLINICIAN`
+        // implica `isClinician` por CHECK de la base
+        // (`users_clinician_implies_flag`). Se lee del login de todos
+        // modos en vez de darlo por hecho — el día que el rol y la marca
+        // se desacoplaran, esta pantalla no tendría que acordarse.
+        esSanitario={cashier.isClinician ?? true}
+        // Su día, de entrada. La decisión de producto es «ve su agenda,
+        // con sus citas por defecto»: el filtro arranca puesto en él y
+        // se puede quitar — las citas de las compañeras no son datos de
+        // salud (la agenda sólo enseña contacto), y necesita verlas para
+        // saber si la sala está ocupada.
+        staffFilterInicial={cashier.id}
+        onClose={onSalir}
+        // pin-1 · EL PIN, EN LA CABECERA DE LA AGENDA.
+        //
+        // En la primera pasada del bloque era un botón flotante colgado
+        // de `LoggedInWrapper`, porque `AgendaPage` era de la rama
+        // `agenda-1` esa tarde. Ya no: el prop existe, lo pinta la
+        // cabecera junto al ⋯ de las ausencias, y sólo se pinta cuando se
+        // pasa — la cajera no pierde píxeles por un botón que ya tiene en
+        // el cajón de la venta.
+        onCambiarMiPin={() => setCambiandoPin(true)}
+        // Y cobrar una cita no se le ofrece: el botón no se pinta. Si
+        // alguien llamara al endpoint a mano, la API lo rechaza igual
+        // — esconder el botón es por no ofrecer una acción que siempre
+        // falla, no por seguridad.
+        puedeCobrar={false}
+      />
+      {cambiandoPin && (
+        <CambiarPinSheet
+          contexto={{ modo: "cambiar" }}
+          nombre={cashierDisplayLabel(cashier)}
+          onHecho={() => setCambiandoPin(false)}
+          onCancelar={() => setCambiandoPin(false)}
+        />
+      )}
+    </LoggedInWrapper>
+  );
 }
 
 function LoggedInWrapper({

@@ -44,10 +44,24 @@ export function ReloginPinModal(props: {
     setBusy(true);
     setError(null);
     try {
-      const res = await apiWithDevice<ReloginResponse>("/shift/cashier-login", {
-        method: "POST",
-        body: { email: props.email, pin },
-      });
+      const res = await apiWithDevice<ReloginResponse | { mustChoosePin: true }>(
+        "/shift/cashier-login",
+        { method: "POST", body: { email: props.email, pin } },
+      );
+      // pin-1 (punto 3) · le han repuesto el PIN mientras tenía la
+      // sesión abierta, así que el login no emite sesión: pide elegir
+      // uno propio. Aquí no se puede hacer —este modal existe para NO
+      // perder el ticket en curso, y la pantalla de elegir PIN es otra
+      // cosa— así que se dice qué pasa y se sale al login, que es quien
+      // sabe llevarla. El ticket se queda en el almacenamiento local
+      // igual que cuando el cajero cancela.
+      if ("mustChoosePin" in res) {
+        setPin("");
+        setError(
+          "Te han puesto un PIN nuevo. Sal al inicio de sesión y tecléalo: el programa te pedirá elegir el tuyo.",
+        );
+        return;
+      }
       setCashierSession({
         sessionToken: res.sessionToken,
         sessionTtlMinutes: res.sessionTtlMinutes,

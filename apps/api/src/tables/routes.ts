@@ -652,6 +652,10 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
           tenantId: auth.tenantId,
           role: { in: ["MANAGER", "OWNER"] },
           pinHash: { not: null },
+          // pin-1 (punto 3) · un PIN PROVISIONAL no autoriza. Ver la nota
+          // larga en `admin/manager-authorize.ts`: el PIN prestado sólo
+          // sirve para entrar a elegir el propio.
+          pinProvisionalAt: null,
           deletedAt: null,
           // clinica-9 (6) · el actor de sistema no autoriza nada. Hoy no
           // puede colarse —el CHECK `users_system_actor_no_credentials`

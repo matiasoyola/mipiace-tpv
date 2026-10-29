@@ -112,6 +112,18 @@ export async function registerManagerAuthorizationRoutes(
           tenantId: session.tid,
           email: lowerEmail,
           role: { in: ["MANAGER", "OWNER"] },
+          // pin-1 (punto 3) · **UN PIN PROVISIONAL NO AUTORIZA NADA.**
+          //
+          // Sirve para que su dueña entre UNA vez al TPV y elija el suyo,
+          // y para nada más. Un encargado al que le acaban de reponer el
+          // PIN no puede firmar con él un descuento ni un cierre con
+          // incidencia: el PIN prestado lo conocen dos personas.
+          //
+          // Va en el `where` y no en un `if` para que la negativa salga
+          // con el mismo 401 genérico que todo lo demás de esta ruta: no
+          // se revela si el email existe, ni si el rol es el correcto, ni
+          // —ahora— si el PIN está prestado.
+          pinProvisionalAt: null,
         },
         select: { id: true, email: true, pinHash: true, role: true },
       });

@@ -348,6 +348,9 @@ export interface ActivateTenantResponse {
   // cliente offline como fallback si el email no llega.
   // H1 · null cuando la empresa no tiene caja: el PIN de cajero no se
   // genera ni se enseña, porque no hay TPV al que entrar.
+  /** pin-1 (punto 4) · siempre `null`: la activación ya no genera PIN.
+   *  Se queda en el tipo porque el campo sigue en el contrato — lo que
+   *  la consola lee es la rama de «no hay PIN que enseñar». */
   ownerPin: string | null;
   cashierPinIssued: boolean;
   purge: {
@@ -468,7 +471,16 @@ export interface HubResponse {
 // El PIN no está aquí a propósito: no lo devuelve la API ni entero, ni
 // parcial, ni su hash. Lo único que baja es `canOpenTpv`, el booleano
 // derivado de si tiene PIN puesto.
-export type CashierAccessStatus = "ACTIVE" | "NO_PIN" | "REVOKED";
+//
+// pin-1 · `PIN_PROVISIONAL` es un estado propio y no una variante de
+// `ACTIVE`: tiene PIN puesto y NO entra con él — al teclearlo, el TPV le
+// obliga a elegir el suyo. Era la combinación que esta pantalla no sabía
+// decir, y es justo la de quien llama diciendo que no puede entrar.
+export type CashierAccessStatus =
+  | "ACTIVE"
+  | "PIN_PROVISIONAL"
+  | "NO_PIN"
+  | "REVOKED";
 
 // De dónde puede venir `lastLoginAt`. Un CASHIER sólo entra por el TPV
 // (el login del admin le devuelve 403), así que su fecha es del TPV
@@ -484,6 +496,10 @@ export interface TenantCashier {
   // cualquiera, así que el panel «¿puede entrar?» lo lista igual.
   role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   status: CashierAccessStatus;
+  /** pin-1 · el PIN que tiene se lo pusieron y sólo sirve para entrar
+   *  una vez a elegir el suyo. Con esto en `true`, `canOpenTpv` es
+   *  `false`. */
+  pinProvisional: boolean;
   canOpenTpv: boolean;
   isTestCashier: boolean;
   lastLoginAt: string | null;

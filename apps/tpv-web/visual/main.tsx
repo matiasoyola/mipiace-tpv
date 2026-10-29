@@ -62,6 +62,12 @@
 //     del CSV de Rosario, que es la captura 33 de la pasada del 27-10. A
 //     1280 de ancho la rejilla es de cinco columnas y ahí es donde
 //     «biomecánica» se salía de la tarjeta.
+//   pin-1: `cambiar-pin` (PIN actual + nuevo + repetir, desde el cajón del
+//     TPV), `elegir-pin` (la pantalla que obliga a elegir el propio tras
+//     entrar con un PIN provisional: sin el campo del actual),
+//     `pin-login` (la pantalla de entrada, para ver que no se movió) y
+//     `agenda-sanitaria` (la agenda con «Cambiar mi PIN» en la cabecera:
+//     es la única pantalla que la sanitaria sin caja tiene)
 //   catalogo-local: `?sin-holded=1` apaga el interruptor de Holded (la venta
 //     del comercio que no lo usa: sin "Cliente" en el menú del ticket y sin
 //     "Fiado" en el cobro) y `?fiado=1` enciende la venta a crédito, que
@@ -2039,6 +2045,8 @@ function Bench() {
     AgendaHealthPanel: typeof import("../src/pages/AgendaHealthPanel.js")["AgendaHealthPanel"];
     AgendaSkillMatrix: typeof import("../src/pages/AgendaSkillMatrix.js")["AgendaSkillMatrix"];
     ClientsPage: typeof import("../src/pages/ClientsPage.js")["ClientsPage"];
+    CambiarPinSheet: typeof import("../src/components/CambiarPinSheet.js")["CambiarPinSheet"];
+    PinScreen: typeof import("../src/pages/PinScreen.js")["PinScreen"];
     KitchenScreen: typeof import("../src/kitchen/KitchenScreen.js")["KitchenScreen"];
   }>(null);
 
@@ -2057,6 +2065,8 @@ function Bench() {
         matriz,
         clientes,
         cocina,
+        pin,
+        pantallaPin,
       ] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
         import("../src/pages/CheckoutPage.successOverlay.js"),
@@ -2070,6 +2080,8 @@ function Bench() {
         import("../src/pages/AgendaSkillMatrix.js"),
         import("../src/pages/ClientsPage.js"),
         import("../src/kitchen/KitchenScreen.js"),
+        import("../src/components/CambiarPinSheet.js"),
+        import("../src/pages/PinScreen.js"),
       ]);
       // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
       // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
@@ -2098,6 +2110,8 @@ function Bench() {
         AgendaSkillMatrix: matriz.AgendaSkillMatrix,
         ClientsPage: clientes.ClientsPage,
         KitchenScreen: cocina.KitchenScreen,
+        CambiarPinSheet: pin.CambiarPinSheet,
+        PinScreen: pantallaPin.PinScreen,
       });
     })();
   }, []);
@@ -2270,6 +2284,19 @@ function Bench() {
   // El punto de ENTRADA a la agenda: la venta de Sole con el botón
   // "Agenda" en la barra. La mudanza cambia a quién llama ese botón, así
   // que la captura tiene que salir igual antes y después.
+  // pin-1 · la agenda de la SANITARIA: la misma pantalla, con el botón
+  // de «Cambiar mi PIN» en la cabecera. Es lo único que ella ve del TPV.
+  if (screen === "agenda-sanitaria") {
+    return (
+      <Screens.AgendaPage
+        onClose={() => {}}
+        esSanitario
+        puedeCobrar={false}
+        onCambiarMiPin={() => {}}
+      />
+    );
+  }
+
   if (screen === "agenda-entrada") {
     return <AgendaEntrada Screens={Screens} />;
   }
@@ -2291,6 +2318,42 @@ function Bench() {
           sections: ["COCINA", "BARRA"],
           settings: { greenMaxMin: 10, amberMaxMin: 20, readyBeep: false },
         }}
+      />
+    );
+  }
+
+  // ── pin-1 · LAS DOS CARAS DE LA PANTALLA DEL PIN ──────────────────
+  //
+  //   · `cambiar-pin`  — desde el cajón del TPV: PIN actual, nuevo y
+  //     repetir. Es la que ve quien quiere cambiarlo porque sí.
+  //   · `elegir-pin`   — tras entrar con un PIN PROVISIONAL: sin el
+  //     campo del actual, y saludando por su nombre. Es la puerta del
+  //     punto 3, así que es la que hay que mirar a 1280×800: la ve una
+  //     cajera con la cola delante.
+  //   · `pin-login`    — la pantalla de entrada de siempre, para ver que
+  //     el bloque no la ha movido.
+  if (screen === "cambiar-pin" || screen === "elegir-pin") {
+    const elegir = screen === "elegir-pin";
+    return (
+      <Screens.CambiarPinSheet
+        contexto={
+          elegir
+            ? { modo: "elegir", pendingPinChangeToken: "tok-del-banco" }
+            : { modo: "cambiar" }
+        }
+        nombre="Marta"
+        onHecho={() => {}}
+        onCancelar={() => {}}
+      />
+    );
+  }
+
+  if (screen === "pin-login") {
+    return (
+      <Screens.PinScreen
+        registerName="Caja 1 · Cafetería Sirope"
+        onLoggedIn={() => {}}
+        onDeviceRevoked={() => {}}
       />
     );
   }

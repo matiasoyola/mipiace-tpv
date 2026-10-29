@@ -104,10 +104,17 @@ const fakePrisma = {
   staffProfile: {
     updateMany: vi.fn(async () => ({ count: 0 })),
   },
+  // pin-1 · el alta crea la persona Y su línea de `pin_changes` en una
+  // transacción interactiva, así que este falso tiene que entender las
+  // DOS formas: la de array (el nombre en dos columnas de clinica-9) y
+  // la de función.
+  pinChange: { create: vi.fn(async () => ({ id: "pc" })) },
   // clinica-9 (5) · el nombre se escribe en las dos columnas dentro de una
   // transacción (`lib/un-solo-nombre.ts`), de la forma de array.
-  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
-} as const;
+  $transaction: vi.fn(async (arg: any) =>
+    typeof arg === "function" ? arg(fakePrisma) : Promise.all(arg),
+  ),
+} as any;
 
 vi.mock("../src/context.js", () => ({
   getPrisma: () => fakePrisma,
@@ -164,7 +171,9 @@ async function createCashier(
       email: `nuevo-${randomUUID().slice(0, 8)}@bar.es`,
       alias: "María",
       role: "CASHIER",
-      pin: "1234",
+      // pin-1 · el alta rechaza los PIN triviales (`1234` entre ellos).
+      // Lo que este fichero mide es el alias.
+      pin: "9473",
       ...payload,
     },
   });
@@ -182,7 +191,7 @@ describe("POST /cashiers · alias obligatorio", () => {
       method: "POST",
       url: "/cashiers",
       headers: { authorization: `Bearer ${ownerToken()}` },
-      payload: { email: "a@bar.es", role: "CASHIER", pin: "1234" },
+      payload: { email: "a@bar.es", role: "CASHIER", pin: "9473" },
     });
     expect(res.statusCode).toBe(400);
   });

@@ -5,17 +5,23 @@ import { getEmailSender } from "../email/sender.js";
 // El subject y el body están definidos en el prompt B-SuperAdmin. NO se
 // loguea la password temporal en ningún punto (sólo se imprime una vez
 // en la response del POST /super-admin/tenants y se envía por email).
+//
+// ── pin-1 (punto 4) · AQUÍ NO VA NINGÚN PIN ──────────────────────────
+//
+// Esta plantilla llevaba un bloque «Acceso al TPV (caja): PIN 4817» y,
+// debajo, «Puedes cambiar tu PIN en cualquier momento desde el panel
+// admin». Lo segundo era MENTIRA: no existía la pantalla. Se van los
+// dos, y se va también el parámetro `ownerPin` — para que la promesa no
+// pueda volver sin que alguien la escriba a mano.
+//
+// Desde este bloque, el PIN del TPV lo elige la persona desde «Mi
+// cuenta» en el panel. El correo que SÍ lo dice es el de invitación
+// (`invite-email.ts`), que es el que recibe quien entra por primera vez.
 
 export interface WelcomeEmailParams {
   ownerEmail: string;
   ownerName: string;
   tempPassword: string;
-  // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero del TPV.
-  // Opcional para no romper callers antiguos; cuando viene se incluye
-  // como segunda credencial junto al email/password de admin.
-  //
-  // H1 · `null` cuando la empresa no tiene caja: sin TPV no hay PIN.
-  ownerPin?: string | null;
   // H1 · si el propietario tiene que conectar Holded tras el primer
   // login. `false` en una empresa que no usa Holded: mandarle a
   // conectarlo era el primer paso en falso de su primer día.
@@ -39,16 +45,6 @@ export async function sendOwnerWelcomeEmail(
     `  · Contraseña temporal: ${params.tempPassword}`,
     ``,
     `Por seguridad te pediremos cambiarla en el primer inicio de sesión.`,
-    ...(params.ownerPin
-      ? [
-          ``,
-          `Acceso al TPV (caja):`,
-          `  · Email: ${params.ownerEmail}`,
-          `  · PIN: ${params.ownerPin}`,
-          ``,
-          `Puedes cambiar tu PIN en cualquier momento desde el panel admin.`,
-        ]
-      : []),
     ...(params.expectsHolded !== false
       ? [
           ``,
@@ -68,15 +64,6 @@ export async function sendOwnerWelcomeEmail(
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
 
-  const pinBlock = params.ownerPin
-    ? `<p><strong>Acceso al TPV (caja):</strong></p>
-  <ul>
-    <li>Email: <code>${escape(params.ownerEmail)}</code></li>
-    <li>PIN: <code>${escape(params.ownerPin)}</code></li>
-  </ul>
-  <p>Puedes cambiar tu PIN en cualquier momento desde el panel admin.</p>`
-    : "";
-
   const html = `<!DOCTYPE html>
 <html lang="es">
 <body style="font-family: -apple-system, system-ui, sans-serif; color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px;">
@@ -89,7 +76,6 @@ export async function sendOwnerWelcomeEmail(
     <li>Contraseña temporal: <code>${escape(params.tempPassword)}</code></li>
   </ul>
   <p>Por seguridad te pediremos cambiarla en el primer inicio de sesión.</p>
-  ${pinBlock}
   ${
     params.expectsHolded !== false
       ? '<p>Para empezar a operar, conecta tu cuenta de Holded en "Mi cuenta" tras el primer login. El catálogo se sincroniza automáticamente en 2-5 minutos.</p>'

@@ -123,7 +123,6 @@ export function TenantDetailPage() {
   const [copiedEnlace, setCopiedEnlace] = useState(false);
   // v1.3-piloto-feedback · Lote 1: feedback separado al copiar el PIN
   // del OWNER (TPV) — coexiste con el feedback de la contraseña admin.
-  const [copiedPin, setCopiedPin] = useState(false);
   const [busy, setBusy] = useState(false);
   // T-6a (v1.1 Thalia): modal de edición de datos fiscales.
   const [showFiscalModal, setShowFiscalModal] = useState(false);
@@ -615,18 +614,6 @@ export function TenantDetailPage() {
     }
   }
 
-  async function copyPin(): Promise<void> {
-    // H1 · sin caja no hay PIN que copiar.
-    if (!activated?.ownerPin) return;
-    try {
-      await navigator.clipboard.writeText(activated.ownerPin);
-      setCopiedPin(true);
-      setTimeout(() => setCopiedPin(false), 2500);
-    } catch {
-      /* clipboard puede fallar */
-    }
-  }
-
   if (loading || !tenant) {
     return (
       <SuperAdminShell title="Cuenta">
@@ -668,39 +655,27 @@ export function TenantDetailPage() {
             · caduca el {diaYMes(activated.invitacion.caducaEl)}. El
             propietario elige su contraseña desde el enlace del correo.
           </p>
-          {/* v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero
-              en el TPV. Se enseña sólo aquí; el OWNER lo puede regenerar
-              desde "Mi cuenta" cuando entre al admin.
+          {/* pin-1 (punto 4) · AQUÍ YA NO HAY PIN QUE ENSEÑAR.
+              Vivía un bloque «PIN del OWNER (TPV / cajero)» con cuatro
+              cifras y un botón de Copiar, y debajo «se muestra una sola
+              vez». Se va con el PIN generado: lo elige la propietaria
+              desde «Mi cuenta» en cuanto entra, y el correo se lo dice.
 
-              H1 · sin caja no hay PIN. En vez de dejar el hueco vacío o un
-              "null", lo decimos: el implantador está en la llamada con el
-              cliente y necesita saber que NO falta nada. */}
-          {activated.ownerPin ? (
-            <>
-              <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
-                PIN del OWNER (TPV / cajero)
-              </div>
-              <div className="flex items-center gap-2">
-                <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
-                  {activated.ownerPin}
-                </code>
-                <button
-                  onClick={copyPin}
-                  className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  {copiedPin ? "Copiado" : "Copiar"}
-                </button>
-              </div>
-              <p className="text-[11.5px] text-emerald-700 mt-2">
-                El PIN se muestra una sola vez. Si el email no llega, pásaselo
-                al cliente por canal seguro.
-              </p>
-            </>
+              Lo que el implantador necesita saber sigue dicho, y eso es
+              lo que no se puede quitar: con caja, que tendrá que elegir
+              su PIN (para poder avisarle en la misma llamada); sin caja,
+              que no falta nada. */}
+          {activated.cashierPinIssued ? (
+            <p className="text-[11.5px] text-emerald-700 mt-3">
+              El <strong>PIN del TPV lo elige el propietario</strong> desde
+              «Mi cuenta» en cuanto entre al panel; el correo se lo explica.
+              Mi Piace ya no genera PINs: si se queda fuera, desde
+              «Configurar como OWNER» se le puede dejar uno provisional.
+            </p>
           ) : (
             <p className="text-[11.5px] text-emerald-700 mt-3">
-              Esta empresa no tiene caja, así que <strong>no se ha generado
-              PIN de cajero</strong>: no hay TPV al que entrar.
+              Esta empresa no tiene caja, así que <strong>no hay ningún PIN
+              que elegir</strong>: no hay TPV al que entrar.
             </p>
           )}
         </div>

@@ -11,13 +11,25 @@ import { decryptSecret, encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
-import { requireOwner, requireOwnerOrManager } from "./middleware.js";
+import {
+  requireOwner,
+  requireOwnerOrCashier,
+  requireOwnerOrManager,
+} from "./middleware.js";
+import {
+  PIN_FORMAT,
+  errorPinTrivial,
+  generarPinDeSoporte,
+  motivoPinTrivial,
+} from "./pin.js";
+import { escribirPinYRegistrarlo } from "./pin-registro.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import {
   signMustChangePasswordToken,
   verifyMustChangePasswordToken,
 } from "./must-change-password.js";
 import {
+  cashierLoginRateLimit,
   inspect as inspectRateLimit,
   ownerLoginRateLimit,
   registerFailure as registerRateLimitFailure,
@@ -221,49 +233,36 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         { sub: user.id, tid: user.tenantId },
         { tv: user.tokenVersion, remember: remember === true },
       );
-      // B7 §9: OWNER sin PIN al primer login → auto-generamos uno de 4
-      // dígitos para que pueda autorizar descuentos y cierres
-      // SYNC_FAILED desde el TPV cuando no hay MANAGER. Se devuelve
-      // una sola vez en este response — el front lo muestra en un
-      // modal "Tu PIN de respaldo es 1234".
+      // ── pin-1 · EL LOGIN YA NO GENERA NINGÚN PIN ───────────────────
       //
-      // ── contrato-lectura-completa (punto 6) · SIN CAJA NO HAY PIN ────
+      // Aquí vivía el PIN de respaldo auto-generado de B7 §9: un OWNER sin
+      // PIN entraba por primera vez y la primera pantalla del programa le
+      // decía «te hemos asignado el 4817, apúntalo, sólo se muestra una
+      // vez».
       //
-      // Lo encontró el primer acceso real de una residencia el 24-10-2026:
-      // a la directora de Jardín de Gredos, nada más entrar, la primera
-      // pantalla del programa le dijo «te hemos asignado un PIN de respaldo
-      // de 4 dígitos… lo usarás desde el TPV», en una cuenta que no tiene
-      // TPV ni lo va a tener. Seis líneas sobre descuentos y cierres con
-      // incidencia, delante de quien va a registrar cuidados.
+      // Se va, y es el punto del bloque. Requisito de Matías desde el
+      // 18-10: «el PIN debe ser personal y cambiable por el propio
+      // usuario desde su panel; no me cuadra que el sistema lo genere y
+      // solo se enseñe una vez». El 27-10 se perdió el PIN de la
+      // propietaria dos veces en la misma mañana, que es lo que pasa con
+      // un número al azar que sólo se enseña una vez.
       //
-      // El panel ya escondía la sección de «Mi cuenta» con `cajaEnabled`
-      // (H1) y `activate` ya no lo generaba: lo que quedaba suelto era el
-      // LOGIN, que es justo el camino por el que entra todo el mundo el
-      // primer día. Mismo gate que el resto de lo que es del TPV.
+      // Lo que lo sustituye: **«Elegir PIN» en Mi cuenta**, que la
+      // propietaria ya autenticada con email y contraseña usa cuando
+      // quiera, sin tener que acordarse de nada. El correo de invitación
+      // se lo dice, y ahora es verdad.
       //
-      // `cajaIsDisabled` falla hacia ENCENDIDO si la lectura no se puede
-      // hacer, igual que en las 103 rutas que lo usan: con el gate caído,
-      // el comportamiento es el de master y no el de dejar sin PIN a una
-      // dueña que cobra.
-      let ownerPinGenerated: string | null = null;
-      if (
-        user.role === "OWNER" &&
-        !user.pinHash &&
-        !(await cajaIsDisabled(user.tenantId))
-      ) {
-        ownerPinGenerated = generateOwnerPin();
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { pinHash: await hashPassword(ownerPinGenerated) },
-        });
-        request.log.info(
-          { event: "owner.pin_auto_generated", userId: user.id, tenantId: user.tenantId },
-          "OWNER PIN de respaldo generado automáticamente en login",
-        );
-      }
-      return ownerPinGenerated
-        ? { accessToken, refreshToken, ownerPinGenerated }
-        : { accessToken, refreshToken };
+      // Lo que esto NO rompe: quien ya tiene PIN sigue con el suyo. Esta
+      // rama sólo le tocaba a quien NO tenía — o sea, al primer login de
+      // una cuenta nueva.
+      //
+      // Y la invariante de contrato-lectura-completa (punto 6) se queda
+      // más fuerte de lo que estaba: una cuenta SIN CAJA no recibe PIN
+      // por ningún camino, porque ya no hay camino que lo genere solo.
+      // El gate de la caja sigue puesto en las tres rutas que escriben un
+      // PIN del TPV (`/auth/me/pin`, `/auth/me/pin/elegir` y
+      // `/auth/me/regenerate-owner-pin`).
+      return { accessToken, refreshToken };
     },
   );
 
@@ -352,6 +351,21 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           role: user.role,
           twoFactorEnabled: user.twoFactorEnabledAt != null,
           recoveryCodesRemaining: recovery.filter((c) => c.usedAt == null).length,
+          // pin-1 · las dos preguntas que «Mi cuenta» necesita para
+          // escribir el rótulo correcto, y no se deducen la una de la
+          // otra:
+          //
+          //   · `hasPin: false` → la sección dice «Elige tu PIN», que es
+          //     lo que ve una propietaria el primer día (desde este
+          //     bloque el sistema ya no le genera ninguno);
+          //   · `pinProvisional: true` → tiene uno PRESTADO (soporte se
+          //     lo regeneró) y la sección se lo dice, porque con él no va
+          //     a poder entrar al TPV sin elegir el suyo.
+          //
+          // El PIN no sale, ni entero ni parcial ni su hash. Salen dos
+          // booleanos sobre su estado.
+          hasPin: user.pinHash != null,
+          pinProvisional: user.pinProvisionalAt != null,
         },
         tenant: {
           id: tenant.id,
@@ -994,19 +1008,60 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // B7 §9: el OWNER puede regenerar su PIN de respaldo desde "Mi
-  // cuenta". Devuelve el nuevo PIN en plano una sola vez. El antiguo
-  // queda invalidado.
+  // ── pin-1 (punto 1) · CAMBIAR MI PIN ────────────────────────────────
   //
-  // contrato-lectura-completa (punto 6) · y **también con el gate de la
-  // caja**. El panel ya escondía el botón sin caja desde H1, pero esconder
-  // no es gatear (la cabecera de `caja-gate.ts`, literal): sin esto, una
-  // cuenta sin TPV sigue teniendo una ruta que le genera un PIN de TPV.
+  // Una pantalla y un endpoint, y el MISMO para el panel y para el TPV:
+  // «PIN actual, nuevo, repetir, guardar». Por eso el `preHandler` es
+  // `requireOwnerOrCashier` y no `requireOwner` — acepta la sesión del
+  // panel (access token de OWNER o MANAGER) y la sesión de cajero del
+  // TPV, que es por donde entran la cajera y el sanitario. Dos endpoints
+  // paralelos habrían sido dos sitios donde escribir el filtro de
+  // triviales y el registro del punto 7.
+  //
+  // `repetirPin` NO viaja: la repetición es cosa de la pantalla (cazar
+  // una errata que no se ve). Mandarla al servidor sólo añadiría un 400
+  // que el front ya evita, y un campo más en el cuerpo de una petición
+  // que lleva dos PIN en claro.
+  //
+  // ── El PIN ACTUAL es obligatorio, y cuenta para el bloqueo ──────────
+  //
+  // Punto 6 del bloque: los cinco intentos / quince minutos protegen
+  // también este campo. Y lo hacen en el MISMO cubo que el login del TPV
+  // (`cashierLoginRateLimit(tenantId, email)`), que es la decisión que
+  // importa: si fueran dos cubos, adivinar el PIN desde aquí saldría
+  // gratis mientras el login se queda bloqueado. Es la misma credencial;
+  // es el mismo contador.
+  //
+  // ── Por qué NO cierra las demás sesiones ───────────────────────────
+  //
+  // El bloque lo pedía «o se justifica en el -done». Está justificado
+  // allí con las cuentas; el resumen: las sesiones que abre un PIN son
+  // las de cajero, que son JWT sin `tokenVersion` y que tienen que
+  // validarse SIN tocar la base (y sin red, en modo offline). Y bumpar
+  // el `tokenVersion` del usuario cerraría las sesiones del PANEL, que
+  // no son las que abre el PIN.
   app.post(
-    "/auth/me/regenerate-owner-pin",
-    { preHandler: requireOwner },
+    "/auth/me/pin",
+    {
+      preHandler: requireOwnerOrCashier,
+      schema: {
+        body: {
+          type: "object",
+          required: ["currentPin", "newPin"],
+          additionalProperties: false,
+          properties: {
+            currentPin: { type: "string", pattern: PIN_FORMAT },
+            newPin: { type: "string", pattern: PIN_FORMAT },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const auth = request.auth!;
+      const { currentPin, newPin } = request.body as {
+        currentPin: string;
+        newPin: string;
+      };
       if (await cajaIsDisabled(auth.tenantId)) {
         return reply.code(403).send({
           error: "CAJA_DISABLED",
@@ -1015,27 +1070,232 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         });
       }
       const prisma = getPrisma();
-      const pin = generateOwnerPin();
-      await prisma.user.update({
+      // Siempre el PROPIO usuario de la sesión. No hay `:userId` en esta
+      // ruta a propósito: un cajero no puede cambiar el PIN de otro, y la
+      // forma de garantizarlo es que no exista el parámetro. El PIN de
+      // otra persona se cambia por `PATCH /cashiers/:id/pin`, que pide
+      // OWNER o MANAGER y deja el PIN PROVISIONAL.
+      const user = await prisma.user.findUnique({
         where: { id: auth.userId },
-        data: { pinHash: await hashPassword(pin) },
+        select: { id: true, email: true, tenantId: true, pinHash: true },
+      });
+      if (!user || user.tenantId !== auth.tenantId) {
+        return reply
+          .code(404)
+          .send({ error: "USER_NOT_FOUND", message: "Usuario no encontrado" });
+      }
+      const rlKey = cashierLoginRateLimit(auth.tenantId, user.email.toLowerCase());
+      const pre = await inspectRateLimit(rlKey);
+      if (pre.locked) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            pre.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: pre.retryAfterSeconds,
+        });
+      }
+      // Sin PIN puesto no hay «PIN actual» que acertar, y dejar pasar un
+      // `currentPin` cualquiera sería dar PIN a quien no lo tiene desde
+      // una ruta que promete comprobarlo. Quien no tiene PIN lo elige:
+      // la propietaria por «Elegir PIN», el personal con el provisional
+      // que le pone su encargado.
+      if (!user.pinHash) {
+        return reply.code(409).send({
+          error: "SIN_PIN_TODAVIA",
+          code: "SIN_PIN_TODAVIA",
+          message:
+            "Todavía no tienes PIN, así que no hay uno actual que comprobar. Elige el tuyo desde «Mi cuenta» en el panel.",
+        });
+      }
+      if (!(await verifyPassword(user.pinHash, currentPin))) {
+        const state = await registerRateLimitFailure(rlKey);
+        return reply.code(401).send({
+          error: "PIN_ACTUAL_INCORRECTO",
+          code: "PIN_ACTUAL_INCORRECTO",
+          message: "El PIN actual no es correcto.",
+          attemptsRemaining: state.attemptsRemaining,
+        });
+      }
+      const motivo = motivoPinTrivial(newPin);
+      if (motivo) return reply.code(400).send(errorPinTrivial(motivo));
+      await resetRateLimit(rlKey);
+      await escribirPinYRegistrarlo({
+        targetUserId: user.id,
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        pinHash: await hashPassword(newPin),
+        kind: "PROPIO",
+        // De dónde viene la sesión: la de cajero es del TPV, la del panel
+        // es del panel. Es lo que hace legible el registro del punto 7.
+        source: request.cashier ? "TPV" : "PANEL",
       });
       request.log.info(
-        { event: "owner.pin_regenerated", userId: auth.userId, tenantId: auth.tenantId },
-        "OWNER PIN de respaldo regenerado manualmente",
+        { event: "pin.cambiado_por_su_dueno", userId: user.id, tenantId: auth.tenantId },
+        "PIN cambiado por su propio dueño",
       );
-      return { pin };
+      return reply.code(200).send({ ok: true });
+    },
+  );
+
+  // ── pin-1 (punto 2) · OLVIDÉ MI PIN, LA PROPIETARIA ─────────────────
+  //
+  // Elegir un PIN nuevo **sin el actual**. No es un agujero: para llegar
+  // aquí hay que tener una sesión del panel, y a esa sesión se llega con
+  // email y contraseña (y con el 2FA si lo tiene). La contraseña ya la
+  // ha identificado — pedirle además un PIN que acaba de olvidar es
+  // pedirle lo que no tiene.
+  //
+  // Esto es lo que SUSTITUYE a «Regenerar PIN» en Mi cuenta. La
+  // diferencia no es cosmética: el que se va daba cuatro cifras al azar
+  // y las enseñaba una vez; éste deja el PIN que la dueña teclea.
+  //
+  // ── OWNER y no MANAGER, y por qué ──────────────────────────────────
+  //
+  // Decisión tomada sin preguntar (queda en el `-done`): el bloque dice
+  // «la propietaria» en el punto 2 y mete al encargado en el punto 3,
+  // que es el camino del personal — su PIN lo repone quien le dio de
+  // alta, y en el siguiente login elige el suyo. Un `MANAGER` que llegue
+  // aquí recibe el 403 de `requireOwner` con su frase de siempre.
+  //
+  // ── Y NO en una sesión de impersonación ────────────────────────────
+  //
+  // `requireOwner` acepta el JWT de «Configurar como OWNER» como si
+  // fuera el OWNER (está escrito así desde v1.3-SuperAdmin-Hub). Sin
+  // esta comprobación, Mi Piace podría dejarle a la propietaria un PIN
+  // DEFINITIVO elegido por Mi Piace, que es exactamente lo que el punto
+  // 5 prohíbe: lo que soporte puede dejar es un PIN provisional. La
+  // negativa va aquí y no en el botón del panel — esconder no es gatear.
+  app.post(
+    "/auth/me/pin/elegir",
+    {
+      preHandler: requireOwner,
+      schema: {
+        body: {
+          type: "object",
+          required: ["newPin"],
+          additionalProperties: false,
+          properties: { newPin: { type: "string", pattern: PIN_FORMAT } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { newPin } = request.body as { newPin: string };
+      if (auth.isImpersonation === true) {
+        return reply.code(403).send({
+          error: "SOPORTE_NO_ELIGE_PIN",
+          code: "SOPORTE_NO_ELIGE_PIN",
+          message:
+            "Desde una sesión de configuración no se puede elegir el PIN definitivo del propietario. Usa «Regenerar PIN», que deja uno provisional y obliga a la propietaria a elegir el suyo.",
+        });
+      }
+      if (await cajaIsDisabled(auth.tenantId)) {
+        return reply.code(403).send({
+          error: "CAJA_DISABLED",
+          code: "CAJA_DISABLED",
+          message: CAJA_DISABLED_MESSAGE,
+        });
+      }
+      const motivo = motivoPinTrivial(newPin);
+      if (motivo) return reply.code(400).send(errorPinTrivial(motivo));
+      await escribirPinYRegistrarlo({
+        targetUserId: auth.userId,
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        pinHash: await hashPassword(newPin),
+        // PROPIO: lo ha elegido ella. No tiene que volver a elegirlo al
+        // entrar al TPV.
+        kind: "PROPIO",
+        source: "PANEL",
+      });
+      // Y el contador del PIN se limpia. La dueña que acaba de elegir el
+      // suyo no puede encontrarse el candado de quince minutos que se
+      // ganó probando cinco veces el que no recordaba: tendría el PIN
+      // nuevo en la mano y la caja cerrada.
+      const yo = await getPrisma().user.findUnique({
+        where: { id: auth.userId },
+        select: { email: true },
+      });
+      if (yo) {
+        await resetRateLimit(
+          cashierLoginRateLimit(auth.tenantId, yo.email.toLowerCase()),
+        );
+      }
+      request.log.info(
+        { event: "pin.elegido_por_la_duena", userId: auth.userId, tenantId: auth.tenantId },
+        "PIN elegido por la propietaria autenticada con contraseña",
+      );
+      return reply.code(200).send({ ok: true });
+    },
+  );
+
+  // ── pin-1 (punto 5) · «REGENERAR PIN», EL ÚLTIMO RECURSO DE SOPORTE ─
+  //
+  // Lo que queda de B7 §9, con dos cambios y los dos del bloque:
+  //
+  //   1. **Deja el PIN PROVISIONAL.** Sirve para que esa persona entre
+  //      UNA vez al TPV y elija el suyo; no abre turno, no autoriza
+  //      descuentos ni cierres, y no viaja en el roster offline. Mi Piace
+  //      ya no deja PINs definitivos en cuentas ajenas.
+  //   2. **Sólo desde una sesión de soporte** («Configurar como OWNER»).
+  //      La propietaria de verdad tiene «Elegir PIN», que le deja el que
+  //      ella teclea; dejarle también este botón sería mantener vivo
+  //      justo lo que el bloque viene a quitar — un número al azar que se
+  //      enseña una vez. El 403 le dice por dónde sí.
+  //
+  // contrato-lectura-completa (punto 6) · el gate de la caja se queda:
+  // sin TPV no hay PIN que regenerar.
+  app.post(
+    "/auth/me/regenerate-owner-pin",
+    { preHandler: requireOwner },
+    async (request, reply) => {
+      const auth = request.auth!;
+      if (auth.isImpersonation !== true) {
+        return reply.code(403).send({
+          error: "PIN_AL_AZAR_SOLO_SOPORTE",
+          code: "PIN_AL_AZAR_SOLO_SOPORTE",
+          message:
+            "El PIN lo eliges tú: usa «Elegir PIN» en Mi cuenta. Generar uno al azar es sólo el último recurso de soporte de Mi Piace.",
+        });
+      }
+      if (await cajaIsDisabled(auth.tenantId)) {
+        return reply.code(403).send({
+          error: "CAJA_DISABLED",
+          code: "CAJA_DISABLED",
+          message: CAJA_DISABLED_MESSAGE,
+        });
+      }
+      const pin = generarPinDeSoporte(randomInt);
+      await escribirPinYRegistrarlo({
+        targetUserId: auth.userId,
+        tenantId: auth.tenantId,
+        // Quién lo hizo de verdad está en `impersonatedBy`, y eso ya lo
+        // escribe `impersonate_write` del middleware por cada mutación en
+        // modo full. Aquí el actor es el usuario de la sesión, que es lo
+        // que la FK puede apuntar — `pin_changes.actor_user_id` referencia
+        // `users`, y un super-admin no es un `user`. `source: SOPORTE` es
+        // lo que distingue la fila.
+        actorUserId: auth.userId,
+        pinHash: await hashPassword(pin),
+        kind: "PROVISIONAL",
+        source: "SOPORTE",
+      });
+      request.log.info(
+        {
+          event: "owner.pin_regenerated",
+          userId: auth.userId,
+          tenantId: auth.tenantId,
+          impersonatedBy: auth.impersonatedBy,
+        },
+        "PIN de propietario regenerado por soporte — queda PROVISIONAL",
+      );
+      // `provisional: true` en la respuesta para que el panel pueda
+      // decirlo en la misma pantalla donde enseña el PIN: quien lo lea en
+      // voz alta por teléfono tiene que saber que la dueña va a tener que
+      // elegir el suyo al entrar.
+      return { pin, provisional: true };
     },
   );
 }
 
-// Genera un PIN numérico de 4 dígitos al estilo del PIN del cajero
-// (B3): suficiente para una autorización de respaldo, fácil de
-// teclear, no se confunde con MFA. Usa `crypto.randomInt` para evitar
-// sesgos del modulo en 10000.
-function generateOwnerPin(): string {
-  // 4 dígitos: cubre 10.000 combinaciones. Para piloto con rate-limit
-  // en `manager-authorize` es suficiente. Si quisiéramos 6 dígitos
-  // (estilo Google), basta cambiar el rango.
-  return randomInt(0, 10_000).toString().padStart(4, "0");
-}

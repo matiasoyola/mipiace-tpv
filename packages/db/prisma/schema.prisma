@@ -1704,6 +1704,9 @@ model Tenant {
   // residencia-3 · el registro de cuidados y los PIN de la puerta.
   careRecords                   CareRecord[]
   carePins                      CarePin[]
+  // pin-1 · los cambios de PIN de este comercio (quién, a quién,
+  // provisional o propio). Sin el PIN.
+  pinChanges                    PinChange[]
   // residencia-4 · el libro de incidencias con sus acciones, enlaces y
   // comunicaciones a familia; los avisos y los turnos de guardia; las
   // excepciones de umbral de sus residentes y su configuración de
@@ -1904,6 +1907,29 @@ model User {
   passwordHash           String?       @map("password_hash")
   // PIN sólo lo tienen cajeros/encargados que tocan el TPV físico.
   pinHash                String?       @map("pin_hash")
+  // pin-1 · **EL PIN QUE HAY PUESTO NO ES SUYO TODAVÍA.**
+  //
+  // `NULL` = el PIN es propio: lo eligió la persona. Con valor = es
+  // PROVISIONAL, lo puso alguien por ella (la propietaria desde Cajeros,
+  // o Mi Piace como último recurso), y no sirve más que para entrar UNA
+  // vez al TPV y elegir el suyo.
+  //
+  // Un PIN provisional **no abre nada**: no emite sesión de cajero (el
+  // login contesta `mustChoosePin`), no autoriza un descuento ni un
+  // cierre con incidencia, y no viaja en el roster offline. Las cinco
+  // puertas que verifican un `pin_hash` lo filtran, y hay un test por
+  // cada una: que falte en una sola es un PIN prestado que sí cobra.
+  //
+  // Nullable y SIN default a propósito: las filas de hoy se quedan en
+  // `NULL`, o sea con PIN PROPIO. Nadie se queda fuera al desplegar —
+  // los quince terminales en producción siguen entrando con el PIN que
+  // tienen teclado desde hace meses.
+  //
+  // El CHECK `users_pin_provisional_exige_pin` impide la fila sin
+  // sentido (marca de provisional sin PIN). Por eso revocar a un cajero
+  // y purgar el cajero técnico, que ponen `pin_hash = NULL`, limpian
+  // esto en la misma escritura.
+  pinProvisionalAt       DateTime?     @map("pin_provisional_at") @db.Timestamptz()
   role                   UserRole
   // Incrementa con `POST /auth/logout-everywhere` (B2 §4.3). Los
   // refresh tokens llevan este `tv` en su payload; si no coincide con
@@ -2131,6 +2157,14 @@ model User {
   managementDutiesCreated  ManagementDuty[]  @relation("ManagementDutyCreatedBy")
   indicatorTargets         IndicatorTarget[]
 
+  // pin-1 · los dos papeles en un cambio de PIN: a quién se le cambió y
+  // quién lo cambió. `Cascade` en el primero (el registro es de esa
+  // credencial: si la persona se borra en duro, se va con ella) y
+  // `SetNull` en el segundo (dar de baja a la encargada que puso un PIN
+  // provisional no puede borrar que se puso).
+  pinChanges        PinChange[] @relation("PinChangeTarget")
+  pinChangesByMe    PinChange[] @relation("PinChangeActor")
+
   // calidad-1 · lo de calidad que lleva firma. `Restrict` en todo lo que
   // ES la firma (quién abrió, cerró o verificó) y `SetNull` en lo que
   // sólo dice quién configuró (quién creó un proceso o un riesgo): ser
@@ -2152,6 +2186,82 @@ model User {
 
   @@index([tenantId])
   @@map("users")
+}
+
+/// pin-1 · **EL REGISTRO DE LOS CAMBIOS DE PIN.**
+///
+/// Punto 7 del bloque: cada cambio queda registrado —quién, a quién,
+/// provisional o propio, y por dónde— **sin el PIN**. Ni entero, ni
+/// parcial, ni su hash: lo que se guarda es que pasó.
+///
+/// ── Por qué una tabla y no una línea de log ─────────────────────────
+///
+/// Porque la pregunta que hay que poder contestar es «¿quién le cambió
+/// el PIN a Marta el martes?», y esa se contesta mirando, no buscando en
+/// los logs de hace tres semanas. El 27-10 se perdió el PIN de la
+/// propietaria dos veces en la misma mañana y lo único que quedó de las
+/// dos regeneraciones fue un `request.log.info` que nadie leyó.
+///
+/// No hay pantalla que lo pinte todavía, y es deliberado: lo que este
+/// bloque necesita es que el dato EXISTA desde el primer cambio. Una
+/// pantalla sobre una tabla vacía no sirve de nada.
+model PinChange {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// A quién se le cambió el PIN.
+  targetUserId String @map("target_user_id") @db.Uuid
+  /// Quién lo cambió. `NULL` sólo si esa persona se borró en duro
+  /// después (ver el `SetNull` de abajo); en el momento de escribirlo
+  /// siempre hay alguien.
+  actorUserId  String? @map("actor_user_id") @db.Uuid
+
+  /// Qué quedó puesto: un PIN que la persona eligió (`PROPIO`) o uno
+  /// prestado que sólo sirve para entrar a elegir el suyo
+  /// (`PROVISIONAL`). Es la columna que convierte el registro en algo
+  /// que se puede leer: «se lo pusieron» y «lo eligió» no son el mismo
+  /// hecho.
+  kind   PinChangeKind
+  /// Por dónde se hizo. Separa el camino normal (la propia persona desde
+  /// el panel o el TPV) del de soporte, que es el que hay que poder
+  /// auditar.
+  source PinChangeSource
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// `Cascade`: el registro es de una CREDENCIAL, igual que `care_pins`.
+  /// Lo que no se borra con la persona es lo que firmó, y eso lo impiden
+  /// los `Restrict` de autoría.
+  target User   @relation("PinChangeTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  /// `SetNull`: dar de baja a la encargada que puso un PIN provisional no
+  /// puede borrar que se puso.
+  actor  User?  @relation("PinChangeActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@map("pin_changes")
+}
+
+enum PinChangeKind {
+  /// Lo eligió la propia persona. Vale para entrar y para autorizar.
+  PROPIO
+  /// Se lo pusieron. Sólo sirve para entrar una vez a elegir el suyo.
+  PROVISIONAL
+}
+
+enum PinChangeSource {
+  /// Mi cuenta, con la sesión del panel.
+  PANEL
+  /// El TPV, con la sesión de cajero (o la pantalla que obliga a elegir
+  /// tras un PIN provisional).
+  TPV
+  /// Cajeros / Personal: la propietaria o el encargado se lo ponen a
+  /// alguien del personal.
+  PERSONAL
+  /// Mi Piace, por «Configurar como OWNER» → «Regenerar PIN». El último
+  /// recurso, y el que más falta hace poder mirar después.
+  SOPORTE
 }
 
 model Store {

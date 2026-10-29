@@ -55,7 +55,14 @@ const REVOKED_EMAIL_SUFFIX = "@revoked.local";
 //             pone desde su sesión.
 //   REVOKED → el OWNER lo dio de baja (o es el cajero técnico purgado
 //             al activar la cuenta). No puede entrar, y no debe.
-type CashierAccessStatus = "ACTIVE" | "NO_PIN" | "REVOKED";
+// pin-1 · `PIN_PROVISIONAL` es un cuarto estado y no una variante de
+// `ACTIVE`: tiene PIN y no puede entrar con él. Era la combinación que
+// esta pantalla no sabía decir.
+type CashierAccessStatus =
+  | "ACTIVE"
+  | "PIN_PROVISIONAL"
+  | "NO_PIN"
+  | "REVOKED";
 
 // Origen del `lastLoginAt`. El campo lo escriben DOS logins distintos:
 // `POST /shift/cashier-login` (TPV, con PIN) y `POST /auth/login`
@@ -75,6 +82,9 @@ interface CashierRow {
   // contesta —«¿puede entrar?»— es la misma para él.
   role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   status: CashierAccessStatus;
+  /** pin-1 · el PIN que tiene puesto se lo pusieron, y sólo sirve para
+   *  entrar una vez a elegir el suyo. */
+  pinProvisional: boolean;
   canOpenTpv: boolean;
   isTestCashier: boolean;
   lastLoginAt: string | null;
@@ -86,8 +96,10 @@ interface CashierRow {
 // pregunta el cliente), luego quien no, y al final los revocados.
 const STATUS_ORDER: Record<CashierAccessStatus, number> = {
   ACTIVE: 0,
-  NO_PIN: 1,
-  REVOKED: 2,
+  // pin-1 · justo detrás de quien entra: es quien va a llamar.
+  PIN_PROVISIONAL: 1,
+  NO_PIN: 2,
+  REVOKED: 3,
 };
 
 export async function registerSuperAdminTenantCashiersRoutes(
@@ -153,6 +165,12 @@ export async function registerSuperAdminTenantCashiersRoutes(
           // Sólo para derivar `canOpenTpv`. NO se devuelve — ver el
           // map de abajo y el test "el PIN no viaja en la respuesta".
           pinHash: true,
+          // pin-1 · y si ese PIN es PRESTADO. `canOpenTpv` mentía con uno
+          // provisional: decía «sí» para alguien que, al teclearlo, se
+          // encuentra la pantalla de elegir PIN y no entra. Es
+          // exactamente la fila que Mi Piace mira cuando alguien llama
+          // diciendo que no puede entrar.
+          pinProvisionalAt: true,
           lastLoginAt: true,
           createdAt: true,
           isTestCashier: true,
@@ -165,18 +183,26 @@ export async function registerSuperAdminTenantCashiersRoutes(
           const revoked =
             u.deletedAt != null || u.email.endsWith(REVOKED_EMAIL_SUFFIX);
           const hasPin = u.pinHash != null;
+          const pinProvisional = u.pinProvisionalAt != null;
           const status: CashierAccessStatus = revoked
             ? "REVOKED"
-            : hasPin
-              ? "ACTIVE"
-              : "NO_PIN";
+            : pinProvisional
+              ? "PIN_PROVISIONAL"
+              : hasPin
+                ? "ACTIVE"
+                : "NO_PIN";
           return {
             id: u.id,
             alias: u.alias,
             email: u.email,
             role: u.role as "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN",
             status,
-            canOpenTpv: hasPin && !revoked,
+            // Con PIN provisional NO abre el TPV: entra a la pantalla
+            // que le obliga a elegir el suyo y ahí se queda hasta que lo
+            // elija. Decir `true` sería contestar que sí a la pregunta
+            // equivocada.
+            canOpenTpv: hasPin && !revoked && !pinProvisional,
+            pinProvisional,
             isTestCashier: u.isTestCashier,
             lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
             // clinica-1 · un CLINICIAN cuenta como el CASHIER: el login
