@@ -121,6 +121,9 @@ export type CheckRequirement =
   | "always"
   | "caja"
   | "holded"
+  // clinica-11 · caja Y Holded. El cajero técnico sólo existe con Holded:
+  // lo provisiona el worker del sync inicial.
+  | "cajaConHolded"
   | "clinica"
   // clinica-8 (fase B) · una CLÍNICA, no «cualquiera con la historia
   // clínica encendida»: una residencia la tiene por diseño.

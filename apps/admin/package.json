@@ -12,6 +12,7 @@
     "@mipiacetpv/contrato-encargado": "workspace:*",
     "@mipiacetpv/cuadrante": "workspace:*",
     "@mipiacetpv/residencia-plan": "workspace:*",
+    "@mipiacetpv/sentry-limpio": "workspace:*",
     "@mipiacetpv/ticket-model": "workspace:*",
     "@mipiacetpv/util-validation": "workspace:*",
     "@sentry/react": "^10.57.0",

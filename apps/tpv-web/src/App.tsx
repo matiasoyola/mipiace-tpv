@@ -36,8 +36,13 @@ import {
   registerLocalShiftLookup,
   registerShiftResolvedCallback,
   startOutboxSync,
+  subscribeOutbox,
 } from "./lib/outbox.js";
 import { refreshOfflineBundle } from "./lib/offlineSession.js";
+import {
+  abrirTurnoDeClinicaEnLocal,
+  adoptarTurnoDelServidor,
+} from "./lib/turnoDeClinica.js";
 import {
   clearLocalShift,
   localShiftIdForOutbox,
@@ -229,11 +234,49 @@ export function App() {
   // offlineShift → sin ciclo de dependencias).
   useEffect(() => {
     registerLocalShiftLookup(localShiftIdForOutbox);
-    registerShiftResolvedCallback(resolveLocalShift);
+    // clinica-11 · el callback hace DOS cosas y hasta hoy hacía una.
+    //
+    // `resolveLocalShift` fija el `serverId` en IndexedDB, pero el
+    // `shiftId` que esta pantalla le pasa a la venta, al cierre y al
+    // arqueo vive en el estado de React y se quedaba con el `localId`.
+    // Consecuencia, que ya existía antes de este bloque en el camino
+    // offline: abrir turno sin red, volver la red y cerrar el turno en la
+    // MISMA sesión pedía `/shift/<localId>/close-day` y recibía un 404.
+    //
+    // En una clínica eso pasaría todos los días —el turno nace siempre
+    // local— así que se arregla aquí, donde vive el estado.
+    registerShiftResolvedCallback(async (localId, serverId) => {
+      await resolveLocalShift(localId, serverId);
+      setCashier((prev) =>
+        prev.kind === "active" && prev.shift.id === localId
+          ? { ...prev, shift: { ...prev.shift, id: serverId } }
+          : prev,
+      );
+    });
     return () => {
       registerLocalShiftLookup(null);
       registerShiftResolvedCallback(null);
     };
+  }, []);
+
+  // clinica-11 · EL PASO 3 DEL TURNO DE UNA CLÍNICA.
+  //
+  // El turno de una clínica nace local y lo abre el SERVIDOR en el primer
+  // cobro. Quien se entera del id real es este `GET /shift/current` de
+  // después de cada cobro que sale de la cola — no hay ningún `shift-open`
+  // encolado del que leerlo (ver `lib/turnoDeClinica.ts`).
+  //
+  // Va sobre el evento `sent` del outbox porque TODO cobro pasa por la
+  // cola (la venta suelta, el cobro de una mesa y el de una cita), así que
+  // es el único sitio que los cubre los tres. `adoptarTurnoDelServidor` no
+  // toca la red si el turno local ya está resuelto, así que en los catorce
+  // comercios sin clínica esto no cuesta nada: su turno nace del servidor
+  // y nace resuelto.
+  useEffect(() => {
+    return subscribeOutbox((e) => {
+      if (e.type !== "sent") return;
+      void adoptarTurnoDelServidor();
+    });
   }, []);
 
   // A5 · canal de soporte. Se abre cuando el terminal está vinculado (antes
@@ -550,6 +593,7 @@ export function App() {
       ) : cashier.kind === "needsShiftOpen" ? (
         <ShiftOpenWithDaySummary
           cashierRole={cashier.cashier.role}
+          clinica={getCachedClinicaEnabled()}
           cashierLabel={cashierDisplayLabel(cashier.cashier)}
           registerName={register.name}
           storeName={store.name}
@@ -1236,12 +1280,22 @@ export function TpvHome(props: {
 // "Confirmar" sella `summaryAckAt` en el server, así que la tarjeta aparece
 // UNA vez y no todas las mañanas. Sin red no hay resumen que pedir: se pasa
 // derecho a abrir turno, como en v1.10.
-function ShiftOpenWithDaySummary({
+// clinica-11 · exportado para el banco. Lo que hay que poder medir es la
+// DECISIÓN —en una clínica no sale «Abrir turno», en un bar sí— y esa
+// decisión vive aquí (pin-1 · «verde pero nadie la llama»). En producción
+// sólo lo monta `LoggedInWrapper`.
+export function ShiftOpenWithDaySummary({
   cashierRole,
+  clinica,
   ...props
 }: React.ComponentProps<typeof ShiftOpenScreen> & {
   // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
   cashierRole: CashierRole;
+  // clinica-11 · en una clínica no hay pantalla de abrir turno. Lo decide
+  // la caché del catálogo, la misma que ya decide si se entra por la
+  // agenda — así que vale sin red y está puesta antes de que esta pantalla
+  // exista.
+  clinica: boolean;
 }) {
   const [pending, setPending] = useState<ShiftDaySummary | null>(null);
   const [checking, setChecking] = useState(() => navigator.onLine);
@@ -1323,7 +1377,68 @@ function ShiftOpenWithDaySummary({
     );
   }
 
+  // clinica-11 · EN UNA CLÍNICA NO SALE LA PANTALLA.
+  //
+  // La tarjeta del día de arriba SÍ sale: es el resumen del cierre de
+  // ayer y no se le quita a nadie («el cierre del día sigue igual»). Lo
+  // que se va es el paso siguiente, el de teclear el fondo de caja, que es
+  // el que no le sirve de nada a quien no tiene mostrador.
+  if (clinica) return <AperturaDeClinica onOpened={props.onOpened} />;
+
   return <ShiftOpenScreen {...props} />;
+}
+
+/**
+ * clinica-11 · el puente sin pantalla entre el login y la agenda.
+ *
+ * Pinta un spinner y nada más, y dura lo que tarda un `GET
+ * /shift/current`. No es una pantalla: es el hueco de la que se ha ido.
+ *
+ * `openedOffline: true` en el `onOpened` a propósito: el turno ya está
+ * escrito en local (`abrirTurnoDeClinicaEnLocal`), así que `App` no tiene
+ * que volver a espejarlo — y espejarlo lo pisaría con un turno del
+ * servidor que todavía no existe.
+ *
+ * Exportado para el banco: lo que hay que poder medir es que esta rama se
+ * monta y que NO monta «Abrir turno» (pin-1 · «verde pero nadie la
+ * llama»). En producción sólo lo monta `ShiftOpenWithDaySummary`.
+ */
+export function AperturaDeClinica({
+  onOpened,
+}: {
+  onOpened: (
+    shift: { id: string; openedAt: string; cashOpening: string },
+    openedOffline: boolean,
+  ) => void;
+}) {
+  const [fallo, setFallo] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void abrirTurnoDeClinicaEnLocal()
+      .then((shift) => {
+        if (vivo) onOpened(shift, true);
+      })
+      .catch(() => {
+        // `abrirTurnoDeClinicaEnLocal` ya se come los fallos de red; si
+        // llega aquí es que IndexedDB no está (modo privado restrictivo).
+        // No se deja a la podóloga mirando un spinner para siempre.
+        if (vivo) setFallo("No se pudo preparar la caja. Vuelve a entrar.");
+      });
+    return () => {
+      vivo = false;
+    };
+    // Dependencias VACÍAS a propósito: `onOpened` cambia en cada render de
+    // `App`, y meterlo aquí abriría un turno local por render.
+  }, []);
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-mipiace-stone">
+      {fallo ? (
+        <p className="text-[14px] text-red-700 px-6 text-center">{fallo}</p>
+      ) : (
+        <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+      )}
+    </div>
+  );
 }
 
 // ─── Modo prueba (B-OnboardingV2) ──────────────────────────────────

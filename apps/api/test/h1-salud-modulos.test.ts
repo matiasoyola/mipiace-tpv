@@ -205,7 +205,11 @@ describe("H1 · empresa SIN caja y SIN Holded (el colegio)", () => {
     expect(byId(h, "taxes-ratio").requires).toBe("holded");
     expect(byId(h, "products-sellable").requires).toBe("caja");
     expect(byId(h, "no-sync-failures").requires).toBe("caja");
-    expect(byId(h, "test-cashier-provisioned").requires).toBe("caja");
+    // clinica-11 · MUDADO de `caja` a `cajaConHolded`, por el mismo
+    // argumento que `taxes-ratio`: el cajero técnico lo provisiona el
+    // worker del SYNC INICIAL, que sólo corre con Holded. Sin Holded no
+    // existe, y no por un fallo: es el diseño.
+    expect(byId(h, "test-cashier-provisioned").requires).toBe("cajaConHolded");
     expect(byId(h, "modules-enabled").requires).toBe("always");
     expect(byId(h, "fiscal-minimum").requires).toBe("always");
   });
@@ -358,5 +362,70 @@ describe("H1 · los dos checks que valen para cualquier empresa", () => {
     const h = await health({});
     expect(byId(h, "modules-enabled").applies).toBe(true);
     expect(byId(h, "fiscal-minimum").applies).toBe(true);
+  });
+});
+
+// ── clinica-11 · UN CHECK EN ROJO QUE NO ES UN FALLO ──────────────────
+//
+// «Cajero técnico provisionado» lo provisiona `provisionTestCashier`, y el
+// único sitio que la llama es el worker del SYNC INICIAL cuando el sync
+// termina OK y el tenant está en DRAFT. Sin Holded no hay sync inicial, así
+// que el cajero técnico **no se provisiona nunca**: el check se quedaba en
+// rojo para siempre y no había nada que hacer para arreglarlo.
+//
+// Un check en rojo que no es un fallo enseña a desconfiar de todos los
+// checks, que es lo que vacía de valor la pantalla entera.
+//
+// Es el mismo argumento exacto con el que catalogo-local (addendum 3) mudó
+// `taxes-ratio` de `caja` a `holded`, y se arregla igual: declarando la
+// dependencia de verdad.
+//
+// Sabotaje: devolver `requires: "caja"` → rojo aquí (el check volvería a
+// aplicar sin Holded y a bloquear la activación).
+describe("clinica-11 · el cajero técnico sólo existe con Holded", () => {
+  it("una caja local SIN Holded: el check NO aplica, ni verde ni rojo", async () => {
+    const h = await health({
+      cajaEnabled: true,
+      holdedEnabled: false,
+      holdedApiKeyCiphertext: null,
+      testCashier: false,
+    });
+    const c = byId(h, "test-cashier-provisioned");
+    expect(c.applies).toBe(false);
+    // Y no bloquea: lo que la bloqueaba era un check imposible.
+    expect(h.readinessChecks.filter((x) => x.applies && !x.ok)).toEqual([]);
+    expect(h.ready).toBe(true);
+  });
+
+  it("con Holded PREVISTO pero sin clave todavía, SÍ aplica y sí bloquea", async () => {
+    // La cuenta a mitad de onboarding. Aquí el cajero técnico es justo lo
+    // que falta por provisionar, así que el check tiene que doler.
+    const h = await health({
+      cajaEnabled: true,
+      holdedEnabled: true,
+      holdedApiKeyCiphertext: null,
+      testCashier: false,
+    });
+    const c = byId(h, "test-cashier-provisioned");
+    expect(c.applies).toBe(true);
+    expect(c.ok).toBe(false);
+    expect(h.ready).toBe(false);
+  });
+
+  it("con caja y Holded conectado sigue aplicando igual que en master", async () => {
+    const h = await health({ testCashier: true });
+    const c = byId(h, "test-cashier-provisioned");
+    expect(c.applies).toBe(true);
+    expect(c.ok).toBe(true);
+  });
+
+  it("SIN caja no aplica, como antes del bloque", async () => {
+    const h = await health({
+      cajaEnabled: false,
+      crmEnabled: true,
+      holdedEnabled: true,
+      testCashier: false,
+    });
+    expect(byId(h, "test-cashier-provisioned").applies).toBe(false);
   });
 });

@@ -483,6 +483,27 @@ function extractServerShiftId(response: unknown): string | null {
   return null;
 }
 
+/**
+ * clinica-11 · la MISMA reescritura, llamada desde fuera.
+ *
+ * En una clínica el turno local no nace de un `POST /shift/open`: nace sin
+ * turno en el servidor, y el servidor lo abre solo en el primer cobro (ver
+ * `lib/turnoDeClinica.ts`). Así que quien se entera del id real no es el
+ * flush de un `shift-open` —no hay ninguno en la cola— sino el `GET
+ * /shift/current` de después del cobro.
+ *
+ * Se expone la función que ya existía en vez de escribir una segunda: lo
+ * que hay que hacer es exactamente lo mismo (reescribir el `shiftId` de
+ * los items pendientes y fijar el `serverId` del turno local), y dos
+ * copias de eso son dos sitios donde se olvida el `path` de los arqueos.
+ */
+export async function resolverTurnoLocal(
+  shiftLocalId: string,
+  serverId: string,
+): Promise<void> {
+  await onShiftResolved(shiftLocalId, serverId);
+}
+
 // v1.10-offline: un shift-open sincronizó. Reescribe el shiftId (local →
 // server) de todos los items dependientes que sigan en la cola y avisa
 // a offlineShift para que fije el serverId.

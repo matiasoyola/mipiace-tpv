@@ -22,6 +22,8 @@ const DEVICE = "00000000-0000-0000-0000-000000000004";
 const SHIFT = "00000000-0000-0000-0000-000000000005";
 
 let ticketCounter = 0;
+/** clinica-11 · los turnos que la apertura automática deja escritos. */
+const turnosAbiertos: any[] = [];
 const tickets = new Map<string, any>();
 const uploads = new Map<string, any>();
 const emailJobs = new Map<string, any>();
@@ -93,10 +95,29 @@ const fakePrisma = {
   shift: {
     findFirst: vi.fn(async ({ where }: any) => {
       if (where.id === SHIFT) return { id: SHIFT };
+      // clinica-11 · la apertura automática pregunta por el turno ABIERTO
+      // de la caja (sin `where.id`) antes de abrir uno. En este fake no
+      // hay ninguno: es el caso que describe el bloque.
+      if (where.closedAt === null) return turnosAbiertos[0] ?? null;
+      // Y por el último CERRADO, para el fondo. Tampoco hay.
       return null;
+    }),
+    create: vi.fn(async ({ data }: any) => {
+      const fila = {
+        id: randomUUID(),
+        openedAt: data.openedAt,
+        cashOpening: { toString: () => String(data.cashOpening) },
+        openReason: data.openReason ?? "MANUAL",
+        userId: data.userId,
+        registerId: data.registerId,
+      };
+      turnosAbiertos.push(fila);
+      return fila;
     }),
     update: vi.fn(async () => ({})),
   },
+  ticketPayment: { groupBy: vi.fn(async () => []) },
+  refund: { groupBy: vi.fn(async () => []) },
   holdedUpload: {
     upsert: vi.fn(async ({ where, create }: any) => {
       if (uploads.has(where.externalId)) return uploads.get(where.externalId);
@@ -126,6 +147,15 @@ const fakePrisma = {
       // fecha el gate la lee como EN ENSAYO y el ticket nace `TEST`, que es
       // justo lo que describe el otro fichero de tests.
       facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
+    })),
+    // clinica-11 · el camino del turno que no está abierto pregunta si
+    // esto es una CONSULTA, porque en una clínica el primer cobro del día
+    // abre la caja sola. Este fake es el comercio de siempre: sin historia
+    // clínica, así que el 409 de abajo sigue siendo el 409 de abajo. El
+    // caso de la clínica vive en `clinica-11-turno-automatico.test.ts`.
+    findUnique: vi.fn(async () => ({
+      clinicalRecordsEnabled: false,
+      residenciaEnabled: false,
     })),
   },
   user: {
@@ -192,8 +222,15 @@ beforeEach(() => {
   tickets.clear();
   uploads.clear();
   emailJobs.clear();
+  turnosAbiertos.length = 0;
   ticketCounter = 0;
   vi.clearAllMocks();
+  // clinica-11 · por defecto, el comercio de siempre. Los tests de la
+  // clínica lo cambian y lo devuelven aquí.
+  fakePrisma.tenant.findUnique.mockImplementation(async () => ({
+    clinicalRecordsEnabled: false,
+    residenciaEnabled: false,
+  }));
 });
 
 describe("POST /tickets", () => {
@@ -486,6 +523,72 @@ describe("POST /tickets", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("SHIFT_NOT_OPEN");
+    // clinica-11 · y no se ha abierto ningún turno: en hostelería el fondo
+    // de caja lo declara una persona.
+    expect(fakePrisma.shift.create).not.toHaveBeenCalled();
+  });
+
+  // ── clinica-11 · EN UNA CLÍNICA, EL MISMO COBRO ABRE LA CAJA ─────────
+  //
+  // Es el otro lado exacto del test de arriba: mismo cuerpo, mismo turno
+  // que no existe, y lo único que cambia es el vertical de la cuenta. Las
+  // dos mitades juntas son lo que hay que poder leer de un tirón.
+  it("en una clínica, un cobro con la caja cerrada la abre solo", async () => {
+    fakePrisma.tenant.findUnique.mockImplementation(async () => ({
+      clinicalRecordsEnabled: true,
+      residenciaEnabled: false,
+    }));
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        lines: [
+          { nameSnapshot: "Plantillas", sku: "S", units: 1, unitPrice: 1, discountPct: 0, taxRate: 0 },
+        ],
+        payments: [{ method: "CASH", amount: 1 }],
+      },
+    });
+    // Cobrar siempre se puede: la venta entra.
+    expect(res.statusCode).toBe(201);
+    expect(fakePrisma.shift.create).toHaveBeenCalledTimes(1);
+    const abierto = turnosAbiertos[0]!;
+    // Sin ningún cierre anterior, el fondo es cero.
+    expect(abierto.cashOpening.toString()).toBe("0");
+    // A nombre de quien cobra, y marcado como apertura automática.
+    expect(abierto.userId).toBe(CASHIER);
+    expect(abierto.openReason).toBe("AUTO_CLINICA");
+    // Y el ticket queda en ESE turno, no en el que pidió el terminal.
+    const guardado = [...tickets.values()][0]!;
+    expect(guardado.shiftId).toBe(abierto.id);
+  });
+
+  it("y en una RESIDENCIA no, aunque tenga la historia clínica encendida", async () => {
+    fakePrisma.tenant.findUnique.mockImplementation(async () => ({
+      clinicalRecordsEnabled: true,
+      residenciaEnabled: true,
+    }));
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        lines: [
+          { nameSnapshot: "x", sku: "S", units: 1, unitPrice: 1, discountPct: 0, taxRate: 0 },
+        ],
+        payments: [{ method: "CASH", amount: 1 }],
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(fakePrisma.shift.create).not.toHaveBeenCalled();
   });
 
   // ── B6 §2: descuento sobre umbral exige authorizationToken ────────────

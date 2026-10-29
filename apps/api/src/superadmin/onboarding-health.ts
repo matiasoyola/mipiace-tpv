@@ -62,6 +62,8 @@
 
 import { TicketStatus, type PrismaClient } from "@mipiacetpv/db";
 
+import { esVerticalClinica } from "../lib/vertical-clinica.js";
+
 const TAXES_RATE_THRESHOLD_PCT = 80;
 const PRODUCTS_SELLABLE_THRESHOLD_PCT = 50;
 
@@ -72,6 +74,10 @@ export type CheckRequirement =
   | "always"
   | "caja"
   | "holded"
+  // clinica-11 · caja Y Holded. No es la suma de dos checks: es UN check
+  // cuya cosa medida sólo llega a existir cuando están las dos. Ver la
+  // nota de `test-cashier-provisioned`.
+  | "cajaConHolded"
   | "clinica"
   // clinica-8 (fase B) · una CLÍNICA, no «cualquiera con la historia
   // clínica encendida». Ver la nota de `applies`.
@@ -344,6 +350,13 @@ export async function computeOnboardingHealth(
   const applies: Record<CheckRequirement, boolean> = {
     always: true,
     caja: hasCaja,
+    // clinica-11 · el cajero técnico lo provisiona el worker del SYNC
+    // INICIAL (`workers/initial-sync-worker.ts`), y ese worker sólo corre
+    // cuando hay Holded del que sincronizar. En una cuenta de catálogo
+    // local nunca se provisiona, así que el check estaba en rojo para
+    // siempre y no había nada que hacer para arreglarlo. Un check en rojo
+    // que no es un fallo enseña a desconfiar de todos los checks.
+    cajaConHolded: hasCaja && holdedPrevisto,
     // clinica-8 · sólo en una clínica. En los catorce comercios sin
     // historia clínica el check sale «No aplica» y no bloquea nada.
     clinica: tenant.clinicalRecordsEnabled === true,
@@ -368,9 +381,12 @@ export async function computeOnboardingHealth(
     // dentro— no se bloquea la activación: su catálogo clínico se
     // completa después, y lo que está en juego ahí no es el primer cobro
     // de una paciente que ya se ha ido.
-    clinicaDePodologia:
-      tenant.clinicalRecordsEnabled === true &&
-      tenant.residenciaEnabled !== true,
+    //
+    // clinica-11 · y la pregunta sube a `lib/vertical-clinica.ts`, porque
+    // este bloque la necesita en un segundo sitio (la apertura automática
+    // del turno) y dos sitios con la misma pregunta escrita a mano son dos
+    // sitios que se separan.
+    clinicaDePodologia: esVerticalClinica(tenant),
     // La dependencia es "está previsto que use Holded", NO "lo tiene
     // conectado". Si fuera lo segundo, la empresa a mitad de onboarding
     // vería su `sync-done` como "No aplica" justo cuando es el único
@@ -493,11 +509,25 @@ export async function computeOnboardingHealth(
       requires: "clinicaDePodologia",
     },
     {
+      // clinica-11 · MUDADO de `caja` a `cajaConHolded`.
+      //
+      // Lo provisiona `provisionTestCashier`, y el único sitio que la
+      // llama es el worker del sync inicial cuando el sync termina OK y el
+      // tenant está en DRAFT. Sin Holded no hay sync inicial, así que no
+      // hay cajero técnico — y no por un fallo: es el diseño. Es el mismo
+      // argumento exacto con el que catalogo-local (addendum 3) mudó
+      // `taxes-ratio` de `caja` a `holded`: `TenantTax` se puebla sólo
+      // desde el sync, así que exigirlo sin Holded no medía la salud de
+      // nadie, medía la existencia del sync.
+      //
+      // OJO a lo que esto cambia en quién bloquea: una cuenta de catálogo
+      // local con caja ya NO se queda sin activar por esto. Lo que la
+      // bloqueaba era un check que no podía cumplir nunca.
       id: "test-cashier-provisioned",
       label: "Cajero técnico provisionado",
       ok: cashierTest != null,
       value: cashierTest != null ? "sí" : "no",
-      requires: "caja",
+      requires: "cajaConHolded",
     },
   ];
 

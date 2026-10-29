@@ -74,6 +74,11 @@ COPY packages/kitchen-lan/package.json packages/kitchen-lan/
 # `workspace:*`: sin esta línea, `pnpm install --frozen-lockfile` en la
 # imagen falla con «no matching version found for @mipiacetpv/residencia-plan».
 COPY packages/residencia-plan/package.json packages/residencia-plan/
+# clinica-11 · el saneado de Sentry. Lo declaran como `workspace:*` las
+# TRES apps (api, tpv-web y admin), así que sin su manifest el install de
+# la imagen falla antes de empezar. Mismo olvido que escpos-builder en
+# v1.9.4 y verifactu en verifactu-1; el test de abajo lo impide.
+COPY packages/sentry-limpio/package.json packages/sentry-limpio/
 COPY packages/ticket-model/package.json packages/ticket-model/
 COPY packages/ticket-pdf/package.json packages/ticket-pdf/
 COPY packages/util-validation/package.json packages/util-validation/

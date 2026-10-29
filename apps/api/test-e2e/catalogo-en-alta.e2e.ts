@@ -218,18 +218,38 @@ describe.skipIf(!e2eEnabled)("e2e · un bar nuevo sin Holded llega a cobrar", ()
   // ── 2 · la activación está bloqueada por DOS cosas ──────────────────
 
   describe("2 · lo que bloquea la activación", () => {
-    it("son dos checks, no uno: el catálogo vacío y el cajero técnico", async () => {
+    // ── clinica-11 · LO QUE BLOQUEA PASÓ DE DOS A UNO ────────────────
+    //
+    // Hasta clinica-11, a este bar le aplicaba también «Cajero técnico
+    // provisionado» y eso le obligaba a pasar por «Probar TPV» antes de
+    // poder activar. Decisión de Matías (28-10): el cajero técnico sólo
+    // existe con Holded, así que sin Holded el check no aplica.
+    //
+    // Y hay que decir lo que se pierde, porque este fichero era quien lo
+    // documentaba: **el implantador ya no está obligado a probar el TPV
+    // antes de activar un comercio sin Holded.** Ver el §3 del
+    // `clinica-11-done.md`: el check SÍ se podía satisfacer sin Holded
+    // —`issueTestCashierSession` provisiona a demanda, y es lo que hace
+    // el paso 4 de este mismo recorrido—, así que lo que se quita no es
+    // un check imposible, es un peaje que servía para algo.
+    it("lo que bloquea es UNO: el catálogo vacío", async () => {
       const h = await salud();
       expect(h.ready).toBe(false);
       expect(check(h, "products-sellable")).toMatchObject({ applies: true, ok: false });
-      expect(check(h, "test-cashier-provisioned")).toMatchObject({ applies: true, ok: false });
+      // clinica-11 · el cajero técnico pasa a «No aplica»: ni verde ni
+      // rojo. Sigue sin estar provisionado (`ok: false`), pero ya no
+      // cuenta para `ready`.
+      expect(check(h, "test-cashier-provisioned")).toMatchObject({
+        applies: false,
+        ok: false,
+      });
       // Y lo que NO le aplica: sin Holded, el sync y los impuestos del ERP
       // no son asunto suyo (H1 + catalogo-local addendum 3).
       expect(check(h, "sync-done").applies).toBe(false);
       expect(check(h, "taxes-ratio").applies).toBe(false);
     });
 
-    it("activar responde 400 nombrando los dos", async () => {
+    it("activar responde 400 nombrando el que queda", async () => {
       const res = await app.inject({
         method: "POST",
         url: `/super-admin/tenants/${tenantId}/activate`,
@@ -240,7 +260,9 @@ describe.skipIf(!e2eEnabled)("e2e · un bar nuevo sin Holded llega a cobrar", ()
       expect(res.json().error).toBe("ONBOARDING_NOT_READY");
       const fallan = res.json().failing as string[];
       expect(fallan.some((f) => f.includes("productos sellable"))).toBe(true);
-      expect(fallan.some((f) => f.includes("Cajero técnico"))).toBe(true);
+      // clinica-11 · y el cajero técnico ya NO sale en la lista de lo que
+      // falla: no aplica, y lo que no aplica no bloquea.
+      expect(fallan.some((f) => f.includes("Cajero técnico"))).toBe(false);
       // Y sigue en DRAFT: una activación que falla no deja medio tenant.
       const t = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
       expect(t.onboardingState).toBe("DRAFT");
@@ -323,12 +345,19 @@ describe.skipIf(!e2eEnabled)("e2e · un bar nuevo sin Holded llega a cobrar", ()
       expect(await prisma.product.count({ where: { tenantId } })).toBe(128);
     });
 
-    it("y la salud ya pasa products-sellable", async () => {
+    it("y con eso la salud queda lista", async () => {
       const h = await salud();
       expect(check(h, "products-sellable")).toMatchObject({ ok: true, value: "128/128 (100%)" });
-      // Pero todavía NO está lista: queda el cajero técnico.
-      expect(h.ready).toBe(false);
-      expect(check(h, "test-cashier-provisioned").ok).toBe(false);
+      // clinica-11 · aquí estaba el segundo peaje. Hasta este bloque
+      // quedaba el cajero técnico y había que pasar por «Probar TPV»;
+      // ahora el catálogo era lo único que faltaba. El cajero técnico
+      // sigue sin provisionarse —el paso 4 lo hace a demanda— pero no
+      // aplica y no cuenta.
+      expect(h.ready).toBe(true);
+      expect(check(h, "test-cashier-provisioned")).toMatchObject({
+        applies: false,
+        ok: false,
+      });
     });
   });
 
@@ -364,9 +393,15 @@ describe.skipIf(!e2eEnabled)("e2e · un bar nuevo sin Holded llega a cobrar", ()
       expect(devices[0]!.kind).toBe("TEST");
     });
 
-    it("con eso la salud queda lista: la activación ya es posible", async () => {
+    it("«Probar TPV» provisiona el cajero, aunque ya no haga falta para activar", async () => {
+      // clinica-11 · ESTE assert es el que demuestra que el check SÍ se
+      // podía satisfacer sin Holded, que es lo que el prompt del bloque
+      // daba por imposible: `issueTestCashierSession` llama a
+      // `provisionTestCashier`, y acaba de hacerlo en el test de arriba.
+      // Lo que cambia con el bloque es que ya no se EXIGE.
       const h = await salud();
       expect(check(h, "test-cashier-provisioned").ok).toBe(true);
+      expect(check(h, "test-cashier-provisioned").applies).toBe(false);
       expect(h.ready).toBe(true);
     });
 
