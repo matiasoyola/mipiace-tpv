@@ -385,9 +385,27 @@ Hacerlo caber en una fila pedía recortar 157 px de cinco controles a la
 vez: el rótulo de la fecha a «jue 29», el conmutador a dos iconos y los
 botones a 36 px. Tres cosas ilegibles para que quepa una.
 
-Lo que se hace es dejar que exista una **segunda fila** por debajo de
-`md`: la barra pasa a `flex-wrap`, el rótulo de la fecha se queda entero
-en la primera y lo que no cabe baja a la segunda, donde sobran píxeles.
+Lo que se hace es dejar que exista una **segunda fila**: la barra pasa a
+`flex-wrap`, el rótulo de la fecha se queda entero en la primera y lo que
+no cabe baja a la segunda, donde sobran píxeles.
+
+### Y sin `flex-nowrap` a ningún ancho
+
+La primera pasada puso el corte en `md` (768). Al medir **todos** los
+anchos y no sólo los dos del prompt, apareció esto:
+
+```
+768 → contenido 820 · fuera: Dar cita
+```
+
+Justo en el breakpoint elegido a ojo. O sea: se habría arreglado 390 y se
+habría dejado roto 768 —una tablet— con exactamente el mismo fallo que el
+bloque viene a arreglar, y sin que ningún test lo dijera.
+
+Así que no hay `flex-nowrap` a ningún ancho. La barra es **una fila
+mientras quepa y dos cuando no**, y no hay un número que alguien tenga
+que haber adivinado bien. Lo que cambia en `lg` es sólo la métrica de la
+fila única (hueco, padding y la altura mínima).
 
 ### Y a 1280×800 no cambia nada
 
@@ -399,10 +417,17 @@ diff antes.json despues.json (sólo las entradas de 1280×800)
 → IDÉNTICO
 ```
 
-`md:flex-nowrap` devuelve la fila única, `md:h-[72px]` la altura exacta y
-el separador elástico (`hidden md:block md:flex-1`) vuelve a ser el que
+A ese ancho cabe todo, así que no envuelve; `lg:min-h-[72px]` da la misma
+altura que el `h-[72px]` de antes (el control más alto mide 64) y el
+separador elástico (`hidden lg:block lg:flex-1`) vuelve a ser el que
 empuja «Dar cita» a la derecha. La Lenovo del mostrador ve la misma barra
 que ayer.
+
+**La altura se pide con un MÍNIMO y no con una fija**, y es la otra mitad
+del arreglo: con `h-[72px]` la segunda fila se recorta. Hay un test que
+lo vigila, y escrito con `(^|\s)h-\[72px\]` y no con `\bh-` — en
+`min-h-[72px]` el guión es un no-palabra, así que `\b` casaba con la
+clase buena y el assert habría sido verde siempre.
 
 ### Un solo DOM
 
@@ -413,12 +438,19 @@ cuenta que sólo hay uno.
 
 ### Lo medido después
 
-| pantalla | ancho | barra | fuera | overflow del body |
-|---|---|---|---|---|
-| `agenda` | 390×844 | 141 px alto, 2 filas | — | no |
-| `agenda-sanitaria` | 390×844 | 141 px alto, 2 filas | — | no |
-| `agenda` | 1280×800 | 72 px, 1 fila | — | no |
-| `agenda-sanitaria` | 1280×800 | 72 px, 1 fila | — | no |
+`agenda-sanitaria`, que es la peor (lleva «Cambiar mi PIN»):
+
+| ancho | barra | fuera | overflow del body |
+|---|---|---|---|
+| 320 | 193 px, 2 filas | — | no |
+| 360 | 193 px, 2 filas | — | no |
+| **390** | 141 px, 2 filas | — | no |
+| 768 | 141 px, 2 filas | — | no |
+| 1024 | 72 px, 1 fila | — | no |
+| **1280** | 72 px, 1 fila | — | no |
+
+Y `agenda` (sin el botón del PIN) igual: 141 a 390, 72 a 1280, nada
+fuera.
 
 Lo que cuesta: 77 px de alto a 390. La rejilla del día pasa de 780 a 703
 y **scrollea**, así que no se pierde nada; lo que se gana es que los
@@ -461,12 +493,19 @@ visto en rojo y restaurado con `git checkout --`.
 | 24 | TPV · el flag de clínica se ignora y sale «Abrir turno» | `clinica-11-sin-abrir-turno` | 2 |
 | 25 | TPV · la clínica encola un `POST /shift/open` | `clinica-11-sin-abrir-turno` | 1 |
 | 26 | la barra pierde `flex-wrap` | `pin-1-agenda-mi-pin` | 1 |
-| 27 | la barra pierde `md:flex-nowrap` | `pin-1-agenda-mi-pin` | 1 |
+| 27 | vuelve un `flex-nowrap` con breakpoint | `pin-1-agenda-mi-pin` | 1 |
 | 28 | el separador elástico vuelve a las dos filas | `pin-1-agenda-mi-pin` | 1 |
 | 29 | «Dar cita» se pinta dos veces (una por fila) | `pin-1-agenda-mi-pin` | 1 |
+| 33 | la altura de la barra vuelve a ser fija (`h-[72px]`) | `pin-1-agenda-mi-pin` | 1 |
 | 30 | la migración deja la columna sin `DEFAULT` | `clinica-11-migracion` | 1 |
 | 31 | `adoptarTurnoDelServidor` no resuelve el turno local | `clinica-11-sin-abrir-turno` | 1 |
 | 32 | `adoptarTurnoDelServidor` pregunta aunque el turno esté resuelto | `clinica-11-sin-abrir-turno` | 2 |
+
+Y uno que salió **verde a la primera y por eso está escrito**: el 33
+aplicado con un `replace` de la primera aparición de `lg:min-h-[72px]`
+no sabotea nada, porque la primera aparición está **en el comentario** de
+encima del `div`. Sabotear por el texto de la clase y no por el de la
+cadena. Es el mismo accidente que pin-1 apuntó con su sabotaje nº 5.
 
 Los mínimos que pedía el prompt, y dónde están:
 
@@ -484,8 +523,15 @@ Los mínimos que pedía el prompt, y dónde están:
 ## 6 · Cómo queda la suite
 
 ```
-pnpm test   →  508 ficheros · 7.567 tests · 10 saltados · 0 rojos
+pnpm test   →  508 ficheros · 7.570 tests · 10 saltados · 0 rojos
                 (base de partida: 501 · 7.493)
+```
+
+Y el e2e, contra Postgres de verdad:
+
+```
+E2E_DATABASE_URL=…/mipiacetpv_e2e_clinica11 pnpm test:e2e
+            →   53 ficheros · 1.249 tests · 0 rojos
 ```
 
 Ficheros nuevos:
@@ -497,7 +543,7 @@ Ficheros nuevos:
 | `apps/api/test/clinica-11-turno-automatico.test.ts` | 16 |
 | `apps/api/test/clinica-11-migracion.test.ts` | 7 |
 | `apps/tpv-web/test/clinica-11-sentry.test.tsx` | 4 |
-| `apps/tpv-web/test/clinica-11-sin-abrir-turno.test.tsx` | 4 |
+| `apps/tpv-web/test/clinica-11-sin-abrir-turno.test.tsx` | 7 |
 | `apps/admin/test/clinica-11-sentry.test.tsx` | 3 |
 
 Y bancos que crecen en vez de nacer, porque el arnés ya estaba y la
@@ -517,13 +563,9 @@ fichero dejó medida y sin arreglar).
 
 ### El e2e
 
-```
-E2E_DATABASE_URL=…/mipiacetpv_e2e_clinica11 pnpm test:e2e
-   →  53 ficheros · 1.249 tests · 0 rojos
-```
-
 Corre contra Postgres de verdad, así que **la migración se aplicó de
-verdad** (`prisma migrate deploy` desde cero, con las 105 de la casa).
+verdad** (`prisma migrate deploy` desde cero, con las 105 de la casa, la
+de este bloque incluida).
 
 Un fichero cambia: `catalogo-en-alta.e2e.ts`, por lo del §3. Es el que
 destapó que la premisa del prompt sobre el cajero técnico no era cierta,
@@ -563,7 +605,11 @@ mismo.
    caso legítimo de dos turnos abiertos que la casa ya tiene (el colgado
    de ayer mientras se abre el de hoy).
 3. **Los tests de la barra son de clases, no de píxeles.** jsdom no hace
-   layout. Las medidas de verdad son las de §4 y las capturas.
+   layout, así que lo que la suite guarda es la DECISIÓN (`flex-wrap`,
+   ningún `flex-nowrap`, altura mínima y no fija, un solo «Dar cita») y
+   no el resultado. Las medidas de verdad son las de §4, hechas con el
+   navegador, y las capturas. Si alguien cambia un `px-` de dentro de la
+   barra, esta suite no se entera: hay que volver a medir.
 4. **El `fondoSugerido` sin red.** Si el TPV de una clínica arranca sin
    conexión, el turno local nace con el fondo del turno local anterior (o
    0). El servidor pone el bueno cuando abre el turno de verdad; lo único
@@ -668,7 +714,13 @@ El de hoy tiene que llevar `open_reason = AUTO_CLINICA` y un
 ### Orden
 
 1. Migrar (aditiva: se puede aplicar con la versión vieja corriendo).
-2. Desplegar API + panel + web del TPV.
+2. Desplegar API + panel + web del TPV. **La API antes que el TPV**, y no
+   al revés: el TPV nuevo pide `fondoSugerido` a `GET /shift/current`, y
+   contra una API vieja ese campo no viene y el turno local de la clínica
+   nacería con fondo 0. No se pierde nada —el servidor pone el bueno al
+   abrir el turno de verdad— pero el arqueo offline de ese día saldría
+   corto. Al revés no hay problema: el campo nuevo es aditivo y un TPV
+   viejo lo ignora.
 3. Comprobar los seis puntos de Sentry.
 4. Publicar la APK e instalarla en el terminal de Rosario.
 5. **Sólo entonces** correr `cogecop-1` contra producción.

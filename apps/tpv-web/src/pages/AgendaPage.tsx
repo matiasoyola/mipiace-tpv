@@ -1615,22 +1615,39 @@ export function AgendaPage({
           pedía recortar 157 px de cinco controles a la vez: el rótulo de
           la fecha a «jue 29», el conmutador a dos iconos y los botones a
           36 px. Tres cosas ilegibles para que quepa una. Lo que se hace
-          es dejar que la fila SEGUNDA exista por debajo de `md`: la barra
-          pasa a `flex-wrap`, el rótulo de la fecha se queda entero y lo
-          que no cabe —el conmutador y «Dar cita»— baja a su propia línea,
-          donde sobran píxeles.
+          es dejar que exista una SEGUNDA fila: la barra pasa a
+          `flex-wrap`, el rótulo de la fecha se queda entero y lo que no
+          cabe —el conmutador y «Dar cita»— baja a su propia línea, donde
+          sobran píxeles.
 
-          **Y a 1280×800 no cambia nada**, que es la condición del bloque:
-          `md:flex-nowrap` devuelve la fila única, `md:h-[72px]` la altura
-          exacta y el separador elástico vuelve a ser el que empuja «Dar
-          cita» a la derecha. La Lenovo del mostrador de Rosario ve la
-          misma barra que ayer, píxel a píxel.
+          **Y envuelve a CUALQUIER ancho, sin `flex-nowrap` que lo
+          impida.** La primera pasada puso el corte en `md` (768) y la
+          medición enseñó que justo ahí la barra mide 820 en 768: el
+          breakpoint elegido a ojo dejaba «Dar cita» fuera en una tablet
+          de 768, que es exactamente el fallo que el bloque viene a
+          arreglar. Sin `flex-nowrap` no hay ancho que adivinar: la barra
+          es una fila mientras quepa y dos cuando no.
+
+          **Y a 1280×800 no cambia nada**, que es la condición del bloque.
+          A ese ancho cabe todo, así que no envuelve; `lg:min-h-[72px]` da
+          la misma altura que el `h-[72px]` de antes (el control más alto
+          mide 64) y el separador elástico vuelve a ser el que empuja «Dar
+          cita» a la derecha. Comprobado midiendo antes y después: la
+          Lenovo del mostrador de Rosario ve la misma barra que ayer,
+          píxel a píxel.
+
+          Medido en el banco visual el 29-10, `agenda-sanitaria`:
+
+            320 → 2 filas (193 alto) · 390 → 2 filas (141) · 768 → 2 (141)
+            1024 → 1 fila (72)       · 1280 → 1 fila (72)
+
+          y a ningún ancho se sale nada de la barra.
 
           **Un solo DOM.** Nada se pinta dos veces con un `hidden` encima:
           eso dejaría dos botones con `data-test="dar-cita"` y el primero
           que encontrase el banco sería el invisible. Lo único que cambia
           entre los dos tamaños es cómo se colocan los MISMOS nodos. */}
-      <div className="flex flex-wrap md:flex-nowrap items-center gap-x-2 gap-y-2 md:gap-4 px-3 md:px-6 py-2 md:py-0 min-h-16 md:min-h-0 md:h-[72px] bg-white border-b border-slate-200 shrink-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 lg:gap-4 px-3 lg:px-6 py-2 lg:py-0 min-h-16 lg:min-h-[72px] bg-white border-b border-slate-200 shrink-0">
         <button
           onClick={onClose}
           className="h-11 w-11 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-200 flex items-center justify-center text-mipiace-ink"
@@ -1747,11 +1764,12 @@ export function AgendaPage({
           ))}
         </div>
 
-        {/* El separador elástico SÓLO existe en una fila. Envolviendo,
-            un `flex-1` en la primera fila la estira y manda el
-            conmutador a la segunda incluso cuando cabría. Lo que empuja
-            «Dar cita» a la derecha por debajo de `md` es su `ml-auto`. */}
-        <div className="hidden md:block md:flex-1" />
+        {/* El separador elástico SÓLO existe cuando la barra es una fila.
+            Envolviendo, un `flex-1` en la primera fila la estira y manda
+            el conmutador a la segunda incluso cuando cabría. Lo que
+            empuja «Dar cita» a la derecha mientras tanto es su
+            `ml-auto`. */}
+        <div className="hidden lg:block lg:flex-1" />
 
         <button
           data-test="dar-cita"
@@ -1761,7 +1779,7 @@ export function AgendaPage({
           // `title`: en la agenda los tooltips están prohibidos
           // (ux-principles §6) y hay un banco que lo vigila.
           aria-label="Dar cita"
-          className="h-touch-lg px-4 md:px-7 shrink-0 ml-auto md:ml-0 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] md:text-[17px] font-semibold flex items-center gap-2"
+          className="h-touch-lg px-4 md:px-7 shrink-0 ml-auto lg:ml-0 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] md:text-[17px] font-semibold flex items-center gap-2"
         >
           <Plus className="w-5 h-5" strokeWidth={2.4} />
           <span className="hidden sm:inline">Dar cita</span>

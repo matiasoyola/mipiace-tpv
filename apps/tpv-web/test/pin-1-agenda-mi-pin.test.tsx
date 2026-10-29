@@ -341,18 +341,24 @@ describe("el TPV de la sanitaria lo pasa de verdad", () => {
 //   agenda            390 → contenido 547 · fuera: Vista, Dar cita
 //   agenda-sanitaria  390 → contenido 599 · fuera: Vista, Dar cita
 //
-// El arreglo es que por debajo de `md` la barra ENVUELVA: el rótulo de la
-// fecha se queda entero en la primera fila y lo que no cabe baja a la
-// segunda. A 1280×800 `md:flex-nowrap` devuelve la fila única y la barra
-// es idéntica a la de ayer (comprobado píxel a píxel: ver el `-done`).
+// El arreglo es que la barra ENVUELVA: el rótulo de la fecha se queda
+// entero en la primera fila y lo que no cabe baja a la segunda. **Sin
+// `flex-nowrap` a ningún ancho**, que es la segunda cosa que enseñó la
+// medición: con el corte puesto en `md` (768), la barra medía 820 en
+// 768 y «Dar cita» se salía en una tablet. Un breakpoint elegido a ojo
+// es otro ancho roto; sin él, la barra es una fila mientras quepa.
+//
+// A 1280×800 cabe todo, así que no envuelve, y `lg:min-h-[72px]` da la
+// misma altura que el `h-[72px]` de antes: la barra es idéntica a la de
+// ayer, comprobado midiendo antes y después (ver el `-done`).
 //
 // Lo que este banco puede ver desde jsdom es lo que decide eso, y es por
 // lo que estos asserts son de clases y no de píxeles: jsdom no hace
 // layout. **Las medidas de verdad están en las capturas del bloque.**
 //
-// Sabotajes: quitar `flex-wrap` → cae 1; quitar `md:flex-nowrap` → cae 1;
-// pintar «Dar cita» dos veces (una por fila, con un `hidden`) → cae 1.
-describe("clinica-11 · la barra envuelve por debajo de md", () => {
+// Sabotajes: quitar `flex-wrap` → cae 1; volver a poner un `flex-nowrap`
+// → cae 1; pintar «Dar cita» dos veces (una por fila) → cae 1.
+describe("clinica-11 · la barra envuelve cuando no cabe", () => {
   async function barra(): Promise<HTMLElement> {
     const h1 = [...container.querySelectorAll("h1")].find(
       (h) => h.textContent?.trim() === "Agenda",
@@ -361,14 +367,21 @@ describe("clinica-11 · la barra envuelve por debajo de md", () => {
     return h1!.parentElement as HTMLElement;
   }
 
-  it("la barra puede envolver abajo y NO arriba", async () => {
+  it("puede envolver, y a NINGÚN ancho se lo impide un flex-nowrap", async () => {
     await pintar(<AgendaPage onClose={() => {}} esSanitario />);
     const clases = (await barra()).className;
-    // Por debajo de `md`, lo que no cabe baja de fila en vez de salirse.
+    // Lo que no cabe baja de fila en vez de salirse.
     expect(clases).toContain("flex-wrap");
-    // Y a partir de `md` vuelve a ser UNA fila, con su altura exacta.
-    expect(clases).toContain("md:flex-nowrap");
-    expect(clases).toContain("md:h-[72px]");
+    // Y nada se lo prohíbe: un `flex-nowrap` con breakpoint es otro ancho
+    // roto (a 768 la barra medía 820 y «Dar cita» se salía).
+    expect(clases).not.toContain("flex-nowrap");
+    // La altura de la fila única se pide con un MÍNIMO, no con una fija:
+    // una altura fija recortaría la segunda fila.
+    expect(clases).toContain("lg:min-h-[72px]");
+    // `(^|\s)` y no `\b`: en «min-h-[72px]» el guión es un no-palabra, así
+    // que `\bh-` casaría con la clase buena y este assert sería verde
+    // siempre.
+    expect(clases).not.toMatch(/(^|\s)h-\[72px\]/);
   });
 
   it("el separador elástico sólo existe en una fila", async () => {
@@ -379,7 +392,7 @@ describe("clinica-11 · la barra envuelve por debajo de md", () => {
     const separador = hijos.find((el) => el.className.includes("flex-1"));
     expect(separador).toBeDefined();
     expect(separador!.className).toContain("hidden");
-    expect(separador!.className).toContain("md:block");
+    expect(separador!.className).toContain("lg:block");
   });
 
   it("«Dar cita» se pinta UNA vez, y se va a la derecha de su fila", async () => {
@@ -390,7 +403,7 @@ describe("clinica-11 · la barra envuelve por debajo de md", () => {
     const botones = container.querySelectorAll('[data-test="dar-cita"]');
     expect(botones).toHaveLength(1);
     expect(botones[0]!.className).toContain("ml-auto");
-    expect(botones[0]!.className).toContain("md:ml-0");
+    expect(botones[0]!.className).toContain("lg:ml-0");
     // Y sigue siendo hija directa de la barra: no se ha montado un
     // flotante colgado de la raíz.
     expect(botones[0]!.parentElement).toBe(await barra());
