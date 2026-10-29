@@ -26,6 +26,7 @@ import {
   ESTADOS_DE_HERIDA,
   FUENTE_DEL_RIESGO,
   LESIONES_V1,
+  LESIONES_V2,
   MAPA_PIE_V1,
   PENDIENTES_V1,
   PISADAS,
@@ -46,6 +47,7 @@ import {
   type CuerpoDeExploracion,
   type CuerpoDeSesion,
   type CuerpoDeSesionCualquiera,
+  type ListaDeLesiones,
   type CuerpoDeSesionV2,
   type EntradaDeCierreV2,
   type ExploracionEnPantalla,
@@ -685,7 +687,7 @@ export interface VistaDeLaSesion {
    *  esa y no «la que tenga compilada». */
   listas: {
     mapa: typeof MAPA_PIE_V1;
-    lesiones: typeof LESIONES_V1;
+    lesiones: ListaDeLesiones;
     consejos: typeof CONSEJOS_V1;
     // clinica-5 · y las de este bloque, por la MISMA razón que las tres
     // de arriba: son la versión con la que se va a ESCRIBIR, y una
@@ -825,7 +827,11 @@ export async function vistaDeLaSesion(
     cerrada,
     listas: {
       mapa: MAPA_PIE_V1,
-      lesiones: LESIONES_V1,
+      // cogecop-1 · la de HOY, que ya es la V2. La sesión que se abre
+      // ahora se escribe con la V2 (`normalizarSesion` guarda
+      // `VERSION_DE_LAS_LESIONES` en el cuerpo), así que la pantalla
+      // tiene que ofrecer esas doce y no las siete de la V1.
+      lesiones: LESIONES_V2,
       consejos: CONSEJOS_V1,
       actos: ACTOS_QUIROPODIA_V1,
       estadosDeHerida: ESTADOS_DE_HERIDA,

@@ -67,3 +67,9 @@ apps/e2e-ui/playwright-report/
 
 # Ficheros clínicos cifrados (fotos, notas de voz, adjuntos): nunca al repo, aunque sean de prueba
 .ficheros-clinicos/
+
+# cogecop-1 · la copia de la base de datos de una clínica NO entra en el
+# repo. Ni la original de Firebird (`.gbk`) ni el export en JSON. Los
+# tests usan el generador de `apps/api/src/cogecop/generador.ts`.
+*.gbk
+**/cogecop-export/

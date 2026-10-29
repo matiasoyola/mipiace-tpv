@@ -1621,7 +1621,13 @@ describe("clinica-3 · la pantalla trae lo que el mockup pinta", () => {
     });
     expect(r.json().listas.mapa.version).toBe(1);
     expect(r.json().listas.mapa.zonas).toHaveLength(11);
-    expect(r.json().listas.lesiones.lesiones).toHaveLength(7);
+    // cogecop-1 · la lista de lesiones que viaja es la de HOY, y hoy es
+    // la V2: las siete de clinica-3 más las cinco que Rosario llevaba
+    // marcando en COGECOP. La versión se afirma al lado del número, que
+    // es lo que impide que esto se arregle subiendo el 7 a mano el día
+    // que alguien añada una lesión sin sacar versión nueva.
+    expect(r.json().listas.lesiones.version).toBe(2);
+    expect(r.json().listas.lesiones.lesiones).toHaveLength(12);
     expect(r.json().listas.consejos.consejos).toHaveLength(5);
   });
 });

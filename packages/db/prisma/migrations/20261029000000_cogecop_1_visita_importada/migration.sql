@@ -1,0 +1,73 @@
+-- cogecop-1 · LA VISITA IMPORTADA: un valor de enum y nada más.
+--
+-- Rosario lleva su clínica en COGECOP (el programa del Consejo de
+-- Podólogos) y nos ha dado su copia: 3.681 pacientes y 9.569 visitas de
+-- febrero de 2025 a hoy. El primer día con nosotros tiene que poder abrir
+-- a cualquier paciente y ver todo lo que le hizo; si tiene que mirar el
+-- programa viejo, no deja el programa viejo.
+--
+-- ── Por qué un KIND y no una tabla ───────────────────────────────────
+--
+-- Porque una visita importada ES una pieza de historia, y la historia ya
+-- tiene su tabla con su inmutabilidad hecha cumplir por el motor
+-- (`clinical_entries` + trigger `clinical_entries_inmutable`, clinica-1),
+-- su cifrado con AAD por fila (clinica-7) y su autoría obligatoria.
+--
+-- Una tabla aparte habría necesitado otra vez las tres cosas, y la lista
+-- de visitas de la historia habría tenido que unir dos orígenes para
+-- ordenarlos por fecha. Con un kind, lo importado entra en la MISMA lista
+-- ordenada por `created_at` y sale gratis: la historia viva, el pie vivo y
+-- el informe lo leen sin un solo `UNION`.
+--
+-- ── Y por qué es un kind PROPIO y no `TREATMENT_SESSION` ─────────────
+--
+-- Es la decisión de fondo del bloque, y es de Dirección: **lo importado es
+-- historia, no sesión.** No se puede editar, no genera cobros, no cuenta
+-- como sesión cerrada para caja ni para bonos, y se ve con la etiqueta
+-- «Importada de COGECOP» en su fecha real.
+--
+-- Si entrara como `TREATMENT_SESSION`, las nueve mil y pico visitas de
+-- Rosario serían nueve mil sesiones cerradas sin cobrar: `cobrosPendientes`
+-- las reclamaría una a una, el bono de la paciente las contaría y la caja
+-- del día de su alta tendría un agujero de nueve años. Un kind propio hace
+-- que todas esas consultas —que ya filtran por `kind = 'TREATMENT_SESSION'`—
+-- sigan diciendo la verdad sin tocar una sola de ellas.
+--
+-- ── LA FECHA DEL PASADO NO NECESITA NADA ─────────────────────────────
+--
+-- Se miró, porque el prompt pedía mirarlo: una entrada con `created_at` de
+-- 2025 **entra tal cual**. El trigger de inmutabilidad es
+-- `BEFORE UPDATE OR DELETE` (nunca INSERT), el CHECK
+-- `clinical_entries_body_object` sólo mira que el cuerpo sea un objeto no
+-- vacío, y `clinical_entries_body_cifrado_formato` sólo mira el prefijo
+-- `c1:`. Ninguno de los tres habla de `created_at`, y la columna no tiene
+-- más que su `DEFAULT now()`.
+--
+-- Así que esta migración NO relaja ningún guardia. Es lo que queríamos:
+-- una importación no es un buen motivo para abrirle la mano a la tabla que
+-- guarda el registro legal.
+--
+-- ── Migración ADITIVA ────────────────────────────────────────────────
+--
+-- Un `ALTER TYPE … ADD VALUE`. Ni un DROP, ni un UPDATE, ni un índice. Las
+-- filas de los quince tenants de hoy no se tocan y ninguna consulta cambia
+-- de resultado: nadie tiene todavía una fila con este kind.
+--
+-- Va SOLA en su migración por la razón de siempre en esta casa (clinica-1,
+-- clinica-2, clinica-3 y residencia-5 hicieron lo mismo): **Postgres
+-- prohíbe usar un valor de enum en la misma transacción en la que se
+-- añade.** Hoy nadie lo nombra en un índice ni en un CHECK, pero si mañana
+-- hace falta uno, el valor ya estará puesto desde antes.
+--
+-- ── El `down`, pensado ───────────────────────────────────────────────
+--
+--   -- No lo hay de verdad: `ALTER TYPE … DROP VALUE` no existe en
+--   -- Postgres. Habría que recrear el tipo entero, y sólo es seguro si
+--   -- ninguna fila de `clinical_entries` lo lleva puesto. Igual que el
+--   -- 'CLINICIAN' de clinica-1, el 'INITIAL_ASSESSMENT' de clinica-2 y
+--   -- los dos de clinica-3.
+--
+-- Y con la historia de Rosario dentro, ese `down` ES el borrado de
+-- historia clínica. No se echa atrás: se conserva.
+
+ALTER TYPE "ClinicalEntryKind" ADD VALUE 'IMPORTED_VISIT';

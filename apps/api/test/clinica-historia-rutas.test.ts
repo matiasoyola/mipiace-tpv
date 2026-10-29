@@ -124,7 +124,17 @@ function entradaCoincide(e: FakeEntry, where: any): boolean {
   if (where.id != null && e.id !== where.id) return false;
   if (where.tenantId != null && e.tenantId !== where.tenantId) return false;
   if (where.clientId != null && e.clientId !== where.clientId) return false;
-  if (where.kind != null && e.kind !== where.kind) return false;
+  // cogecop-1 · la historia pide DOS kinds a la vez. Sin entender el
+  // `in`, `e.kind !== {in:[…]}` es siempre cierto y la historia sale
+  // vacía EN VERDE: 200 con cero visitas.
+  if (where.kind != null) {
+    const k = where.kind as string | { in?: readonly string[] };
+    if (typeof k === "string") {
+      if (e.kind !== k) return false;
+    } else if (Array.isArray(k.in)) {
+      if (!k.in.includes(e.kind)) return false;
+    }
+  }
   return true;
 }
 

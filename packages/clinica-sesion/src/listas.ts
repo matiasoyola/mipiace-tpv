@@ -34,10 +34,58 @@ export const LESIONES_V1: ListaDeLesiones = {
   ],
 };
 
-export const VERSION_DE_LAS_LESIONES = LESIONES_V1.version;
+// ── La versión 2 (cogecop-1) ──────────────────────────────────────────
+//
+// Las siete de la V1 **tal cual, en su orden, con sus mismas ids y sus
+// mismas etiquetas**, y cinco más. No es un capricho de vocabulario: son
+// las cinco que Rosario lleva marcando desde 2013 en COGECOP y que la V1
+// no sabía escribir. En su copia hay 7.022 marcas de onicogrifosis —la
+// segunda lesión más marcada de las 52.003—, 290 de xerosis, 205 de
+// hematoma subungueal, 110 de onicolisis y 59 de uña distrófica.
+//
+// Sin ellas, la importación de cogecop-1 tendría que tirar 7.686 marcas a
+// «sin traducir», y la primera sesión que Rosario hiciera con nosotros no
+// tendría dónde apuntar la uña engrosada que lleva años tratando. Una
+// lista que no sabe escribir lo que la podóloga ve es una lista que la
+// obliga a volver al programa viejo.
+//
+// ── La V1 NO SE TOCA ─────────────────────────────────────────────────
+//
+// Ni una etiqueta, ni un orden. Lo marcado con la V1 se sigue leyendo con
+// la V1 (`lesionesVersion` viaja en el cuerpo de cada sesión), que es la
+// razón por la que estas listas están versionadas. Lo que cambia es con
+// qué versión se escribe de hoy en adelante: `VERSION_DE_LAS_LESIONES`.
+//
+// ── Por qué las etiquetas llevan las dos palabras ────────────────────
+//
+// La misma razón que «Callo (heloma)»: la podóloga escribe «onicogrifosis»
+// y el paciente lee «uña engrosada», y el informe PDF va a las dos manos.
+// «Uña distrófica» es la excepción y es deliberada: no tiene nombre de
+// calle que no sea peor («uña fea» no es un diagnóstico).
+export const LESIONES_V2: ListaDeLesiones = {
+  version: 2,
+  lesiones: [
+    ...LESIONES_V1.lesiones,
+    { id: "onicogrifosis", label: "Uña engrosada (onicogrifosis)" },
+    { id: "hematoma", label: "Hematoma bajo la uña" },
+    { id: "xerosis", label: "Piel seca (xerosis)" },
+    { id: "onicolisis", label: "Uña despegada (onicolisis)" },
+    { id: "distrofica", label: "Uña distrófica" },
+  ],
+};
+
+/** La versión con la que se ESCRIBE hoy. Lo escrito antes se lee con la
+ *  suya: eso es lo que `lesionesVersion` guarda en cada cuerpo. */
+export const VERSION_DE_LAS_LESIONES = LESIONES_V2.version;
+
+/** La lista de hoy, para quien tenga que pintarla sin elegir versión.
+ *  Existe para que ninguna pantalla importe `LESIONES_V1` «porque es la
+ *  que había»: el día que salga una V3, esta constante la sigue. */
+export const LESIONES_DE_HOY = LESIONES_V2;
 
 const LESIONES_POR_VERSION: Record<number, ListaDeLesiones> = {
   [LESIONES_V1.version]: LESIONES_V1,
+  [LESIONES_V2.version]: LESIONES_V2,
 };
 
 export function lesionesDeVersion(

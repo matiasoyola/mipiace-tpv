@@ -118,6 +118,18 @@ export interface VisitaDeLaHistoria {
   marcas: Marcas;
   mapaVersion: number;
   lesionesVersion: number;
+  /**
+   * cogecop-1 · esta visita NO se hizo aquí: viene del programa anterior
+   * (`kind = IMPORTED_VISIT`).
+   *
+   * Es obligatorio y no opcional a propósito. Quien construya una visita
+   * para la historia tiene que decir de dónde salió, porque el pie vivo
+   * lo DICE: «parte de la última visita importada». Un `?` habría dejado
+   * que la pantalla se callara eso por olvido, y callarse que el estado
+   * de los pies lo fijó un programa que ya no usamos es justo lo que no
+   * se puede callar.
+   */
+  importada: boolean;
 }
 
 /**
@@ -151,6 +163,8 @@ export interface PasoDeZona {
   /** De qué clase fue esa visita. Vacío en una v1. */
   tipos: readonly TipoDeVisita[];
   tiposNombre: readonly string[];
+  /** cogecop-1 · el paso lo dio una visita importada. */
+  importada: boolean;
 }
 
 export interface ZonaViva {
@@ -168,6 +182,16 @@ export interface ZonaViva {
   gravedadNombre: string | null;
   /** Cada visita que la marcó, de la más antigua a la más reciente. */
   pasos: readonly PasoDeZona[];
+  /**
+   * cogecop-1 · lo último que se sabe de esta zona lo marcó una visita
+   * IMPORTADA, no una sesión hecha aquí.
+   *
+   * La pantalla lo dice («parte de la última visita importada»), y no es
+   * un adorno: el mapa de partida de la primera sesión en mipiacetpv sale
+   * de ahí, y la podóloga tiene derecho a saber que lo que ve en el pie
+   * lo escribió ella en otro programa y nadie lo ha vuelto a mirar aquí.
+   */
+  importada: boolean;
   /**
    * La visita en la que dejó de estar marcada, si está curada.
    *
@@ -241,6 +265,7 @@ export function estadoDeLasZonas(
         gravedadNombre: gravedad ? NOMBRE_DE_GRAVEDAD[gravedad] : null,
         tipos: visita.tipos,
         tiposNombre,
+        importada: visita.importada,
       });
       pasosPorClave.set(clave, lista);
     }
@@ -278,6 +303,7 @@ export function estadoDeLasZonas(
       gravedad: ultimo.gravedad,
       gravedadNombre: ultimo.gravedadNombre,
       pasos,
+      importada: ultimo.importada,
       curadaEn: curadaEn
         ? { entryId: curadaEn.entryId, fecha: curadaEn.fecha }
         : null,
@@ -513,6 +539,9 @@ export interface VisitaLegible {
   /** Lo que se hizo, en chips. NUNCA el nombre de un tipo (eso ya está en
    *  la columna de la izquierda, y repetirlo es ruido). */
   chips: readonly string[];
+  /** cogecop-1 · la fila lleva «Importada de COGECOP» al lado de la
+   *  fecha. Obligatorio por lo mismo que en `VisitaDeLaHistoria`. */
+  importada: boolean;
 }
 
 /**
@@ -560,6 +589,7 @@ export function visitaLegible(
       titulo,
       ...(nivel != null ? [`Quiropodia ${NOMBRE_DE_NIVEL[nivel]}`] : []),
     ]),
+    importada: false,
   };
 }
 
@@ -665,5 +695,6 @@ export function visitaDeLaHistoria(
       typeof c.mapaVersion === "number" ? c.mapaVersion : VERSION_DEL_MAPA,
     lesionesVersion:
       typeof c.lesionesVersion === "number" ? c.lesionesVersion : 1,
+    importada: false,
   };
 }
