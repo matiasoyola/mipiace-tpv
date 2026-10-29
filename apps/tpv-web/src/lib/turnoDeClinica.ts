@@ -43,6 +43,7 @@ import {
   getLocalShift,
   mirrorServerShift,
   openLocalShift,
+  resolveLocalShift,
 } from "./offlineShift.js";
 import { resolverTurnoLocal } from "./outbox.js";
 
@@ -126,7 +127,16 @@ export async function adoptarTurnoDelServidor(): Promise<string | null> {
     }
     const res = await apiWithCashier<RespuestaTurnoActual>("/shift/current");
     if (!res.shift) return null;
+    // Las DOS, y en este orden. `resolverTurnoLocal` reescribe el
+    // `shiftId` de lo que siga en la cola y avisa a quien se registró
+    // (`App`, que además arregla el id del estado de React).
+    // `resolveLocalShift` fija el `serverId` en IndexedDB **aquí mismo**,
+    // sin depender de que alguien haya registrado el callback: si
+    // dependiera, un remonte de `App` a destiempo dejaría el turno local
+    // sin resolver y el cierre del día pidiendo un id que no existe. Las
+    // dos son idempotentes, así que hacerlo dos veces no cuesta nada.
     await resolverTurnoLocal(local.localId, res.shift.id);
+    await resolveLocalShift(local.localId, res.shift.id);
     return res.shift.id;
   } catch {
     return null;

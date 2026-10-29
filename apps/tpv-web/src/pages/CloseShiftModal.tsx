@@ -34,6 +34,7 @@ import { useBackGuard } from "../hooks/useBackGuard.js";
 import { CashPad } from "../components/CashPad.js";
 import { outboxAdd, outboxCounts, outboxList } from "../lib/outbox.js";
 import { closeLocalShift, getLocalShift } from "../lib/offlineShift.js";
+import { adoptarTurnoDelServidor } from "../lib/turnoDeClinica.js";
 import { newId } from "../lib/ids.js";
 import { formatEur } from "../lib/money.js";
 import {
@@ -254,6 +255,27 @@ export function CloseShiftModal(props: {
   // Cierre resuelto SIN resumen de server (offline, o el GET del resumen
   // falló justo después de cerrar). Panel local de v1.0-pilotos.
   const [zResult, setZResult] = useState<CashCountResponse | null>(null);
+
+  // ── clinica-11 · ANTES DE HABLAR DEL TURNO, SABER CUÁL ES ─────────
+  //
+  // En una clínica el turno nace LOCAL y lo abre el servidor en el primer
+  // cobro, así que el `shiftId` de esta pantalla puede ser todavía un
+  // `localId` que el servidor no conoce. El camino normal lo resuelve el
+  // evento `sent` del outbox, pero hay un día en que no pasa por ahí:
+  // **la podóloga abre el cobro de una cita y no lo termina** —la
+  // paciente paga otro día, o va con bono—. Entonces el servidor SÍ tiene
+  // turno (lo abrió el borrador) y el TPV sigue con su id local, y
+  // «Cerrar turno» pediría `/shift/<localId>/close-day` y recibiría un
+  // 404: no podría cerrar su propio día.
+  //
+  // Una llamada, aquí, que es el único sitio por el que se entra a hablar
+  // del turno con el servidor. No hace nada —ni red— si el turno local ya
+  // está resuelto o si nació del servidor, que es el caso de los catorce
+  // comercios sin clínica.
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    void adoptarTurnoDelServidor();
+  }, []);
 
   // v1.11 · previsualización del resumen antes de decidir si se cuenta.
   // Sin red no hay nada que pedir: caemos a la tabla con los datos

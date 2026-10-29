@@ -152,3 +152,79 @@ describe("clinica-11 · la pantalla de «Abrir turno»", () => {
     expect(llamadas).not.toContain("/shift/current");
   });
 });
+
+// ── clinica-11 · EL PASO 3: ADOPTAR EL TURNO DEL SERVIDOR ───────────
+//
+// El turno de una clínica nace local y lo abre el SERVIDOR en el primer
+// cobro. Quien se entera del id real es `adoptarTurnoDelServidor`, y si
+// no se entera nadie el cierre del día pide `/shift/<localId>/close-day`
+// y recibe un 404: la podóloga no podría cerrar su propio día.
+//
+// Sabotajes: que `adoptarTurnoDelServidor` no llame a `resolverTurnoLocal`
+// → cae 1; que llame a la red con el turno ya resuelto → cae 1.
+describe("clinica-11 · adoptar el turno que abrió el servidor", () => {
+  it("un turno local sin resolver adopta el id del servidor", async () => {
+    const { abrirTurnoDeClinicaEnLocal, adoptarTurnoDelServidor } =
+      await import("../src/lib/turnoDeClinica.js");
+    const { getLocalShift } = await import("../src/lib/offlineShift.js");
+
+    const local = await abrirTurnoDeClinicaEnLocal();
+    expect((await getLocalShift())!.serverId).toBeNull();
+
+    // El primer cobro ya pasó: el servidor tiene turno.
+    apiMock.apiWithCashier.mockImplementation(async (path: string) => {
+      llamadas.push(path);
+      if (path === "/shift/current") {
+        return {
+          shift: {
+            id: "11111111-1111-4111-8111-111111111111",
+            openedAt: "2026-10-29T08:05:00.000Z",
+            lastActivityAt: "2026-10-29T08:05:00.000Z",
+            cashOpening: String(FONDO),
+            userId: "u-1",
+            ticketsCount: 1,
+          },
+        };
+      }
+      return {};
+    });
+
+    const adoptado = await adoptarTurnoDelServidor();
+    expect(adoptado).toBe("11111111-1111-4111-8111-111111111111");
+    const tras = await getLocalShift();
+    expect(tras!.serverId).toBe("11111111-1111-4111-8111-111111111111");
+    // Y el localId no se pisa: es el que llevan los tickets que puedan
+    // seguir en la cola, y es con lo que el outbox los reescribe.
+    expect(tras!.localId).toBe(local.id);
+  });
+
+  it("con el turno ya resuelto no toca la red", async () => {
+    // Es lo que hace que esto no cueste nada en los catorce comercios sin
+    // clínica: su turno nace del servidor y nace resuelto.
+    const { adoptarTurnoDelServidor } = await import(
+      "../src/lib/turnoDeClinica.js"
+    );
+    const { mirrorServerShift } = await import("../src/lib/offlineShift.js");
+    await mirrorServerShift({
+      id: "22222222-2222-4222-8222-222222222222",
+      openedAt: "2026-10-29T07:00:00.000Z",
+      cashOpening: "0",
+    });
+    llamadas.length = 0;
+    expect(await adoptarTurnoDelServidor()).toBe(
+      "22222222-2222-4222-8222-222222222222",
+    );
+    expect(llamadas).toEqual([]);
+  });
+
+  it("sin turno local no hace nada y no revienta", async () => {
+    const { adoptarTurnoDelServidor } = await import(
+      "../src/lib/turnoDeClinica.js"
+    );
+    const { clearLocalShift } = await import("../src/lib/offlineShift.js");
+    await clearLocalShift();
+    llamadas.length = 0;
+    expect(await adoptarTurnoDelServidor()).toBeNull();
+    expect(llamadas).toEqual([]);
+  });
+});
