@@ -601,7 +601,16 @@ export async function importarCogecop(
       recuento,
     });
     hechos += 1;
-    if (hechos % 250 === 0) {
+    // La PRIMERA también, y no sólo cada 250.
+    //
+    // Dos razones, y la segunda es la que lo puso aquí. La primera es de
+    // uso: con una clínica de treinta fichas, «cada 250» no se imprime
+    // nunca y el script parece colgado. La segunda la encontró un
+    // sabotaje — meter el nombre del paciente en esta línea y ver qué
+    // test se pone rojo: **ninguno**, porque el e2e corre con ocho
+    // fichas y esta línea no llegaba a ejecutarse. Un centinela que
+    // vigila una línea que no se ejecuta no vigila nada.
+    if (hechos === 1 || hechos % 250 === 0) {
       avisar(`  … ${hechos} / ${datos.pacientes.length} fichas`);
     }
   }
