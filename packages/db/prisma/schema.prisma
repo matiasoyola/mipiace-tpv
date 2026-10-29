@@ -575,6 +575,28 @@ enum ShiftCloseReason {
   AUTO_DAY_CUT
 }
 
+// clinica-11 · por qué se ABRIÓ un turno. Hermano exacto de
+// `ShiftCloseReason`, y por la misma razón: `userId` dice QUIÉN y esto
+// dice POR QUÉ.
+//
+//   MANUAL       — alguien declaró el fondo de caja en la pantalla de
+//                  «Abrir turno». Es el default y es lo que hacen las
+//                  catorce cuentas que no son una clínica.
+//   AUTO_CLINICA — en una clínica no hay pantalla de abrir turno: la
+//                  podóloga llega, atiende y cobra. El turno lo abre el
+//                  SERVIDOR al primer cobro del día, con el fondo que
+//                  dejó el último cierre.
+//
+// Y existe por una razón concreta y no por simetría: un fondo de caja que
+// nadie ha contado no es lo mismo que un fondo declarado por una persona.
+// Si al cierre hay descuadre, lo primero que hay que poder saber es si
+// alguien contó el cajón esa mañana. Sin esta columna, el Z de una clínica
+// y el de un bar dicen lo mismo y no es verdad.
+enum ShiftOpenReason {
+  MANUAL
+  AUTO_CLINICA
+}
+
 // v1.12-mesas-abandonadas · por qué se anuló un ticket DRAFT. NULL en un
 // ticket que no está VOIDED. Mismo criterio que `ShiftCloseReason`:
 // `voidedByUserId` dice QUIÉN (NULL = lo hizo el sistema), esto dice POR QUÉ.
@@ -3063,6 +3085,10 @@ model Shift {
   // v1.11-cierre-de-dia · quién/qué cerró el turno. `closedByUserId` dice
   // QUIÉN (null cuando cierra el job); esto dice POR QUÉ.
   closeReason    ShiftCloseReason @default(MANUAL) @map("close_reason")
+  // clinica-11 · y por qué se abrió. `MANUAL` en todo lo de antes de este
+  // bloque (es el default de la migración) y en toda cuenta que no sea una
+  // clínica. Ver el comentario del enum.
+  openReason     ShiftOpenReason  @default(MANUAL) @map("open_reason")
   // v1.11-cierre-de-dia · cuándo el cajero confirmó el resumen del día de
   // este turno cerrado. NULL = el resumen sigue pendiente de enseñarse (la
   // tarjeta aparece al abrir por la mañana). Evita que la tarjeta reaparezca

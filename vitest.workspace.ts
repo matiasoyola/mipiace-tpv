@@ -14,6 +14,9 @@ export default [
   "packages/cuadrante",
   // residencia-2 · el paquete puro del plan de cuidados (`queToca`).
   "packages/residencia-plan",
+  // clinica-11 · el saneado de Sentry, compartido por la API, el TPV y el
+  // panel. Puro y sin dependencias de ningún SDK.
+  "packages/sentry-limpio",
   "packages/ticket-model",
   "packages/ticket-pdf",
   "packages/util-validation",

@@ -51,6 +51,11 @@ import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { abrirTurnoDeClinica } from "../shift/apertura-automatica.js";
+import {
+  esVerticalClinica,
+  SELECT_VERTICAL_CLINICA,
+} from "../lib/vertical-clinica.js";
 import {
   markZReportStale,
   parseOccurredAt,
@@ -446,14 +451,54 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         requestedShiftId: body.shiftId,
         occurredAt,
       });
-      if (!resolution.ok) {
-        return reply.code(409).send({
-          error: "SHIFT_NOT_OPEN",
-          message: "El turno no está abierto en esta caja.",
+      // ── clinica-11 · LA VENTA SUELTA DE UNA CLÍNICA ───────────────────
+      //
+      // El cobro de una consulta entra por `agenda/checkout.ts`, que es
+      // quien abre el turno solo. Por aquí entran los otros dos:
+      //
+      //   · lo que se añade aparte —unas plantillas, un spray— que la
+      //     podóloga cobra sin cita delante;
+      //   · el reintento del outbox con un `shiftId` que el servidor no
+      //     conoce (un turno local que nunca se abrió) o que ya cerró a
+      //     mano, que es el caso en que `resolveShiftForSale` dice no.
+      //
+      // Cobrar siempre se puede: en una clínica un 409 aquí es una venta
+      // que el outbox clasifica como rechazo permanente y que **no se
+      // registra**. Así que si el tenant es una consulta, se abre el turno
+      // y la venta entra. Para todo lo demás el 409 es el de siempre.
+      //
+      // Las dos columnas del tenant se leen SÓLO en este camino, que es el
+      // que ya iba a devolver un error. El cobro normal no paga nada.
+      let shiftResuelto = resolution;
+      if (!shiftResuelto.ok) {
+        const tenantVertical = await prisma.tenant.findUnique({
+          where: { id: cashier.tid },
+          select: SELECT_VERTICAL_CLINICA,
         });
+        if (!esVerticalClinica(tenantVertical)) {
+          return reply.code(409).send({
+            error: "SHIFT_NOT_OPEN",
+            message: "El turno no está abierto en esta caja.",
+          });
+        }
+        const turno = await abrirTurnoDeClinica({
+          prisma,
+          registerId: cashier.rid,
+          userId: cashier.sub,
+          log: request.log,
+        });
+        shiftResuelto = {
+          ok: true,
+          shiftId: turno.id,
+          // `imputed` para que quede en el log de abajo: el ticket NO va al
+          // turno que pedía el terminal, va al que el servidor acaba de
+          // abrir.
+          imputed: turno.id !== body.shiftId,
+          stale: false,
+        };
       }
-      const effectiveShiftId = resolution.shiftId;
-      if (resolution.imputed || resolution.stale) {
+      const effectiveShiftId = shiftResuelto.shiftId;
+      if (shiftResuelto.imputed || shiftResuelto.stale) {
         request.log.info(
           {
             event: "ticket.shift_imputed",
@@ -461,7 +506,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             requestedShiftId: body.shiftId,
             effectiveShiftId,
             occurredAt: body.occurredAt ?? null,
-            stale: resolution.stale,
+            stale: shiftResuelto.stale,
           },
           "venta imputada a un turno distinto del que pedía el terminal",
         );
@@ -1101,7 +1146,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // v1.11-cierre-de-dia · la venta entró en un turno cuyo Z ya está
       // archivado. El PDF no se regenera (es un documento emitido); lo que
       // sí hacemos es dejar de fingir que cuadra.
-      if (resolution.stale) {
+      if (shiftResuelto.stale) {
         await markZReportStale(prisma, effectiveShiftId).catch((err) => {
           request.log.warn(
             { shiftId: effectiveShiftId },
@@ -1383,6 +1428,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // camino que nace en ensayo, y tiene que nacer igual que el
           // primero.
           facturaDesde: true,
+          // clinica-11 · si esto es una consulta, el turno se abre solo.
+          // Se cuelan en el `select` que ya existe —como hicieron
+          // catalogo-local y puesta-en-marcha— porque son dos columnas y
+          // una consulta más por cobro no se paga por nada.
+          ...SELECT_VERTICAL_CLINICA,
         },
       });
       // catalogo-local · el cobro de mesa NUNCA pasó por
@@ -1545,12 +1595,34 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // ticket acabaría sellado en un turno que ya no es el que la
           // resolución vio. Sin `occurredAt` en el cuerpo (camino online
           // de siempre) el instante es el del cobro, ahora.
-          const resolution = await resolveShiftForSale({
+          let resolution = await resolveShiftForSale({
             prisma: tx,
             registerId: cashier.rid,
             requestedShiftId: draft.shiftId,
             occurredAt: bodyOccurredAt ?? new Date(),
           });
+          // clinica-11 · y aquí se cobra el borrador de una cita abierto
+          // ayer, cuyo turno cerró a mano una persona. `resolveShiftForSale`
+          // sólo rescata los cierres del corte de día (AUTO_DAY_CUT), así
+          // que un cierre manual deja a la clínica con un 409 sobre una
+          // visita que ya se hizo. El turno se abre solo, como en los otros
+          // dos caminos — y DENTRO de la transacción, que es donde el claim
+          // del DRAFT ya está hecho.
+          if (!resolution.ok && esVerticalClinica(tenantForDiscount)) {
+            const turno = await abrirTurnoDeClinica({
+              prisma,
+              tx,
+              registerId: cashier.rid,
+              userId: cashier.sub,
+              log: request.log,
+            });
+            resolution = {
+              ok: true,
+              shiftId: turno.id,
+              imputed: turno.id !== draft.shiftId,
+              stale: false,
+            };
+          }
           if (!resolution.ok) throw new ShiftNotOpenError();
 
           const next = await tx.register.update({

@@ -14,6 +14,7 @@ import { loadShiftBreakdownSums } from "./breakdown-sums.js";
 import { buildShiftDaySummary, SHIFT_SUMMARY_SELECT } from "./summary.js";
 import { archiveZReport } from "./z-seal.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { fondoDelUltimoCierre } from "./apertura-automatica.js";
 
 // Body shape de close (B3 §3.4). methodTotals reportado por el cajero
 // (cash, card, bizum, voucher). En B3 todavía no hay tickets reales →
@@ -47,7 +48,25 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           userId: true,
         },
       });
-      if (!shift) return { shift: null };
+      // clinica-11 · EL FONDO QUE LE TOCARÍA AL TURNO SIGUIENTE.
+      //
+      // Sólo cuando NO hay turno abierto, que es cuando alguien lo
+      // pregunta: el TPV de una clínica no pinta pantalla de «Abrir
+      // turno», así que abre su turno LOCAL con este número para que el
+      // arqueo de un cierre sin red cuadre con el que el servidor usará al
+      // abrirlo de verdad en el primer cobro. Dos fuentes para el mismo
+      // fondo acabarían en un descuadre que no es de nadie, así que es la
+      // MISMA función (`fondoDelUltimoCierre`).
+      //
+      // Va aquí y no en un endpoint nuevo porque el TPV ya llama a esto en
+      // el arranque y porque «¿hay turno?» y «¿con qué fondo se abriría?»
+      // son la misma pregunta hecha desde los dos lados.
+      if (!shift) {
+        return {
+          shift: null,
+          fondoSugerido: await fondoDelUltimoCierre(prisma, cashier.rid),
+        };
+      }
       // Mejora-02: contador de tickets emitidos en este turno. Lo
       // usa la PWA para mostrar "Ticket #N del turno" en el header
       // del SalePage sin que el cajero tenga que abrir el historial.

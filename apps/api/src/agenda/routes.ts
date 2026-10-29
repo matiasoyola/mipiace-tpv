@@ -828,6 +828,9 @@ export async function registerAgendaRoutes(
           tenantId: auth.tenantId,
           registerId: cashier.rid,
           cashierUserId: cashier.sub,
+          // clinica-11 · para que la apertura automática del turno deje su
+          // línea en el log de la petición que la provocó.
+          log: request.log,
         },
         id,
       );

@@ -329,3 +329,70 @@ describe("el TPV de la sanitaria lo pasa de verdad", () => {
     ).toBeNull();
   });
 });
+
+// ── clinica-11 · Y LA BARRA, QUE A 390 NO CABÍA ─────────────────────
+//
+// pin-1 dejó medido que a 390 px esta barra mide 547 dentro de 390 y que
+// «Dar cita» se salía por la derecha. Lo que la medición del 29-10 añadió
+// —navegador, no a ojo— es que detrás de «Dar cita» se iba también el
+// conmutador Día | Semana, que es el único modo de llegar a la vista de
+// semana:
+//
+//   agenda            390 → contenido 547 · fuera: Vista, Dar cita
+//   agenda-sanitaria  390 → contenido 599 · fuera: Vista, Dar cita
+//
+// El arreglo es que por debajo de `md` la barra ENVUELVA: el rótulo de la
+// fecha se queda entero en la primera fila y lo que no cabe baja a la
+// segunda. A 1280×800 `md:flex-nowrap` devuelve la fila única y la barra
+// es idéntica a la de ayer (comprobado píxel a píxel: ver el `-done`).
+//
+// Lo que este banco puede ver desde jsdom es lo que decide eso, y es por
+// lo que estos asserts son de clases y no de píxeles: jsdom no hace
+// layout. **Las medidas de verdad están en las capturas del bloque.**
+//
+// Sabotajes: quitar `flex-wrap` → cae 1; quitar `md:flex-nowrap` → cae 1;
+// pintar «Dar cita» dos veces (una por fila, con un `hidden`) → cae 1.
+describe("clinica-11 · la barra envuelve por debajo de md", () => {
+  async function barra(): Promise<HTMLElement> {
+    const h1 = [...container.querySelectorAll("h1")].find(
+      (h) => h.textContent?.trim() === "Agenda",
+    );
+    expect(h1).toBeDefined();
+    return h1!.parentElement as HTMLElement;
+  }
+
+  it("la barra puede envolver abajo y NO arriba", async () => {
+    await pintar(<AgendaPage onClose={() => {}} esSanitario />);
+    const clases = (await barra()).className;
+    // Por debajo de `md`, lo que no cabe baja de fila en vez de salirse.
+    expect(clases).toContain("flex-wrap");
+    // Y a partir de `md` vuelve a ser UNA fila, con su altura exacta.
+    expect(clases).toContain("md:flex-nowrap");
+    expect(clases).toContain("md:h-[72px]");
+  });
+
+  it("el separador elástico sólo existe en una fila", async () => {
+    // Envolviendo, un `flex-1` en la primera fila la estira y manda el
+    // conmutador a la segunda incluso cuando cabría.
+    await pintar(<AgendaPage onClose={() => {}} esSanitario />);
+    const hijos = [...(await barra()).children];
+    const separador = hijos.find((el) => el.className.includes("flex-1"));
+    expect(separador).toBeDefined();
+    expect(separador!.className).toContain("hidden");
+    expect(separador!.className).toContain("md:block");
+  });
+
+  it("«Dar cita» se pinta UNA vez, y se va a la derecha de su fila", async () => {
+    // Dos nodos con el mismo `data-test` (uno por fila, con un `hidden`
+    // encima) es la trampa que este assert cierra: el banco encontraría
+    // el invisible y el `querySelector` del bucle visual también.
+    await pintar(<AgendaPage onClose={() => {}} esSanitario />);
+    const botones = container.querySelectorAll('[data-test="dar-cita"]');
+    expect(botones).toHaveLength(1);
+    expect(botones[0]!.className).toContain("ml-auto");
+    expect(botones[0]!.className).toContain("md:ml-0");
+    // Y sigue siendo hija directa de la barra: no se ha montado un
+    // flotante colgado de la raíz.
+    expect(botones[0]!.parentElement).toBe(await barra());
+  });
+});

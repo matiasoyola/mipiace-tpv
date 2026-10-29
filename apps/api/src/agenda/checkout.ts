@@ -44,6 +44,11 @@ import { Prisma } from "@mipiacetpv/db";
 import type { PrismaClient } from "@mipiacetpv/db";
 
 import { lineasDeLaSesionCerrada } from "../clinica/lineas-de-la-sesion.js";
+import {
+  esVerticalClinica,
+  SELECT_VERTICAL_CLINICA,
+} from "../lib/vertical-clinica.js";
+import { abrirTurnoDeClinica } from "../shift/apertura-automatica.js";
 import { canjeParaElBorrador } from "../vouchers/caja.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
 import { computeTicket } from "../tickets/totals.js";
@@ -116,6 +121,11 @@ export interface CheckoutContext {
   tenantId: string;
   registerId: string;
   cashierUserId: string;
+  // clinica-11 · el logger de la petición, para que la apertura
+  // automática del turno de una clínica deje su línea. Opcional: los
+  // llamantes de antes del bloque no lo pasan y la apertura sigue
+  // funcionando sin registrar nada (nunca es una alarma; es un rastro).
+  log?: { info: (obj: object, msg: string) => void };
 }
 
 // Abre (o devuelve si ya existe) el ticket pre-poblado de una cita.
@@ -229,18 +239,48 @@ export async function checkoutAppointment(
   const byId = new Map(products.map((p) => [p.id, p]));
 
   // Turno abierto de la caja del cajero (mismo criterio que abrir mesa).
-  const shift = await prisma.shift.findFirst({
+  const abierto = await prisma.shift.findFirst({
     where: { registerId: ctx.registerId, closedAt: null },
     select: { id: true },
     orderBy: { openedAt: "desc" },
   });
+  // ── clinica-11 · EL PRIMER COBRO DEL DÍA ABRE LA CAJA ──────────────
+  //
+  // En una clínica no hay pantalla de «Abrir turno»: la podóloga llega,
+  // atiende y cobra. Y ESTO es su cobro — «Cobrar en caja» sobre la cita
+  // es el camino por el que pasa el dinero de una consulta—, así que aquí
+  // es donde el turno se abre solo, con el fondo que dejó el último
+  // cierre y a nombre de quien está cobrando.
+  //
+  // El 409 se mantiene intacto para todo lo demás. Un bar sin turno
+  // abierto sigue recibiendo el mismo «No hay turno abierto en esta caja»
+  // que recibía ayer: ahí hay un mostrador, hay relevo y el fondo de caja
+  // lo declara una persona.
+  //
+  // Las dos columnas del tenant se leen SÓLO cuando no hay turno, que es
+  // una vez al día como mucho. En el camino normal esto no cuesta ni una
+  // consulta.
+  let shift = abierto;
   if (!shift) {
-    return {
-      ok: false,
-      status: 409,
-      error: "SHIFT_NOT_OPEN",
-      message: "No hay turno abierto en esta caja.",
-    };
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: ctx.tenantId },
+      select: SELECT_VERTICAL_CLINICA,
+    });
+    if (!esVerticalClinica(tenant)) {
+      return {
+        ok: false,
+        status: 409,
+        error: "SHIFT_NOT_OPEN",
+        message: "No hay turno abierto en esta caja.",
+      };
+    }
+    const turno = await abrirTurnoDeClinica({
+      prisma,
+      registerId: ctx.registerId,
+      userId: ctx.cashierUserId,
+      log: ctx.log,
+    });
+    shift = { id: turno.id };
   }
 
   // Construir las líneas (una por item, en orden). units=1, sin descuento.

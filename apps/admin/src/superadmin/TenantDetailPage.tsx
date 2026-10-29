@@ -1396,6 +1396,11 @@ function HealthPanel({
 const NO_APLICA_MOTIVO: Record<Exclude<CheckRequirement, "always">, string> = {
   caja: "sin caja",
   holded: "sin Holded",
+  // clinica-11 · el cajero técnico lo provisiona el worker del sync
+  // inicial, y ese worker sólo corre cuando hay Holded. Sin Holded no
+  // existe, y no por un fallo: es el diseño. El motivo lo dice así para
+  // que nadie lo lea como «falta por hacer».
+  cajaConHolded: "sólo con caja y Holded",
   // clinica-8 · el catálogo clínico sólo se mide donde hay historia
   // clínica. En los demás sale «No aplica · sin historia clínica», que es
   // distinto de cumplir y de fallar.
