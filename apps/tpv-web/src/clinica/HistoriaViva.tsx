@@ -59,6 +59,8 @@ import {
   COLOR_DE_TIPO_DE_VISITA,
   DESCRIPCION_DE_TIPO_DE_VISITA,
   ANCHO_DE_LOS_DOS_PIES_PX,
+  ETIQUETA_DE_IMPORTADA,
+  ETIQUETA_SIN_VALIDAR,
   NOMBRE_DE_ESTADO_DE_ZONA,
   NOMBRE_DE_PULSO,
   NOMBRE_DE_TIPO_DE_VISITA,
@@ -67,6 +69,8 @@ import {
   type MapaDelPie as MapaVersionado,
   type PendienteLegible,
   type Pie,
+  type CuerpoImportado,
+  type SinValidarDeCogecop,
   type TipoDeVisita,
   type VisitaLegible,
   type ZonaViva,
@@ -89,6 +93,7 @@ import { Consentimientos } from "./Consentimientos.js";
 import { Informe } from "./Informe.js";
 import { FranjaRoja, Mal, cuantoHace, diaCorto } from "./piezas.js";
 import { SesionCerrada, type SesionCerradaView } from "./SesionCerrada.js";
+import { VisitaImportada } from "./VisitaImportada.js";
 
 // ── Lo que manda la API ──────────────────────────────────────────────
 
@@ -105,6 +110,8 @@ interface VistaDeLaHistoria {
     alertas: string[];
     alertaIds: string[];
     alertasPorValidar: boolean;
+    /** cogecop-1 · lo que traía del programa anterior, sin validar. */
+    cogecop: SinValidarDeCogecop | null;
   };
   enDiezSegundos: {
     hoyToca: {
@@ -158,8 +165,11 @@ interface DetalleDeVisita {
   entryId: string;
   cerradaEn: string;
   firma: SesionCerradaView["firma"];
-  cuerpo: SesionCerradaView["cuerpo"];
+  cuerpo: SesionCerradaView["cuerpo"] | CuerpoImportado;
   marcas: SesionCerradaView["marcas"];
+  /** cogecop-1 · viene del programa anterior y se pinta con
+   *  `VisitaImportada`, que no tiene ni dolor ni caja ni botones. */
+  importada: boolean;
 }
 
 // clinica-4 · dos pestañas más: las fotos del paciente y el informe. La
@@ -471,19 +481,32 @@ function HistoriaVivaDentro(props: {
         >
           ← Volver a la historia
         </button>
-        <SesionCerrada
-          cerrada={{
-            entryId: detalle.entryId,
-            cerradaEn: detalle.cerradaEn,
-            firma: detalle.firma,
-            cuerpo: detalle.cuerpo,
-            marcas: detalle.marcas,
-          }}
-          // Sin caja: aquí no hay importes, ni para la dueña. `SesionCerrada`
-          // sin `resumen` no pinta el bloque de cobro — ver su cabecera.
-          verImportes={false}
-          paciente={cabecera.paciente.nombre}
-        />
+        {detalle.importada ? (
+          <VisitaImportada
+            visita={{
+              entryId: detalle.entryId,
+              cerradaEn: detalle.cerradaEn,
+              firma: detalle.firma,
+              cuerpo: detalle.cuerpo as CuerpoImportado,
+            }}
+            paciente={cabecera.paciente.nombre}
+          />
+        ) : (
+          <SesionCerrada
+            cerrada={{
+              entryId: detalle.entryId,
+              cerradaEn: detalle.cerradaEn,
+              firma: detalle.firma,
+              cuerpo: detalle.cuerpo as SesionCerradaView["cuerpo"],
+              marcas: detalle.marcas,
+            }}
+            // Sin caja: aquí no hay importes, ni para la dueña.
+            // `SesionCerrada` sin `resumen` no pinta el bloque de cobro —
+            // ver su cabecera.
+            verImportes={false}
+            paciente={cabecera.paciente.nombre}
+          />
+        )}
       </div>
     );
   }
@@ -533,6 +556,7 @@ function HistoriaVivaDentro(props: {
 
       <div className="mt-4">
         <FranjaRoja alertas={cabecera.alertas} />
+        <DeCogecop sinValidar={cabecera.cogecop} />
         {cabecera.alertas.length > 0 && cabecera.alertasPorValidar && (
           <div className="text-[12.5px] text-slate-500 mt-1.5">
             La valoración todavía no está validada: estas alertas son lo que
@@ -1094,7 +1118,9 @@ function PanelDeZona(props: {
     clave: `${p.entryId}-${p.fecha}`,
     fecha: p.fecha,
     titulo: p.gravedadNombre ?? p.lesionNombre,
-    sub: p.tiposNombre.join(" + ") || "Sesión",
+    sub:
+      (p.tiposNombre.join(" + ") || "Sesión") +
+      (p.importada ? ` · ${ETIQUETA_DE_IMPORTADA}` : ""),
     punto:
       p.gravedad === "SEVERA"
         ? "bg-red-600"
@@ -1118,6 +1144,20 @@ function PanelDeZona(props: {
       className="bg-white border border-slate-200 rounded-3xl px-3 sm:px-5 py-4"
       data-test="historia-zona"
     >
+      {/* cogecop-1 · DE DÓNDE SALE LO QUE SE VE EN EL PIE.
+          La primera sesión de un paciente de Rosario parte de esto, así
+          que la podóloga tiene derecho a saber que lo último que se sabe
+          de esta zona lo escribió ella en el programa anterior y nadie lo
+          ha vuelto a mirar aquí. */}
+      {z.importada && (
+        <div
+          data-test="historia-zona-importada"
+          className="mb-2.5 rounded-2xl bg-mipiace-stone px-3 py-2 text-[13px] text-slate-600"
+        >
+          Parte de la última visita importada de COGECOP. Nadie lo ha
+          comprobado aquí todavía.
+        </div>
+      )}
       <div className="flex justify-between items-start gap-2.5">
         <div>
           <h2 className="m-0 text-[17px] font-bold text-mipiace-ink">
@@ -1272,6 +1312,17 @@ function FilaDeVisita(props: {
         <span className="text-slate-500 text-[13px] ml-1.5 font-normal">
           {diaCorto(v.fecha)}
         </span>
+        {/* cogecop-1 · al lado de la fecha, que es donde se mira. No en
+            el título: el título dice QUÉ visita fue, y de dónde salió es
+            otra cosa. */}
+        {v.importada && (
+          <span
+            data-test="historia-visita-importada"
+            className="text-slate-500 text-[13px] ml-1.5 font-normal whitespace-nowrap"
+          >
+            · {ETIQUETA_DE_IMPORTADA}
+          </span>
+        )}
         {v.chips.length > 0 && (
           <span className="flex flex-wrap gap-1.5 mt-1.5">
             {v.chips.map((c) => (
@@ -1297,6 +1348,54 @@ function FilaDeVisita(props: {
         )}
       </span>
     </button>
+  );
+}
+
+/**
+ * cogecop-1 · LO QUE TRAÍA DEL PROGRAMA ANTERIOR, SIN VALIDAR.
+ *
+ * Las enfermedades y las alergias que estaban escritas en COGECOP, tal
+ * cual. **No son alertas** —no van en la franja roja— y la banda lo dice
+ * con todas las letras: es texto libre que nadie ha repasado con el
+ * paciente, y la valoración de clinica-2 se le hace igual la primera vez
+ * que vuelva.
+ *
+ * Pero se VEN desde el primer día. «Nadie trata a un diabético
+ * anticoagulado sin saberlo», y el día que más falta hace saberlo es
+ * justo el primero, que es cuando todavía no hay valoración.
+ */
+function DeCogecop(props: { sinValidar: SinValidarDeCogecop | null }) {
+  const s = props.sinValidar;
+  if (!s) return null;
+  const filas: Array<[string, string]> = [];
+  if (s.enfermedades) filas.push(["Enfermedades", s.enfermedades]);
+  if (s.alergias) filas.push(["Alergias", s.alergias]);
+  if (filas.length === 0) return null;
+  return (
+    <div
+      data-test="historia-cogecop"
+      className="mt-2 rounded-2xl border border-amber-300 bg-amber-50 px-3.5 py-3"
+    >
+      <div className="text-[12.5px] font-bold uppercase tracking-[0.04em] text-amber-800">
+        {ETIQUETA_SIN_VALIDAR}
+      </div>
+      <dl className="m-0 mt-1.5">
+        {filas.map(([etiqueta, valor]) => (
+          <div key={etiqueta} className="mt-1 first:mt-0">
+            <dt className="inline text-[14px] font-semibold text-amber-900">
+              {etiqueta}:{" "}
+            </dt>
+            <dd className="inline m-0 text-[14px] text-amber-900 break-words">
+              {valor}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="text-[12.5px] text-amber-800 mt-1.5">
+        Lo escribió la podóloga en el programa anterior. Nadie lo ha repasado
+        con el paciente: la valoración inicial se le hace igual.
+      </div>
+    </div>
   );
 }
 

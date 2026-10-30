@@ -329,7 +329,19 @@ export function crearMundo(): MundoDeLaClinica {
     if (where.id != null && e.id !== where.id) return false;
     if (where.tenantId != null && e.tenantId !== where.tenantId) return false;
     if (where.clientId != null && e.clientId !== where.clientId) return false;
-    if (where.kind != null && e.kind !== where.kind) return false;
+    // cogecop-1 · la historia pide DOS kinds a la vez (`TREATMENT_SESSION`
+    // y `IMPORTED_VISIT`), así que el falso tiene que entender el `in` de
+    // Prisma. Sin esto, `where.kind` es un objeto, `e.kind !== {…}` es
+    // siempre cierto y la historia sale vacía — en verde, porque el
+    // endpoint contesta 200 con cero visitas.
+    if (where.kind != null) {
+      const k = where.kind as string | { in?: readonly string[] };
+      if (typeof k === "string") {
+        if (e.kind !== k) return false;
+      } else if (Array.isArray(k.in)) {
+        if (!k.in.includes(e.kind)) return false;
+      }
+    }
     return true;
   }
 

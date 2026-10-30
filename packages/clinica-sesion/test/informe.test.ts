@@ -39,6 +39,7 @@ function visita(n: number, dolor: number | null = 5): VisitaLegible {
     evolucion: "MEJOR",
     evolucionNombre: "Mejor",
     chips: ["Corte y fresado"],
+    importada: false,
   };
 }
 
@@ -54,6 +55,7 @@ const ZONA: ZonaViva = {
   gravedadNombre: "Moderada",
   pasos: [],
   curadaEn: null,
+  importada: false,
 };
 
 function fuentes(extra: Partial<FuentesDelInforme> = {}): FuentesDelInforme {

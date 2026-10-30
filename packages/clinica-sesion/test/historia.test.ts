@@ -41,6 +41,7 @@ function visita(input: {
   marcas?: Record<string, { lesion: string; gravedad: string | null }>;
   tipos?: TipoDeVisita[];
   v?: number;
+  importada?: boolean;
 }): VisitaDeLaHistoria {
   return {
     entryId: `e${++n}`,
@@ -50,6 +51,7 @@ function visita(input: {
     marcas: (input.marcas ?? {}) as Marcas,
     mapaVersion: 1,
     lesionesVersion: 1,
+    importada: input.importada ?? false,
   };
 }
 

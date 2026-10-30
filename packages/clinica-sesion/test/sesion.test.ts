@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 import {
   ANCHO_DEL_PIE_PX,
   CONSEJOS_V1,
-  LESIONES_V1,
+  LESIONES_V2,
+  VERSION_DE_LAS_LESIONES,
   MAPA_PIE_V1,
   RADIO_MINIMO,
   VERSION_DEL_MAPA,
@@ -387,7 +388,12 @@ describe("normalizarSesion", () => {
     if (!r.ok) return;
     expect(r.cuerpo.v).toBe(1);
     expect(r.cuerpo.mapaVersion).toBe(VERSION_DEL_MAPA);
-    expect(r.cuerpo.lesionesVersion).toBe(LESIONES_V1.version);
+    // cogecop-1 · lo que se escribe HOY lleva la V2 de lesiones. Lo
+    // escrito con la V1 se sigue leyendo con la V1: eso es lo que
+    // `lesionesVersion` guarda, y por eso aquí no vale la constante de
+    // una versión concreta.
+    expect(r.cuerpo.lesionesVersion).toBe(VERSION_DE_LAS_LESIONES);
+    expect(VERSION_DE_LAS_LESIONES).toBe(LESIONES_V2.version);
     expect(r.cuerpo.consejosVersion).toBe(CONSEJOS_V1.version);
   });
 

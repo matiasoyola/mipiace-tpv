@@ -114,6 +114,28 @@ enum ClinicalEntryKind {
   // `clinical_entries_una_sesion_por_cita` lo impone, y de ahí sale sin un
   // solo `if` que cerrar dos veces no cree dos cobros.
   TREATMENT_SESSION
+  // cogecop-1 · una visita que NO se hizo aquí: viene de COGECOP, el
+  // programa del Consejo de Podólogos con el que Rosario llevaba su
+  // clínica. 9.569 visitas de nueve años.
+  //
+  // Un kind propio y no `TREATMENT_SESSION`, y es la decisión de fondo
+  // del bloque: **lo importado es historia, no sesión.** No se edita
+  // (trigger `clinical_entries_inmutable`, como todo lo de esta tabla),
+  // no genera cobros, no cuenta como sesión cerrada para caja ni para
+  // bonos, y se ve con la etiqueta «Importada de COGECOP» en su fecha
+  // real.
+  //
+  // Con el kind de la sesión, las 9.569 visitas serían 9.569 sesiones
+  // cerradas sin cobrar: `cobrosPendientes` las reclamaría, el bono las
+  // contaría y la caja del día del alta tendría un agujero de nueve
+  // años. Con uno propio, todas esas consultas —que ya filtran por
+  // `TREATMENT_SESSION`— siguen diciendo la verdad sin tocarlas.
+  //
+  // El `body` tiene forma propia (`CuerpoImportado` de
+  // `@mipiacetpv/clinica-sesion`) y lleva `cogecopId`: ésa es la mitad
+  // de la idempotencia que hace que correr el importador dos veces no
+  // duplique nada.
+  IMPORTED_VISIT
 }
 
 // clinica-2 · en qué punto está una valoración inicial.

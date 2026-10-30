@@ -33,10 +33,13 @@
 // de fallo que una señal de seguridad no puede tener.
 
 import {
+  esCuerpoImportado,
   estadoDeLasZonas,
   hoyToca,
   LESIONES_V1,
+  LESIONES_V2,
   MAPA_PIE_V1,
+  marcasDeLoImportado,
   marcasLegibles,
   ojoDeHoy,
   PENDIENTES_V1,
@@ -46,23 +49,32 @@ import {
   TIPOS_DE_VISITA,
   tiposDeLaSesion,
   ultimaVisita,
+  sinValidarDeLaNota,
   visitaDeLaHistoria,
+  visitaImportadaDeLaHistoria,
+  visitaImportadaLegible,
   visitaLegible,
   type CuerpoDeSesionCualquiera,
+  type CuerpoImportado,
   type HoyToca,
   type Marcas,
   type MarcaLegible,
   type OjoDeHoy,
   type PendienteCreado,
+  type ListaDeLesiones,
   type Recomendada,
+  type SinValidarDeCogecop,
   type TendenciaDelDolor,
   type VisitaLegible,
   type ZonaViva,
 } from "@mipiacetpv/clinica-sesion";
 import type { Alerta } from "@mipiacetpv/clinica-valoracion";
-import type { Prisma, PrismaClient } from "@mipiacetpv/db";
+import type { ClinicalEntryKind, Prisma, PrismaClient } from "@mipiacetpv/db";
 
+import { nombreParaMostrar } from "../lib/nombre-para-mostrar.js";
 import { dekONada } from "./claves.js";
+import { leerNota } from "./notas.js";
+import { numeroDeColegiado } from "./consentimientos.js";
 import { cuerpoDeEntrada, esIlegible } from "./cripto-campos.js";
 import { edadDe, ultimaExploracion } from "./sesion.js";
 import { vistaDeLaValoracion } from "./valoracion.js";
@@ -117,6 +129,20 @@ export interface CabeceraDeLaHistoria {
   /** `true` mientras la valoración no esté validada. La franja se enseña
    *  igual (clinica-2: no esconderlas es la decisión segura) y lo dice. */
   alertasPorValidar: boolean;
+  /**
+   * cogecop-1 · LO QUE TRAÍA DEL PROGRAMA ANTERIOR, SIN VALIDAR.
+   *
+   * Las enfermedades y las alergias que Rosario tenía escritas en
+   * COGECOP, tal cual, con su fecha de importación. `null` para un
+   * paciente que no viene de ahí o que no traía ninguna de las dos.
+   *
+   * **No sustituye a la valoración inicial** (decisión de Dirección): es
+   * texto libre que nadie ha repasado con el paciente, y la primera vez
+   * que vuelva se le hace la valoración de clinica-2 como a cualquiera.
+   * Pero que SE VEA: «nadie trata a un diabético anticoagulado sin
+   * saberlo», y eso vale también el primer día.
+   */
+  cogecop: SinValidarDeCogecop | null;
 }
 
 export interface EnDiezSegundos {
@@ -187,7 +213,7 @@ export interface VistaDeLaHistoria {
    *  sesión: la pantalla no importa «la que tiene compilada». */
   listas: {
     mapa: typeof MAPA_PIE_V1;
-    lesiones: typeof LESIONES_V1;
+    lesiones: ListaDeLesiones;
     pendientes: typeof PENDIENTES_V1;
     tipos: readonly string[];
   };
@@ -203,8 +229,18 @@ export interface DetalleDeVisita {
   entryId: string;
   cerradaEn: string;
   firma: { autorNombre: string; colegiado: string | null; firmadaEn: string };
-  cuerpo: CuerpoDeSesionCualquiera;
+  cuerpo: CuerpoDeSesionCualquiera | CuerpoImportado;
   marcas: readonly MarcaLegible[];
+  /**
+   * cogecop-1 · esta visita viene del programa anterior.
+   *
+   * La pantalla la pinta distinta —sin bloque de caja, con la etiqueta
+   * «Importada de COGECOP» y con los textos tal como los escribió la
+   * podóloga allí— y **no deja anotarla ni editarla**. Que se pueda
+   * abrir es lo que hace que la importación valga para algo: una lista
+   * de visitas que no se abren no es una historia.
+   */
+  importada: boolean;
 }
 
 // ── La lectura ───────────────────────────────────────────────────────
@@ -216,7 +252,27 @@ interface FilaDeVisita {
   body: Prisma.JsonValue;
   bodyCifrado: string | null;
   createdAt: Date;
+  /** cogecop-1 · `TREATMENT_SESSION` o `IMPORTED_VISIT`. Decide con qué
+   *  función se lee el cuerpo, y es lo único que las distingue en la
+   *  consulta: las dos son piezas de la misma historia ordenada. */
+  kind: ClinicalEntryKind;
 }
+
+/**
+ * cogecop-1 · LAS DOS CLASES DE VISITA QUE ENTRAN EN LA HISTORIA.
+ *
+ * La sesión que se hizo aquí y la que viene de COGECOP. Van en la MISMA
+ * lista ordenada por fecha —que es el punto entero de la importación: la
+ * podóloga abre la ficha y ve nueve años seguidos— y la etiqueta las
+ * separa.
+ *
+ * Lo que NO entra por aquí es ninguna otra: `FOOT_EXAM` tiene su propia
+ * lectura (`ultimaExploracion`) y la valoración es un documento.
+ */
+export const KINDS_DE_LA_HISTORIA = [
+  "TREATMENT_SESSION",
+  "IMPORTED_VISIT",
+] as const satisfies readonly ClinicalEntryKind[];
 
 /** El `select` de una visita. En una constante porque lo usan los dos
  *  sitios que leen visitas en este fichero, y las columnas que el cifrado
@@ -227,6 +283,7 @@ const SELECT_VISITA = {
   body: true,
   bodyCifrado: true,
   createdAt: true,
+  kind: true,
 } satisfies Prisma.ClinicalEntrySelect;
 
 /**
@@ -245,10 +302,59 @@ function cuerpoDe(
   fila: FilaDeVisita,
   dek: Buffer | null,
 ): CuerpoDeSesionCualquiera | null {
+  const b = cuerpoCrudo(fila, dek);
+  if (b == null) return null;
+  // cogecop-1 · un cuerpo importado NO es una sesión. Devolverlo como
+  // si lo fuera dejaría a `tiposDeLaSesion` leyendo campos que no están
+  // y a `visitaLegible` titulando «Sesión» una visita de 2025.
+  if (esCuerpoImportado(b)) return null;
+  return b as CuerpoDeSesionCualquiera;
+}
+
+function cuerpoCrudo(fila: FilaDeVisita, dek: Buffer | null): unknown {
   const b = cuerpoDeEntrada(fila, dek);
   if (b == null || typeof b !== "object") return null;
   if (esIlegible(b)) return null;
-  return b as CuerpoDeSesionCualquiera;
+  return b;
+}
+
+/**
+ * cogecop-1 · el cuerpo importado de una fila, o `null`.
+ *
+ * Mira el KIND y el ORIGEN, las dos cosas. El kind porque es lo que la
+ * consulta filtró, y el origen porque es lo que el cuerpo dice de sí
+ * mismo: una fila con el kind de importada y un cuerpo que no lo es está
+ * rota, y lo que se hace con una fila rota es enseñarla vacía, no
+ * adivinarle la forma.
+ */
+function importadoDe(
+  fila: FilaDeVisita,
+  dek: Buffer | null,
+): CuerpoImportado | null {
+  if (fila.kind !== "IMPORTED_VISIT") return null;
+  const b = cuerpoCrudo(fila, dek);
+  return esCuerpoImportado(b) ? b : null;
+}
+
+/** Una fila, como se lee en la lista de visitas. */
+function legibleDeLaFila(fila: FilaDeVisita, dek: Buffer | null): VisitaLegible {
+  const meta = { entryId: fila.id, fecha: fila.createdAt.toISOString() };
+  const importado = importadoDe(fila, dek);
+  return importado != null
+    ? visitaImportadaLegible(importado, meta)
+    : visitaLegible(cuerpoDe(fila, dek), meta);
+}
+
+/** Y como la quiere el pie vivo. */
+function paraElPieDeLaFila(
+  fila: FilaDeVisita,
+  dek: Buffer | null,
+): ReturnType<typeof visitaDeLaHistoria> {
+  const meta = { entryId: fila.id, fecha: fila.createdAt.toISOString() };
+  const importado = importadoDe(fila, dek);
+  return importado != null
+    ? visitaImportadaDeLaHistoria(importado, meta)
+    : visitaDeLaHistoria(cuerpoDe(fila, dek), meta);
 }
 
 /**
@@ -283,19 +389,24 @@ export async function vistaDeLaHistoria(
           phone: true,
           birthdate: true,
           createdAt: true,
+          // cogecop-1 · de aquí sale «De COGECOP · sin validar». La nota
+          // está cifrada en un tenant clínico, y este SIEMPRE lo es (la
+          // ruta pasa por `ensureClinicaEnabled`).
+          notes: true,
+          notesCifradas: true,
         },
       }),
       // Las alertas salen de AQUÍ, igual que en la sesión: mismo origen,
       // mismos ids, misma función pura. No hay una segunda lista.
       vistaDeLaValoracion(prisma, { tenantId, clientId }),
       prisma.clinicalEntry.findMany({
-        where: { tenantId, clientId, kind: "TREATMENT_SESSION" },
+        where: { tenantId, clientId, kind: { in: [...KINDS_DE_LA_HISTORIA] } },
         orderBy: { createdAt: "desc" },
         take: VISITAS_DE_LA_HISTORIA,
         select: SELECT_VISITA,
       }),
       prisma.clinicalEntry.count({
-        where: { tenantId, clientId, kind: "TREATMENT_SESSION" },
+        where: { tenantId, clientId, kind: { in: [...KINDS_DE_LA_HISTORIA] } },
       }),
       ultimaExploracion(prisma, { tenantId, clientId }),
       // clinica-4 · las fotos, los consentimientos y las entregas. Van en
@@ -313,24 +424,20 @@ export async function vistaDeLaHistoria(
   const dek = await dekONada(tenantId, prisma);
 
   // De la más reciente a la más antigua, que es como se lee la lista.
-  const visitas = filas.map((f: FilaDeVisita) =>
-    visitaLegible(cuerpoDe(f, dek), {
-      entryId: f.id,
-      fecha: f.createdAt.toISOString(),
-    }),
-  );
-  const paraElPie = filas.map((f: FilaDeVisita) =>
-    visitaDeLaHistoria(cuerpoDe(f, dek), {
-      entryId: f.id,
-      fecha: f.createdAt.toISOString(),
-    }),
-  );
+  const visitas = filas.map((f: FilaDeVisita) => legibleDeLaFila(f, dek));
+  const paraElPie = filas.map((f: FilaDeVisita) => paraElPieDeLaFila(f, dek));
 
   // «Hoy toca» sale de los `pendientesCreados` de la ÚLTIMA sesión
   // cerrada, y de ninguna otra: al cerrar, lo que sigue abierto se vuelve
   // a crear, así que lo abierto está siempre en un solo sitio
   // (clinica-5 · `pendientes.ts`).
-  const ultimaFila = filas[0] ?? null;
+  // cogecop-1 · lo que quedó PENDIENTE sale de la última sesión hecha
+  // AQUÍ, no de la última visita a secas. Una visita importada no tiene
+  // pendientes —COGECOP no los pedía— y tomarla por la última sesión
+  // cerrada dejaría a «Hoy toca» en blanco el día que un paciente de
+  // Rosario volviera después de una sesión nuestra.
+  const ultimaFila =
+    filas.find((f: FilaDeVisita) => f.kind === "TREATMENT_SESSION") ?? null;
   const pendientes = pendientesAbiertos(
     ultimaFila
       ? (cuerpoDe(ultimaFila, dek) as {
@@ -364,6 +471,18 @@ export async function vistaDeLaHistoria(
       alertas: alertas.map((a: Alerta) => a.texto),
       alertaIds: alertas.map((a: Alerta) => a.preguntaId),
       alertasPorValidar: valoracion.valoracion?.estado !== "VALIDADA",
+      cogecop: sinValidarDeLaNota(
+        leerNota(
+          {
+            tenantId,
+            id: paciente.id,
+            que: "FICHA",
+            claro: paciente.notes,
+            cifrado: paciente.notesCifradas,
+          },
+          dek,
+        ),
+      ),
     },
     enDiezSegundos: {
       hoyToca: hoyToca(pendientes, versionesDeLaUltima),
@@ -404,7 +523,10 @@ export async function vistaDeLaHistoria(
     pendientes,
     listas: {
       mapa: MAPA_PIE_V1,
-      lesiones: LESIONES_V1,
+      // cogecop-1 · la de HOY, que ya es la V2 (las siete de siempre más
+      // las cinco que Rosario llevaba marcando en COGECOP). La pantalla
+      // no importa «la que tiene compilada»: pinta la que viene.
+      lesiones: LESIONES_V2,
       pendientes: PENDIENTES_V1,
       tipos: TIPOS_DE_VISITA,
     },
@@ -571,12 +693,40 @@ export async function detalleDeVisita(
       id: input.entryId,
       tenantId: input.tenantId,
       clientId: input.clientId,
-      kind: "TREATMENT_SESSION",
+      kind: { in: [...KINDS_DE_LA_HISTORIA] },
     },
-    select: SELECT_VISITA,
+    select: {
+      ...SELECT_VISITA,
+      // cogecop-1 · sólo para UNA visita, no para las doscientas de la
+      // lista: una visita importada no lleva firma dentro del cuerpo
+      // (COGECOP no la tenía), así que su autora se lee de la fila.
+      author: { select: { alias: true, email: true, clinicianLicense: true } },
+    },
   });
   if (!fila) return null;
-  const cuerpo = cuerpoDe(fila, await dekONada(input.tenantId, prisma));
+  const dek = await dekONada(input.tenantId, prisma);
+
+  const importado = importadoDe(fila, dek);
+  if (importado != null) {
+    return {
+      entryId: fila.id,
+      cerradaEn: fila.createdAt.toISOString(),
+      firma: {
+        autorNombre: nombreParaMostrar(fila.author),
+        colegiado: numeroDeColegiado(fila.author?.clinicianLicense ?? null),
+        firmadaEn: fila.createdAt.toISOString(),
+      },
+      cuerpo: importado,
+      marcas: marcasLegibles({
+        marcas: marcasDeLoImportado(importado),
+        mapaVersion: importado.mapaVersion,
+        lesionesVersion: importado.lesionesVersion,
+      }),
+      importada: true,
+    };
+  }
+
+  const cuerpo = cuerpoDe(fila, dek);
   if (!cuerpo) return null;
   const c = cuerpo as {
     marcas?: Marcas;
@@ -598,6 +748,7 @@ export async function detalleDeVisita(
       mapaVersion: c.mapaVersion ?? MAPA_PIE_V1.version,
       lesionesVersion: c.lesionesVersion ?? LESIONES_V1.version,
     }),
+    importada: false,
   };
 }
 
